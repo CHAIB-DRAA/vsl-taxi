@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, FlatList, Linking, Alert } from 'react-native';
 import axios from 'axios';
 
-const API_URL = 'https://vsl-taxi.onrender.com';
+const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 // Formulaire pour créer une course
 const RideForm = ({ onCreate }) => {
   const [patientName, setPatientName] = useState('');
