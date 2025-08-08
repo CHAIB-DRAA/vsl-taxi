@@ -7,8 +7,11 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:android": "eas build -p android --profile preview",
+    "build:ios": "eas build -p ios --profile production"
   },
+  
   "dependencies": {
     "@react-native-community/datetimepicker": "^8.4.3",
     "@react-native-community/geolocation": "^3.4.0",
