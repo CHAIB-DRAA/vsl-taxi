@@ -36,6 +36,19 @@ router.patch('/:id/start', async (req, res) => {
       res.status(500).json({ error: 'Erreur lors du démarrage de la course' });
     }
   });
+  // Obtenir une course par ID
+router.get('/:id', async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.id);
+    if (!ride) {
+      return res.status(404).json({ message: 'Course non trouvée' });
+    }
+    res.status(200).json(ride);
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur serveur', error });
+  }
+});
+
   
   // PATCH /api/rides/:id/finish - Finir une course
   router.patch('/:id/finish', async (req, res) => {
