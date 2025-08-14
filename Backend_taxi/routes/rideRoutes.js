@@ -23,20 +23,22 @@ router.post('/', async (req, res) => {
     res.status(400).json({ message: 'Erreur lors de la création de la course', error });
   }
 });
-// PATCH /api/rides/:id/start - Démarrer une course
+
+// Démarrer une course
 router.patch('/:id/start', async (req, res) => {
-    try {
-      const updatedRide = await Ride.findByIdAndUpdate(
-        req.params.id,
-        { startTime: new Date() },
-        { new: true }
-      );
-      res.json(updatedRide);
-    } catch (err) {
-      res.status(500).json({ error: 'Erreur lors du démarrage de la course' });
-    }
-  });
-  // Obtenir une course par ID
+  try {
+    const updatedRide = await Ride.findByIdAndUpdate(
+      req.params.id,
+      { startTime: new Date() },
+      { new: true }
+    );
+    res.json(updatedRide);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors du démarrage de la course' });
+  }
+});
+
+// Obtenir une course par ID
 router.get('/:id', async (req, res) => {
   try {
     const ride = await Ride.findById(req.params.id);
@@ -49,23 +51,43 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-  
-  // PATCH /api/rides/:id/finish - Finir une course
-  router.patch('/:id/finish', async (req, res) => {
-    try {
-      const updatedRide = await Ride.findByIdAndUpdate(
-        req.params.id,
-        {
-          endTime: new Date(),
-          distance: req.body.distance ?? 10, // distance fictive
-        },
-        { new: true }
-      );
-      res.json(updatedRide);
-    } catch (err) {
-      res.status(500).json({ error: 'Erreur lors de la fin de la course' });
-    }
-  });
-  
+// Finir une course
+router.patch('/:id/finish', async (req, res) => {
+  try {
+    const updatedRide = await Ride.findByIdAndUpdate(
+      req.params.id,
+      {
+        endTime: new Date(),
+        distance: req.body.distance ?? 10,
+      },
+      { new: true }
+    );
+    res.json(updatedRide);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la fin de la course' });
+  }
+});
+
+// **Mettre à jour une course**
+router.patch('/:id', async (req, res) => {
+  try {
+    const updatedRide = await Ride.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!updatedRide) return res.status(404).json({ message: 'Course non trouvée' });
+    res.json(updatedRide);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la mise à jour de la course' });
+  }
+});
+
+// **Supprimer une course**
+router.delete('/:id', async (req, res) => {
+  try {
+    const ride = await Ride.findByIdAndDelete(req.params.id);
+    if (!ride) return res.status(404).json({ message: 'Course non trouvée' });
+    res.json({ message: 'Course supprimée avec succès' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la suppression de la course' });
+  }
+});
 
 module.exports = router;
