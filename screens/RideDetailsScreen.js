@@ -1,56 +1,50 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, Button, StyleSheet, ActivityIndicator } from 'react-native';
-import { getRideById, deleteRideById } from '../services/api';
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { updateRideStatus } from '../services/api';
 
-const RideDetailsScreen = ({ route, navigation }) => {
-  const { id } = route.params;
-  const [ride, setRide] = useState(null);
-  const [loading, setLoading] = useState(true);
+const RideDetailScreen = ({ route, navigation }) => {
+  const { ride } = route.params;
 
-  useEffect(() => {
-    const fetchRide = async () => {
-      try {
-        const data = await getRideById(id);
-        setRide(data);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchRide();
-  }, [id]);
-
-  const handleDelete = async () => {
+  const handleUpdateStatus = async () => {
     try {
-      await deleteRideById(id);
-      navigation.goBack();
+      const newStatus = ride.status === 'facturé' ? 'non facturé' : 'facturé';
+      await updateRideStatus(ride._id, newStatus);
+      Alert.alert('Succès', `La course est maintenant "${newStatus}"`, [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
     } catch (error) {
-      console.error(error);
+      console.error('Erreur mise à jour :', error);
+      Alert.alert('Erreur', 'Impossible de mettre à jour le statut.');
     }
   };
-
-  if (loading) return <ActivityIndicator size="large" color="#0000ff" />;
-
-  if (!ride) return <Text>Course introuvable</Text>;
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{ride.patientName}</Text>
-      <Text>Date : {new Date(ride.date).toLocaleString()}</Text>
+      <Text>Date : {new Date(ride.date).toLocaleDateString()}</Text>
       <Text>Départ : {ride.startLocation}</Text>
       <Text>Arrivée : {ride.endLocation}</Text>
       <Text>Type : {ride.type}</Text>
+      <Text>Distance : {ride.distance} km</Text>
+      <Text>Statut : {ride.status || 'non défini'}</Text>
 
-      <Button title="Modifier" onPress={() => navigation.navigate('EditRide', { id })} />
-      <Button title="Supprimer" color="red" onPress={handleDelete} />
+      <TouchableOpacity style={styles.button} onPress={handleUpdateStatus}>
+        <Text style={styles.buttonText}>Basculer statut</Text>
+      </TouchableOpacity>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 }
+  container: { padding: 20 },
+  title: { fontWeight: 'bold', fontSize: 20, marginBottom: 10 },
+  button: {
+    marginTop: 20,
+    backgroundColor: '#007bff',
+    padding: 12,
+    borderRadius: 6,
+  },
+  buttonText: { color: '#fff', textAlign: 'center', fontSize: 16 },
 });
 
-export default RideDetailsScreen;
+export default RideDetailScreen;

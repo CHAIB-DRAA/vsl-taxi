@@ -36,3 +36,20 @@ exports.getRides = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.updateRide = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const ride = await Ride.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
+    if (!ride) {
+      return res.status(404).json({ message: "Course introuvable" });
+    }
+    res.json(ride);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

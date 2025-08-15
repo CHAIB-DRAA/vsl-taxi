@@ -1,34 +1,33 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import CreateRideScreen from './screens/CreateRideScreen';
-import HistoryScreen from './screens/HistoryScreen';
-import AgendaScreen from './screens/AgendaScreen';
-import { Ionicons } from '@expo/vector-icons';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import LoginScreen from './screens/LoginScreen';
+import RegisterScreen from './screens/RegisterScreen';
+import MainApp from './screens/MainApp'; // ton TabNavigator actuel
 
-const Tab = createBottomTabNavigator();
-
+const Stack = createNativeStackNavigator();
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem('token').then(token => {
+      if (token) setIsLoggedIn(true);
+    });
+  }, []);
+
   return (
     <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarIcon: ({ color, size }) => {
-            let iconName;
-            if (route.name === 'Créer') iconName = 'add-circle-outline';
-            else if (route.name === 'Agenda') iconName = 'calendar-outline';
-            else if (route.name === 'Historique') iconName = 'list-outline';
-            return <Ionicons name={iconName} size={size} color={color} />;
-          },
-          tabBarActiveTintColor: '#007bff',
-          tabBarInactiveTintColor: 'gray',
-        })}
-      >
-        <Tab.Screen name="Créer" component={CreateRideScreen} />
-        <Tab.Screen name="Agenda" component={AgendaScreen} />
-        <Tab.Screen name="Historique" component={HistoryScreen} />
-       
-      </Tab.Navigator>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {!isLoggedIn ? (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Register" component={RegisterScreen} />
+          </>
+        ) : (
+          <Stack.Screen name="MainApp" component={MainApp} />
+        )}
+      </Stack.Navigator>
     </NavigationContainer>
   );
 }

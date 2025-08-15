@@ -1,15 +1,45 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Alert } from 'react-native';
 import RideForm from '../components/RideForm';
 import { createRide } from '../services/api';
 
 const CreateRideScreen = () => {
   const handleCreate = async (ride) => {
     try {
-      await createRide(ride);
-      alert('Course créée !');
+      if (ride.isRoundTrip && ride.returnDate) {
+        // Course Aller
+        await createRide({
+          patientName: ride.patientName,
+          startLocation: ride.startLocation,
+          endLocation: ride.endLocation,
+          type: 'Aller',
+          date: ride.date,
+        });
+
+        // Course Retour
+        await createRide({
+          patientName: ride.patientName,
+          startLocation: ride.endLocation,
+          endLocation: ride.startLocation,
+          type: 'Retour',
+          date: ride.returnDate,
+        });
+
+        Alert.alert('Succès', 'Courses Aller et Retour créées !');
+      } else {
+        await createRide({
+          patientName: ride.patientName,
+          startLocation: ride.startLocation,
+          endLocation: ride.endLocation,
+          type: 'Aller',
+          date: ride.date,
+        });
+
+        Alert.alert('Succès', 'Course créée !');
+      }
     } catch (err) {
-      alert('Erreur lors de la création de la course.');
+      console.error(err);
+      Alert.alert('Erreur', 'Erreur lors de la création de la course.');
     }
   };
 

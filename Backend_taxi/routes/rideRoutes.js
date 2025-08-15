@@ -2,11 +2,12 @@
 const express = require('express');
 const router = express.Router();
 const Ride = require('../models/Ride');
+const auth = require('../middlewares/auth');
 
-// Obtenir toutes les courses
-router.get('/', async (req, res) => {
+// Obtenir toutes les courses de l'utilisateur connecté
+router.get('/', auth, async (req, res) => {
   try {
-    const rides = await Ride.find();
+    const rides = await Ride.find({ chauffeurId: req.user.id }).sort({ date: -1 });
     res.status(200).json(rides);
   } catch (error) {
     res.status(500).json({ message: 'Erreur serveur', error });
@@ -14,9 +15,9 @@ router.get('/', async (req, res) => {
 });
 
 // Créer une nouvelle course
-router.post('/', async (req, res) => {
+router.post('/', auth, async (req, res) => {
   try {
-    const newRide = new Ride(req.body);
+    const newRide = new Ride({ ...req.body, chauffeurId: req.user.id });
     await newRide.save();
     res.status(201).json(newRide);
   } catch (error) {
@@ -25,68 +26,85 @@ router.post('/', async (req, res) => {
 });
 
 // Démarrer une course
-router.patch('/:id/start', async (req, res) => {
+router.patch('/:id/start', auth, async (req, res) => {
   try {
-    const updatedRide = await Ride.findByIdAndUpdate(
-      req.params.id,
+    const updatedRide = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
       { startTime: new Date() },
       { new: true }
     );
+    if (!updatedRide) return res.status(404).json({ message: 'Course non trouvée ou non autorisée' });
     res.json(updatedRide);
   } catch (err) {
     res.status(500).json({ error: 'Erreur lors du démarrage de la course' });
   }
 });
 
-// Obtenir une course par ID
-router.get('/:id', async (req, res) => {
-  try {
-    const ride = await Ride.findById(req.params.id);
-    if (!ride) {
-      return res.status(404).json({ message: 'Course non trouvée' });
-    }
-    res.status(200).json(ride);
-  } catch (error) {
-    res.status(500).json({ message: 'Erreur serveur', error });
-  }
-});
-
 // Finir une course
-router.patch('/:id/finish', async (req, res) => {
+router.patch('/:id/finish', auth, async (req, res) => {
   try {
-    const updatedRide = await Ride.findByIdAndUpdate(
-      req.params.id,
-      {
-        endTime: new Date(),
-        distance: req.body.distance ?? 10,
-      },
+    const updatedRide = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { endTime: new Date(), distance: req.body.distance ?? 10 },
       { new: true }
     );
+    if (!updatedRide) return res.status(404).json({ message: 'Course non trouvée ou non autorisée' });
     res.json(updatedRide);
   } catch (err) {
     res.status(500).json({ error: 'Erreur lors de la fin de la course' });
   }
 });
 
-// **Mettre à jour une course**
-router.patch('/:id', async (req, res) => {
+// Obtenir une course par ID
+router.get('/:id', auth, async (req, res) => {
   try {
-    const updatedRide = await Ride.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!updatedRide) return res.status(404).json({ message: 'Course non trouvée' });
+    const ride = await Ride.findOne({ _id: req.params.id, chauffeurId: req.user.id });
+    if (!ride) return res.status(404).json({ message: 'Course non trouvée ou non autorisée' });
+    res.status(200).json(ride);
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur serveur', error });
+  }
+});
+
+// Mettre à jour une course
+router.patch('/:id', auth, async (req, res) => {
+  try {
+    const updatedRide = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      req.body,
+      { new: true }
+    );
+    if (!updatedRide) return res.status(404).json({ message: 'Course non trouvée ou non autorisée' });
     res.json(updatedRide);
   } catch (err) {
     res.status(500).json({ error: 'Erreur lors de la mise à jour de la course' });
   }
 });
 
-// **Supprimer une course**
-router.delete('/:id', async (req, res) => {
+// Supprimer une course
+router.delete('/:id', auth, async (req, res) => {
   try {
-    const ride = await Ride.findByIdAndDelete(req.params.id);
-    if (!ride) return res.status(404).json({ message: 'Course non trouvée' });
+    const ride = await Ride.findOneAndDelete({ _id: req.params.id, chauffeurId: req.user.id });
+    if (!ride) return res.status(404).json({ message: 'Course non trouvée ou non autorisée' });
     res.json({ message: 'Course supprimée avec succès' });
   } catch (err) {
     res.status(500).json({ error: 'Erreur lors de la suppression de la course' });
+  }
+});
+
+// Mettre à jour le statut (facturé / non facturé)
+router.patch('/:id/status', auth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    const updatedRide = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { status },
+      { new: true }
+    );
+    if (!updatedRide) return res.status(404).json({ message: 'Course non trouvée ou non autorisée' });
+    res.json(updatedRide);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la mise à jour du statut' });
   }
 });
 
