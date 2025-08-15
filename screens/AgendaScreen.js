@@ -1,5 +1,18 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, ActivityIndicator, Alert, TouchableOpacity, ScrollView, LayoutAnimation, UIManager, Platform, Modal, TextInput, Button } from 'react-native';
+import {
+  View,
+  Text,
+  ActivityIndicator,
+  Alert,
+  TouchableOpacity,
+  ScrollView,
+  LayoutAnimation,
+  UIManager,
+  Platform,
+  Modal,
+  TextInput,
+  Button
+} from 'react-native';
 import { getRides, updateRide, deleteRide } from '../services/api';
 import { Calendar } from 'react-native-calendars';
 import moment from 'moment';
@@ -178,61 +191,51 @@ const AgendaScreen = () => {
             />
           )}
 
-          {Object.keys(groupedEvents).length === 0 ? (
-            <Text style={{ textAlign: 'center', marginTop: 20, fontSize: 16, color: '#777' }}>
-              Aucune course planifiée
-            </Text>
-          ) : (
+          {groupedEvents[selectedDate] ? (
             <ScrollView contentContainerStyle={{ padding: 20 }} ref={scrollRef}>
-              {Object.keys(groupedEvents).map(date => (
-                <View key={date} style={{ marginBottom: 30 }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>
-                    {moment(date, 'YYYY-MM-DD').format('dddd D MMMM YYYY')}
-                  </Text>
-                  {groupedEvents[date].map(item => (
-                    <TouchableOpacity key={item._id} onPress={() => openRideModal(item)}>
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 15 }}>
-                        <View style={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: 6,
-                          backgroundColor: typeColors[item.type] || typeColors.autre,
-                          marginTop: 8,
-                          marginRight: 15,
-                        }} />
-                        <View style={{
-                          flex: 1,
-                          backgroundColor: '#fff',
-                          padding: 15,
-                          borderRadius: 12,
-                          shadowColor: '#000',
-                          shadowOpacity: 0.1,
-                          shadowOffset: { width: 0, height: 2 },
-                          shadowRadius: 5,
-                          elevation: 3,
-                        }}>
-                          <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 5 }}>
-                            {item.patientName}
-                          </Text>
-                          <Text style={{ color: '#555', marginBottom: 3 }}>
-                            Départ : {item.startLocation}
-                          </Text>
-                          <Text style={{ color: '#555', marginBottom: 3 }}>
-                            Arrivée : {item.endLocation}
-                          </Text>
-                          <Text style={{ color: '#555', marginBottom: 3 }}>
-                            Heure : {formatTime(item.date)}
-                          </Text>
-                          <Text style={{ color: '#555', fontStyle: 'italic' }}>
-                            Type : {item.type}
-                          </Text>
-                        </View>
+              <View style={{ marginBottom: 30 }}>
+                <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>
+                  {moment(selectedDate, 'YYYY-MM-DD').format('dddd D MMMM YYYY')}
+                </Text>
+                {groupedEvents[selectedDate].map(item => (
+                  <TouchableOpacity key={item._id} onPress={() => openRideModal(item)}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 15 }}>
+                      <View style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: typeColors[item.type] || typeColors.autre,
+                        marginTop: 8,
+                        marginRight: 15,
+                      }} />
+                      <View style={{
+                        flex: 1,
+                        backgroundColor: '#fff',
+                        padding: 15,
+                        borderRadius: 12,
+                        shadowColor: '#000',
+                        shadowOpacity: 0.1,
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowRadius: 5,
+                        elevation: 3,
+                      }}>
+                        <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 5 }}>
+                          {item.patientName}
+                        </Text>
+                        <Text style={{ color: '#555', marginBottom: 3 }}>Départ : {item.startLocation}</Text>
+                        <Text style={{ color: '#555', marginBottom: 3 }}>Arrivée : {item.endLocation}</Text>
+                        <Text style={{ color: '#555', marginBottom: 3 }}>Heure : {formatTime(item.date)}</Text>
+                        <Text style={{ color: '#555', fontStyle: 'italic' }}>Type : {item.type}</Text>
                       </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ))}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </ScrollView>
+          ) : (
+            <Text style={{ textAlign: 'center', marginTop: 20, fontSize: 16, color: '#777' }}>
+              Aucune course ce jour
+            </Text>
           )}
         </>
       )}

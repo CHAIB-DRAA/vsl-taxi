@@ -22,14 +22,13 @@ export const finishRideById = async (id, data) => {
   return response.data;
 };
 
-// Mise à jour avec PATCH
+
 export const updateRide = async (id, ride) => {
-  const response = await axios.patch(`${API_URL}/${id}/update`, ride);
+  const response = await axios.patch(`${API_URL}/${id}`, ride);
   return response.data;
 };
 
-// Suppression avec PATCH
 export const deleteRide = async (id) => {
-  const response = await axios.patch(`${API_URL}/${id}/delete`);
+  const response = await axios.delete(`${API_URL}/${id}`);
   return response.data;
 };

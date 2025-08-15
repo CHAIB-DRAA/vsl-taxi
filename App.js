@@ -16,8 +16,8 @@ export default function App() {
           tabBarIcon: ({ color, size }) => {
             let iconName;
             if (route.name === 'Créer') iconName = 'add-circle-outline';
-            else if (route.name === 'Historique') iconName = 'list-outline';
             else if (route.name === 'Agenda') iconName = 'calendar-outline';
+            else if (route.name === 'Historique') iconName = 'list-outline';
             return <Ionicons name={iconName} size={size} color={color} />;
           },
           tabBarActiveTintColor: '#007bff',
@@ -25,8 +25,9 @@ export default function App() {
         })}
       >
         <Tab.Screen name="Créer" component={CreateRideScreen} />
-        <Tab.Screen name="Historique" component={HistoryScreen} />
         <Tab.Screen name="Agenda" component={AgendaScreen} />
+        <Tab.Screen name="Historique" component={HistoryScreen} />
+       
       </Tab.Navigator>
     </NavigationContainer>
   );
