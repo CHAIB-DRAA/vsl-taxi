@@ -1,8 +1,7 @@
 const mongoose = require('mongoose');
 
 const rideSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-
+  
   patientName: { type: String, required: true },
   date: { type: Date, required: true },
   startLocation: { type: String, required: true },
