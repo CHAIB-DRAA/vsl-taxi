@@ -6,7 +6,10 @@ const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 const axiosInstance = axios.create({
   baseURL: API_URL,
 });
-
+export const registerUser = async (userData) => {
+  const response = await axios.post(`${API_URL}/register`, userData);
+  return response.data;
+};
 // Intercepteur pour ajouter le token à chaque requête
 axiosInstance.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('token');

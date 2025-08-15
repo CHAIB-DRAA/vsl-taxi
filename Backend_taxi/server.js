@@ -11,6 +11,9 @@ dotenv.config();
 // Initialisation de l'application
 const app = express();
 
+app.use('/api/auth', authRoutes); // <- ici, toutes les routes auth passent par /api/auth
+
+
 // Middleware
 app.use(cors());
 app.use(express.json()); // Remplace body-parser (inclus depuis Express v4.16+)

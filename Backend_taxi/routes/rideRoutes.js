@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Ride = require('../models/Ride');
-const auth = require('../middlewares/auth');
+const auth = require('./middlewares/auth');
 
 // Obtenir toutes les courses de l'utilisateur connecté
 router.get('/', auth, async (req, res) => {
