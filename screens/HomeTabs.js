@@ -1,15 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import CreateRideScreen from './CreateRideScreen';
-import HistoryScreen from './HistoryScreen';
-import AgendaScreen from './AgendaScreen';
 import TodayRidesScreen from './TodayRidesScreen';
+import AgendaScreen from './AgendaScreen';
+import HistoryScreen from './HistoryScreen';
 import { getRides } from '../services/api';
 
 const Tab = createBottomTabNavigator();
 
-export default function MainApp() {
+export default function HomeTabs() {
   const [todayRidesCount, setTodayRidesCount] = useState(0);
 
   const fetchTodayRidesCount = async () => {
@@ -39,6 +39,7 @@ export default function MainApp() {
           else if (route.name === 'Agenda') iconName = 'calendar-outline';
           else if (route.name === 'Historique') iconName = 'list-outline';
           else if (route.name === 'aujourdui') iconName = 'today-outline';
+
           return <Ionicons name={iconName} size={size} color={color} />;
         },
         tabBarActiveTintColor: '#007bff',
@@ -50,7 +51,9 @@ export default function MainApp() {
         name="aujourdui"
         component={TodayRidesScreen}
         options={{ tabBarBadge: todayRidesCount ? todayRidesCount : null }}
-        listeners={{ focus: fetchTodayRidesCount }}
+        listeners={{
+          focus: () => fetchTodayRidesCount(),
+        }}
       />
       <Tab.Screen name="Agenda" component={AgendaScreen} />
       <Tab.Screen name="Historique" component={HistoryScreen} />

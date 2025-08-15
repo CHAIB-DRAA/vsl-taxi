@@ -3,45 +3,53 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 
-// Headers avec token JWT
-const getAuthHeaders = async () => {
+const axiosInstance = axios.create({
+  baseURL: API_URL,
+});
+
+// Intercepteur pour ajouter le token à chaque requête
+axiosInstance.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('token');
-  return { headers: { Authorization: `Bearer ${token}` } };
-};
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
 
-// Auth
-export const registerUser = async (userData) => {
-  const res = await axios.post(`${API_URL}/auth/register`, userData);
-  return res.data;
-};
-
-export const loginUser = async (credentials) => {
-  const res = await axios.post(`${API_URL}/auth/login`, credentials);
-  await AsyncStorage.setItem('token', res.data.token);
-  return res.data;
-};
-
-// Rides
 export const getRides = async () => {
-  const headers = await getAuthHeaders();
-  const res = await axios.get(`${API_URL}/rides`, headers);
-  return res.data;
+  const response = await axiosInstance.get('/');
+  return response.data;
 };
 
 export const createRide = async (ride) => {
-  const headers = await getAuthHeaders();
-  const res = await axios.post(`${API_URL}/rides`, ride, headers);
-  return res.data;
+  const response = await axiosInstance.post('/', ride);
+  return response.data;
+};
+
+export const startRideById = async (id) => {
+  const response = await axiosInstance.patch(`/${id}/start`);
+  return response.data;
+};
+
+export const finishRideById = async (id, data) => {
+  const response = await axiosInstance.patch(`/${id}/finish`, data);
+  return response.data;
 };
 
 export const updateRide = async (id, ride) => {
-  const headers = await getAuthHeaders();
-  const res = await axios.patch(`${API_URL}/rides/${id}`, ride, headers);
-  return res.data;
+  const response = await axiosInstance.patch(`/${id}`, ride);
+  return response.data;
 };
 
 export const deleteRide = async (id) => {
-  const headers = await getAuthHeaders();
-  const res = await axios.delete(`${API_URL}/rides/${id}`, headers);
-  return res.data;
+  const response = await axiosInstance.delete(`/${id}`);
+  return response.data;
+};
+
+// Met à jour uniquement le statut (facturé ou non)
+export const updateRideStatus = async (id, status) => {
+  const response = await axiosInstance.patch(`/${id}`, { status });
+  return response.data;
 };

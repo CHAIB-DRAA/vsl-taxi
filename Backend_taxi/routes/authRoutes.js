@@ -1,36 +1,40 @@
-import express from 'express';
-import User from '../models/User.js';
-import jwt from 'jsonwebtoken';
-
+const express = require('express');
 const router = express.Router();
+const User = require('../models/User');
+const jwt = require('jsonwebtoken');
 
-// Enregistrer un utilisateur
+// Créer un compte
 router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ message: 'Email déjà utilisé' });
+
     const user = new User({ name, email, password });
     await user.save();
-    res.status(201).json({ message: 'Utilisateur créé' });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
 
-// Se connecter
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) return res.status(400).json({ error: 'Mot de passe incorrect' });
-
-    const token = jwt.sign({ id: user._id }, 'TON_SECRET', { expiresIn: '7d' });
-    res.json({ token, user: { id: user._id, name: user.name, email: user.email } });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-export default router;
+// Login
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ message: 'Utilisateur non trouvé' });
+
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) return res.status(400).json({ message: 'Mot de passe incorrect' });
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
