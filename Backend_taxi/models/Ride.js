@@ -10,7 +10,7 @@ const rideSchema = new mongoose.Schema({
   startTime: { type: Date, default: null },
   endTime: { type: Date, default: null },
   distance: { type: Number, default: null },
-  type: { type: String, enum: ['Aller', 'Aller-Retour'], default: 'Aller' },
+  type: { type: String, enum: ['Aller', 'Retour'], default: 'Aller' },
   status: { type: String, enum: ['Non démarrée', 'En cours', 'Terminée'], default: 'Non démarrée' }
 });
 
