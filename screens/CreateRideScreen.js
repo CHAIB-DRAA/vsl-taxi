@@ -50,9 +50,9 @@ const CreateRideScreen = () => {
           startLocation: ride.endLocation,
           endLocation: ride.startLocation,
           type: 'Retour',
-          date: new Date(ride.returnDate).toISOString(),
+          date: ride.returnDate,
           patientName: ride.patientName,
-          chauffeurId: chauffeurId || null,
+          chauffeurId,
         };
         console.log('Course retour envoyée:', retourRide);
         
