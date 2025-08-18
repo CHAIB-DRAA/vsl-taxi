@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 
 const rideSchema = new mongoose.Schema({
-  
   patientName: { type: String, required: true },
   date: { type: Date, required: true },
   startLocation: { type: String, required: true },
@@ -10,7 +9,8 @@ const rideSchema = new mongoose.Schema({
   startTime: { type: Date, default: null },
   endTime: { type: Date, default: null },
   distance: { type: Number, default: 0 },
-  status: { type: String, default: 'Non facturé' }
+  status: { type: String, default: 'Non facturé' },
+  chauffeurId: { type: String, required: true }, // ← id de Supabase
 });
 
 module.exports = mongoose.model('Ride', rideSchema);

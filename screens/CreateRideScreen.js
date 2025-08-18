@@ -1,39 +1,65 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Alert } from 'react-native';
 import RideForm from '../components/RideForm';
 import { createRide } from '../services/api';
+import { supabase } from '../lib/supabase';
 
 const CreateRideScreen = () => {
+  const [chauffeurId, setChauffeurId] = useState(null);
+
+  useEffect(() => {
+    const fetchSession = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error(error);
+        return;
+      }
+      if (session?.user?.id) {
+        setChauffeurId(session.user.id);
+      }
+    };
+    fetchSession();
+  }, []);
+
   const handleCreate = async (ride) => {
+    if (!chauffeurId) {
+      Alert.alert('Erreur', 'Impossible de récupérer l’utilisateur connecté.');
+      return;
+    }
+
     try {
       if (ride.isRoundTrip && ride.returnDate) {
-        // Course Aller
-        await createRide({
-          patientName: ride.patientName,
-          startLocation: ride.startLocation,
-          endLocation: ride.endLocation,
+        const allerRide = {
+          ...ride,
           type: 'Aller',
-          date: ride.date,
-        });
+          chauffeurId,
+        };
+        console.log('Envoi Aller → MongoDB :', allerRide);
+        const responseAller = await createRide(allerRide);
+        console.log('Réponse MongoDB Aller :', responseAller);
 
-        // Course Retour
-        await createRide({
-          patientName: ride.patientName,
+        const retourRide = {
+          ...ride,
           startLocation: ride.endLocation,
           endLocation: ride.startLocation,
           type: 'Retour',
           date: ride.returnDate,
-        });
+          chauffeurId,
+        };
+        console.log('Envoi Retour → MongoDB :', retourRide);
+        const responseRetour = await createRide(retourRide);
+        console.log('Réponse MongoDB Retour :', responseRetour);
 
         Alert.alert('Succès', 'Courses Aller et Retour créées !');
       } else {
-        await createRide({
-          patientName: ride.patientName,
-          startLocation: ride.startLocation,
-          endLocation: ride.endLocation,
+        const allerRide = {
+          ...ride,
           type: 'Aller',
-          date: ride.date,
-        });
+          chauffeurId,
+        };
+        console.log('Envoi Aller → MongoDB :', allerRide);
+        const responseAller = await createRide(allerRide);
+        console.log('Réponse MongoDB Aller :', responseAller);
 
         Alert.alert('Succès', 'Course créée !');
       }
@@ -45,7 +71,9 @@ const CreateRideScreen = () => {
 
   return (
     <View style={{ flex: 1, padding: 20 }}>
-      <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 10 }}>Créer une course</Text>
+      <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 10 }}>
+        Créer une course
+      </Text>
       <RideForm onCreate={handleCreate} />
     </View>
   );

@@ -4,25 +4,8 @@ exports.createRide = async (req, res) => {
   try {
     const ride = new Ride({ ...req.body, chauffeurId: req.user.id });
     await ride.save();
+    console.log('Envoi vers MongoDB →', ride);
     res.status(201).json(ride);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-};
-
-exports.startRide = async (req, res) => {
-  try {
-    const ride = await Ride.findByIdAndUpdate(req.params.id, { startTime: new Date() }, { new: true });
-    res.json(ride);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-};
-
-exports.endRide = async (req, res) => {
-  try {
-    const ride = await Ride.findByIdAndUpdate(req.params.id, { endTime: new Date() }, { new: true });
-    res.json(ride);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -40,16 +23,43 @@ exports.getRides = async (req, res) => {
 exports.updateRide = async (req, res) => {
   try {
     const { status } = req.body;
-    const ride = await Ride.findByIdAndUpdate(
-      req.params.id,
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
       { status },
       { new: true }
     );
-    if (!ride) {
-      return res.status(404).json({ message: "Course introuvable" });
-    }
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+
     res.json(ride);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.startRide = async (req, res) => {
+  try {
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { startTime: new Date() },
+      { new: true }
+    );
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.endRide = async (req, res) => {
+  try {
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { endTime: new Date() },
+      { new: true }
+    );
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };

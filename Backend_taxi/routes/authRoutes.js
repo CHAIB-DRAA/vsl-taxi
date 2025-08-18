@@ -1,9 +1,8 @@
-// routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User'); // Assure-toi que User.js existe
+const User = require('../models/User');
 
 // Inscription
 router.post('/register', async (req, res) => {

@@ -1,11 +1,23 @@
-const express = require('express');
-const router = express.Router();
-const { registerUser, loginUser } = require('../controllers/authController');
+const { createClient } = require('@supabase/supabase-js');
 
-// Route inscription
-router.post('/register', registerUser);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-// Route connexion
-router.post('/login', loginUser);
+const supabaseAuth = async (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ message: 'Non autorisé' });
 
-module.exports = router;
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return res.status(401).json({ message: 'Non autorisé' });
+
+    req.user = { id: user.id };
+    next();
+  } catch (err) {
+    res.status(401).json({ message: 'Erreur d’authentification' });
+  }
+};
+
+module.exports = supabaseAuth;
