@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,34 +35,42 @@ export default function App() {
   }, []);
 
   return (
-    <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarIcon: ({ color, size }) => {
-            let iconName;
-            if (route.name === 'Créer') iconName = 'add-circle-outline';
-            else if (route.name === 'Agenda') iconName = 'calendar-outline';
-            else if (route.name === 'Historique') iconName = 'list-outline';
-            else if (route.name === 'aujourdui') iconName = 'today-outline';
+    <GestureHandlerRootView style={styles.container}>
+      <NavigationContainer>
+        <Tab.Navigator
+          screenOptions={({ route }) => ({
+            tabBarIcon: ({ color, size }) => {
+              let iconName;
+              if (route.name === 'Créer') iconName = 'add-circle-outline';
+              else if (route.name === 'Agenda') iconName = 'calendar-outline';
+              else if (route.name === 'Historique') iconName = 'list-outline';
+              else if (route.name === 'aujourdui') iconName = 'today-outline';
 
-            return <Ionicons name={iconName} size={size} color={color} />;
-          },
-          tabBarActiveTintColor: '#007bff',
-          tabBarInactiveTintColor: 'gray',
-        })}
-      >
-        <Tab.Screen name="Créer" component={CreateRideScreen} />
-        <Tab.Screen
-          name="aujourdui"
-          component={TodayRidesScreen}
-          options={{ tabBarBadge: todayRidesCount ? todayRidesCount : null }}
-          listeners={{
-            focus: () => fetchTodayRidesCount(), // met à jour le badge à chaque focus
-          }}
-        />
-        <Tab.Screen name="Agenda" component={AgendaScreen} />
-        <Tab.Screen name="Historique" component={HistoryScreen} />
-      </Tab.Navigator>
-    </NavigationContainer>
+              return <Ionicons name={iconName} size={size} color={color} />;
+            },
+            tabBarActiveTintColor: '#007bff',
+            tabBarInactiveTintColor: 'gray',
+          })}
+        >
+          <Tab.Screen name="Créer" component={CreateRideScreen} />
+          <Tab.Screen
+            name="aujourdui"
+            component={TodayRidesScreen}
+            options={{ tabBarBadge: todayRidesCount ? todayRidesCount : null }}
+            listeners={{
+              focus: () => fetchTodayRidesCount(),
+            }}
+          />
+          <Tab.Screen name="Agenda" component={AgendaScreen} />
+          <Tab.Screen name="Historique" component={HistoryScreen} />
+        </Tab.Navigator>
+      </NavigationContainer>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+});
