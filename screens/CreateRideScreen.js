@@ -4,6 +4,8 @@ import RideForm from '../components/RideForm';
 import { createRide } from '../services/api';
 import { supabase } from '../lib/supabase';
 
+const sanitizeString = (str) => str ? str.replace(/["']/g, '').trim() : '';
+
 const CreateRideScreen = () => {
   const [chauffeurId, setChauffeurId] = useState(null);
 
@@ -14,9 +16,7 @@ const CreateRideScreen = () => {
         console.error(error);
         return;
       }
-      if (session?.user?.id) {
-        setChauffeurId(session.user.id);
-      }
+      if (session?.user?.id) setChauffeurId(session.user.id);
     };
     fetchSession();
   }, []);
@@ -28,44 +28,46 @@ const CreateRideScreen = () => {
     }
 
     try {
-      if (ride.isRoundTrip && ride.returnDate) {
-        const allerRide = {
-          ...ride,
-          type: 'Aller',
-          chauffeurId,
-        };
-        console.log('Envoi Aller → MongoDB :', allerRide);
-        const responseAller = await createRide(allerRide);
-        console.log('Réponse MongoDB Aller :', responseAller);
+      // Préparer la course Aller
+      const allerRide = {
+        patientName: sanitizeString(ride.patientName),
+        startLocation: sanitizeString(ride.startLocation),
+        endLocation: sanitizeString(ride.endLocation),
+        date: ride.date,
+        type: 'Aller',
+        chauffeurId,
+        isRoundTrip: ride.isRoundTrip || false,
+      };
 
+      console.log('Envoi Aller → MongoDB :', allerRide);
+      const responseAller = await createRide(allerRide);
+      console.log('Réponse MongoDB Aller :', responseAller);
+
+      // Si Aller-Retour, préparer la course Retour
+      if (ride.isRoundTrip && ride.returnDate) {
         const retourRide = {
           ...ride,
           startLocation: ride.endLocation,
           endLocation: ride.startLocation,
           type: 'Retour',
-          date: ride.returnDate,
-          chauffeurId,
+          date: new Date(ride.returnDate).toISOString(),
+          patientName: ride.patientName,
+          chauffeurId: chauffeurId || null,
         };
+        console.log('Course retour envoyée:', retourRide);
+        
+
         console.log('Envoi Retour → MongoDB :', retourRide);
         const responseRetour = await createRide(retourRide);
         console.log('Réponse MongoDB Retour :', responseRetour);
 
         Alert.alert('Succès', 'Courses Aller et Retour créées !');
       } else {
-        const allerRide = {
-          ...ride,
-          type: 'Aller',
-          chauffeurId,
-        };
-        console.log('Envoi Aller → MongoDB :', allerRide);
-        const responseAller = await createRide(allerRide);
-        console.log('Réponse MongoDB Aller :', responseAller);
-
         Alert.alert('Succès', 'Course créée !');
       }
     } catch (err) {
-      console.error(err);
-      Alert.alert('Erreur', 'Erreur lors de la création de la course.');
+      console.error('Erreur création course :', err);
+      Alert.alert('Erreur', 'Impossible de créer la course. Vérifiez les champs.');
     }
   };
 

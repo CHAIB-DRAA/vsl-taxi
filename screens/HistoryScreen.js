@@ -171,13 +171,22 @@ const HistoryScreen = () => {
                     <Text style={styles.modalValue}>{selectedRide.type||'Non défini'}</Text>
                   </View>
                   <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Début :</Text>
-                    <Text style={styles.modalValue}>{selectedRide.startTime ? new Date(selectedRide.startTime).toLocaleDateString('fr-FR') : 'Non démarrée'}</Text>
-                  </View>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Fin :</Text>
-                    <Text style={styles.modalValue}>{selectedRide.endTime ? new Date(selectedRide.endTime).toLocaleDateString('fr-FR') : 'Non terminée'}</Text>
-                  </View>
+  <Text style={styles.modalLabel}>Début :</Text>
+  <Text style={styles.modalValue}>
+    {selectedRide.startTime 
+      ? `${new Date(selectedRide.startTime).toLocaleDateString('fr-FR')} à ${new Date(selectedRide.startTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+      : 'Non démarrée'}
+  </Text>
+</View>
+<View style={styles.modalRow}>
+  <Text style={styles.modalLabel}>Fin :</Text>
+  <Text style={styles.modalValue}>
+    {selectedRide.endTime 
+      ? `${new Date(selectedRide.endTime).toLocaleDateString('fr-FR')} à ${new Date(selectedRide.endTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+      : 'Non terminée'}
+  </Text>
+</View>
+
                   <View style={styles.modalRow}>
                     <Text style={styles.modalLabel}>Distance :</Text>
                     <Text style={styles.modalValue}>{selectedRide.distance||'Non renseignée'} km</Text>

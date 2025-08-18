@@ -16,7 +16,7 @@ const RideForm = ({ onCreate }) => {
   const [isReturn, setIsReturn] = useState(false);
 
   const handleCreateRide = () => {
-    if (!patientName || !dateTime || !startLocation || !endLocation) {
+    if (!patientName.trim() || !dateTime || !startLocation.trim() || !endLocation.trim()) {
       Alert.alert('Erreur', 'Merci de remplir tous les champs');
       return;
     }
@@ -27,9 +27,9 @@ const RideForm = ({ onCreate }) => {
     }
 
     onCreate({
-      patientName,
-      startLocation,
-      endLocation,
+      patientName: patientName.trim(),
+      startLocation: startLocation.trim(),
+      endLocation: endLocation.trim(),
       date: dateTime.toISOString(),
       returnDate: isRoundTrip ? returnDateTime.toISOString() : null,
       isRoundTrip,
@@ -51,13 +51,16 @@ const RideForm = ({ onCreate }) => {
   };
 
   const onChange = (event, selectedDate) => {
-    setShowPicker(Platform.OS === 'ios');
-    if (!selectedDate) return;
+    if (!selectedDate) {
+      setShowPicker(false);
+      return;
+    }
 
     if (isReturn) setReturnDateTime(selectedDate);
     else setDateTime(selectedDate);
 
     if (mode === 'date') setMode('time');
+    else setShowPicker(Platform.OS === 'ios');
   };
 
   return (

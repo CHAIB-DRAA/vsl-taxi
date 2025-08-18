@@ -65,14 +65,14 @@ const TodayRidesScreen = () => {
   };
 
   const submitDistance = async () => {
-    if (!distance || isNaN(distance)) {
+    const parsedDistance = parseFloat(distance?.trim());
+    if (!parsedDistance || isNaN(parsedDistance)) {
       Alert.alert('Erreur', 'Veuillez entrer une distance valide.');
       return;
     }
 
     try {
-      // Envoi de la distance au backend
-      await finishRideById(currentRideId, { distance: parseFloat(distance) });
+      await finishRideById(currentRideId, parsedDistance);
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setModalVisible(false);
       setCurrentRideId(null);
@@ -85,7 +85,7 @@ const TodayRidesScreen = () => {
   };
 
   const renderRightActions = (item) => {
-    if (!item.startTime || item.endTime) return null;
+    if (!item.startTime || item.endTime) return null; 
     return (
       <TouchableOpacity
         style={styles.swipeButton}
