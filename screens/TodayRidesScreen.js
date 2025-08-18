@@ -28,7 +28,6 @@ const TodayRidesScreen = () => {
   const [currentRideId, setCurrentRideId] = useState(null);
   const [distance, setDistance] = useState('');
 
-  // Récupère les courses d'aujourd'hui
   const fetchRides = async () => {
     try {
       setLoading(true);
@@ -48,26 +47,19 @@ const TodayRidesScreen = () => {
 
   useEffect(() => { fetchRides(); }, []);
 
-  // Démarrer une course
-  const handleStartRide = async (ride) => {
+  const handleStartRide = async (id) => {
     try {
-      if (!ride || !ride._id) return;
-
-      const result = await startRideById(ride._id);
-      console.log('Course démarrée :', result);
-
+      await startRideById(id);
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       fetchRides();
     } catch (error) {
-      console.error('Erreur démarrage course :', error.response?.data || error.message);
+      console.error(error);
       Alert.alert('Erreur', 'Impossible de démarrer la course.');
     }
   };
 
-  // Terminer une course (ouvre modal)
-  const handleFinishRide = (ride) => {
-    if (!ride || !ride._id) return;
-    setCurrentRideId(ride._id);
+  const handleFinishRide = (id) => {
+    setCurrentRideId(id);
     setDistance('');
     setModalVisible(true);
   };
@@ -79,6 +71,7 @@ const TodayRidesScreen = () => {
     }
 
     try {
+      // Envoi de la distance au backend
       await finishRideById(currentRideId, { distance: parseFloat(distance) });
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setModalVisible(false);
@@ -86,29 +79,38 @@ const TodayRidesScreen = () => {
       setDistance('');
       fetchRides();
     } catch (error) {
-      console.error(error.response?.data || error.message);
+      console.error(error);
       Alert.alert('Erreur', 'Impossible de terminer la course.');
     }
   };
 
-  const renderItem = ({ item }) => {
-    const hasStarted = !!item.startTime;
-    const hasEnded = !!item.endTime;
+  const renderRightActions = (item) => {
+    if (!item.startTime || item.endTime) return null;
+    return (
+      <TouchableOpacity
+        style={styles.swipeButton}
+        onPress={() => handleFinishRide(item._id)}
+      >
+        <Text style={styles.swipeButtonText}>Terminer</Text>
+      </TouchableOpacity>
+    );
+  };
 
+  const renderItem = ({ item }) => {
     let statusText = 'Non démarrée';
     let buttonLabel = 'Démarrer';
-    let buttonAction = () => handleStartRide(item);
+    let buttonAction = () => handleStartRide(item._id);
     let cardBackground = '#e3f2fd';
     let buttonColor = '#2196F3';
     let textColor = '#000';
 
-    if (hasStarted && !hasEnded) {
+    if (item.startTime && !item.endTime) {
       statusText = 'En cours';
       buttonLabel = 'Terminer';
-      buttonAction = () => handleFinishRide(item);
+      buttonAction = () => handleFinishRide(item._id);
       cardBackground = '#ffe0b2';
       buttonColor = '#FF9800';
-    } else if (hasEnded) {
+    } else if (item.endTime) {
       statusText = 'Terminée';
       buttonLabel = '✓';
       buttonAction = null;
@@ -118,27 +120,29 @@ const TodayRidesScreen = () => {
     }
 
     return (
-      <View style={[styles.card, { backgroundColor: cardBackground }]}>
-        {hasEnded && (
-          <View style={styles.finishedBadge}>
-            <Text style={styles.finishedText}>Terminée</Text>
-          </View>
-        )}
-        <Text style={[styles.title, { color: textColor }]}>{item.patientName}</Text>
-        <Text style={{ color: textColor }}>Date : {new Date(item.date).toLocaleDateString()}</Text>
-        <Text style={{ color: textColor }}>Départ : {item.startLocation}</Text>
-        <Text style={{ color: textColor }}>Arrivée : {item.endLocation}</Text>
-        <Text style={{ color: textColor }}>Statut : {statusText}</Text>
+      <Swipeable renderRightActions={() => renderRightActions(item)}>
+        <View style={[styles.card, { backgroundColor: cardBackground }]}>
+          {item.endTime && (
+            <View style={styles.finishedBadge}>
+              <Text style={styles.finishedText}>Terminée</Text>
+            </View>
+          )}
+          <Text style={[styles.title, { color: textColor }]}>{item.patientName}</Text>
+          <Text style={{ color: textColor }}>Date : {new Date(item.date).toLocaleDateString()}</Text>
+          <Text style={{ color: textColor }}>Départ : {item.startLocation}</Text>
+          <Text style={{ color: textColor }}>Arrivée : {item.endLocation}</Text>
+          <Text style={{ color: textColor }}>Statut : {statusText}</Text>
 
-        {buttonAction && (
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: buttonColor }]}
-            onPress={buttonAction}
-          >
-            <Text style={styles.buttonText}>{buttonLabel}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+          {buttonAction && (
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: buttonColor }]}
+              onPress={buttonAction}
+            >
+              <Text style={styles.buttonText}>{buttonLabel}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Swipeable>
     );
   };
 
@@ -168,6 +172,7 @@ const TodayRidesScreen = () => {
         <Text style={styles.floatingButtonText}>Actualiser</Text>
       </TouchableOpacity>
 
+      {/* Modal pour saisir distance */}
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
@@ -180,16 +185,10 @@ const TodayRidesScreen = () => {
               style={styles.input}
             />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 }}>
-              <TouchableOpacity
-                onPress={() => setModalVisible(false)}
-                style={[styles.button, { backgroundColor: '#9E9E9E', flex: 0.45 }]}
-              >
+              <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.button, { backgroundColor: '#9E9E9E', flex: 0.45 }]}>
                 <Text style={styles.buttonText}>Annuler</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={submitDistance}
-                style={[styles.button, { backgroundColor: '#4CAF50', flex: 0.45 }]}
-              >
+              <TouchableOpacity onPress={submitDistance} style={[styles.button, { backgroundColor: '#4CAF50', flex: 0.45 }]}>
                 <Text style={styles.buttonText}>Valider</Text>
               </TouchableOpacity>
             </View>
@@ -211,6 +210,8 @@ const styles = StyleSheet.create({
   floatingButtonText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
   finishedBadge: { position: 'absolute', top: 10, right: 10, backgroundColor: '#4CAF50', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, zIndex: 10 },
   finishedText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  swipeButton: { backgroundColor: '#FF9800', justifyContent: 'center', alignItems: 'center', width: 90, marginVertical: 8, borderRadius: 12 },
+  swipeButtonText: { color: '#fff', fontWeight: 'bold' },
   modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
   modalContainer: { width: '80%', backgroundColor: '#fff', padding: 20, borderRadius: 10 },
   input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10 },
