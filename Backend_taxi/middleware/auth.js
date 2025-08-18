@@ -1,3 +1,4 @@
+require('dotenv').config(); // Important : charger .env en premier
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
@@ -7,15 +8,22 @@ const supabase = createClient(
 
 const authMiddleware = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'Token manquant' });
+    // Récupération du token Bearer
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Token manquant' });
 
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) return res.status(401).json({ error: 'Utilisateur non valide' });
+    const token = authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Token invalide' });
 
-    req.user = { id: user.id }; // ← récupère l'id Supabase
+    // Vérification du token
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data.user) return res.status(401).json({ error: 'Utilisateur non valide' });
+
+    // Injecter l'id Supabase dans req.user
+    req.user = { id: data.user.id };
     next();
   } catch (err) {
+    console.error(err);
     res.status(401).json({ error: 'Erreur d\'authentification' });
   }
 };
