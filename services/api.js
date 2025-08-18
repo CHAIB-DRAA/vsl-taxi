@@ -18,11 +18,17 @@ export const getRides = async () => {
 };
 
 export const createRide = async (ride) => {
+  console.log('Envoi Aller → MongoDB :', { ...ride, chauffeurId: 'token sera ajouté côté backend' });
   const response = await axios.post(API_URL, ride, config());
+  console.log('Réponse MongoDB :', response.data);
   return response.data;
 };
 
+
+// Démarrer une course
 export const startRideById = async (id) => {
+  if (!token) throw new Error('Token non défini');
+  if (!id) throw new Error('ID de course manquant');
   const response = await axios.patch(`${API_URL}/start/${id}`, {}, config());
   return response.data;
 };

@@ -13,7 +13,7 @@ import CreateRideScreen from './screens/CreateRideScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import AgendaScreen from './screens/AgendaScreen';
 import TodayRidesScreen from './screens/TodayRidesScreen';
-import { getRides } from './services/api';
+import { getRides, setToken } from './services/api';
 
 const Tab = createBottomTabNavigator();
 
@@ -44,14 +44,22 @@ export default function App() {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
+
+      if (session?.access_token) {
+        setToken(session.access_token); // ← stocker token pour API
+      }
     };
     init();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      // Met à jour le badge automatiquement quand l'utilisateur se connecte/déconnecte
-      if (session) fetchTodayRidesCount();
-      else setTodayRidesCount(0);
+
+      if (session?.access_token) {
+        setToken(session.access_token); // ← mettre à jour token à chaque changement
+        fetchTodayRidesCount();
+      } else {
+        setTodayRidesCount(0);
+      }
     });
 
     return () => {

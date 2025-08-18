@@ -4,7 +4,6 @@ exports.createRide = async (req, res) => {
   try {
     const ride = new Ride({ ...req.body, chauffeurId: req.user.id });
     await ride.save();
-    console.log('Envoi vers MongoDB →', ride);
     res.status(201).json(ride);
   } catch (err) {
     res.status(400).json({ error: err.message });
