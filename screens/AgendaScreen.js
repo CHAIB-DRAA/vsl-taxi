@@ -11,16 +11,18 @@ import {
   Platform,
   Modal,
   TextInput,
-  Button,
   Linking,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-
 import { Calendar } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
 import { supabase } from '../lib/supabase';
-import { getRides, updateRide, shareRide, deleteRide } from '../services/api';
+import {
+  getRides,
+  updateRide,
+  deleteRide,
+  shareRide,
+} from '../services/api';
 
 moment.locale('fr');
 
@@ -61,14 +63,11 @@ const AgendaScreen = () => {
   // 🔹 Fetch contacts Supabase
   const fetchContacts = async () => {
     const { data, error } = await supabase.from('profiles').select('id, full_name, email');
-    if (error) {
-      console.error('Erreur fetch contacts:', error);
-    } else {
-      setContacts(data);
-    }
+    if (error) console.error('Erreur fetch contacts:', error);
+    else setContacts(data);
   };
 
-  // 🔹 Fetch rides (propres + partagées)
+  // 🔹 Fetch rides
   const fetchEvents = async () => {
     setLoading(true);
     try {
@@ -78,7 +77,7 @@ const AgendaScreen = () => {
         .map(item => ({
           ...item,
           date: new Date(item.date).toISOString(),
-          isShared: !!item.shared, // marquer les courses partagées
+          isShared: !!item.shared,
         }))
         .sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -96,48 +95,18 @@ const AgendaScreen = () => {
     fetchEvents();
     fetchContacts();
   }, []);
-  const handleDelete = async () => {
-    if (!selectedRide) return;
-    Alert.alert(
-      "Supprimer la course",
-      "Voulez-vous vraiment supprimer cette course ?",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Supprimer",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteRide(selectedRide._id); // Assure-toi que deleteRide est importé
-              Alert.alert('Succès', 'Course supprimée');
-              setModalVisible(false);
-              fetchEvents();
-            } catch (error) {
-              console.error(error);
-              Alert.alert('Erreur', "Impossible de supprimer la course");
-            }
-          }
-        }
-      ]
-    );
-  };
-  
+
   // 🔹 Marquer les dates pour le calendrier
   const updateMarkedDates = data => {
     const marks = {};
     data.forEach(ride => {
       const dateKey = moment(ride.date).format('YYYY-MM-DD');
       if (!marks[dateKey]) marks[dateKey] = { dots: [] };
-
       const color = typeColors[ride.type] || typeColors.autre;
-      if (!marks[dateKey].dots.find(d => d.color === color)) {
-        marks[dateKey].dots.push({ color });
-      }
+      if (!marks[dateKey].dots.find(d => d.color === color)) marks[dateKey].dots.push({ color });
     });
-
     if (!marks[selectedDate]) marks[selectedDate] = { selected: true };
     else marks[selectedDate].selected = true;
-
     setMarkedDates(marks);
   };
 
@@ -152,9 +121,7 @@ const AgendaScreen = () => {
   };
 
   const groupedEvents = groupByDate(events);
-
   const formatTime = date => (date ? moment(date).format('HH:mm') : '');
-
   const toggleCalendar = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setShowCalendar(!showCalendar);
@@ -184,17 +151,34 @@ const AgendaScreen = () => {
     }
   };
 
-  // 🔹 Partage avec contact
+  const handleDelete = async () => {
+    Alert.alert(
+      'Confirmer la suppression',
+      'Voulez-vous vraiment supprimer cette course ?',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteRide(selectedRide._id);
+              Alert.alert('Supprimé', 'Course supprimée');
+              setModalVisible(false);
+              fetchEvents();
+            } catch (err) {
+              console.error(err);
+              Alert.alert('Erreur', err.response?.data?.message || 'Impossible de supprimer la course');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const shareRideWithContact = async (ride, contact) => {
     try {
-      const { data: user } = await supabase.auth.getUser();
-      const fromUserId = user?.id;
-      const rideId = ride._id;
-      const toUserId = contact.id;
-
-      if (!fromUserId) throw new Error('Utilisateur non connecté');
-
-      await shareRide(rideId, toUserId);
+      await shareRide(ride._id, contact.id);
 
       const message = `
 Course pour ${ride.patientName}
@@ -207,7 +191,6 @@ Pour : ${contact.full_name || contact.email}
 
       const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
       const supported = await Linking.canOpenURL(url);
-
       if (!supported) Alert.alert('WhatsApp non installé');
       else {
         Linking.openURL(url);
@@ -305,24 +288,15 @@ Pour : ${contact.full_name || contact.email}
                             <Text style={{ fontSize: 12, color: '#FF5722', fontWeight: 'bold' }}> (Partagée)</Text>
                           )}
                         </Text>
-                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>
-                          Départ : {item.startLocation}
-                        </Text>
-                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>
-                          Arrivée : {item.endLocation}
-                        </Text>
-                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>
-                          Heure : {formatTime(item.date)}
-                        </Text>
+                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Départ : {item.startLocation}</Text>
+                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Arrivée : {item.endLocation}</Text>
+                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Heure : {formatTime(item.date)}</Text>
                         <Text style={{ color: isFinished ? '#777' : '#555', fontStyle: 'italic' }}>Type : {item.type}</Text>
 
                         {!item.isShared && (
                           <TouchableOpacity
                             style={{ marginTop: 8, backgroundColor: '#25D366', padding: 8, borderRadius: 6, alignItems: 'center' }}
-                            onPress={() => {
-                              setSelectedShareRide(item);
-                              setShareModalVisible(true);
-                            }}
+                            onPress={() => { setSelectedShareRide(item); setShareModalVisible(true); }}
                           >
                             <Text style={{ color: '#fff', fontWeight: 'bold' }}>Partager</Text>
                           </TouchableOpacity>
@@ -353,17 +327,10 @@ Pour : ${contact.full_name || contact.email}
         <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>Actualiser</Text>
       </TouchableOpacity>
 
-    {/* Modal modification */}
-    <Modal visible={modalVisible} animationType="slide" transparent>
+      {/* Modal modification */}
+      <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20 }}>
-            <TouchableOpacity
-              style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}
-              onPress={() => handleShare(selectedRide)}
-            >
-              <Ionicons name="logo-whatsapp" size={28} color="#25D366" />
-            </TouchableOpacity>
-
             <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Modifier la course</Text>
             <TextInput
               placeholder="Nom du patient"
@@ -412,7 +379,6 @@ Pour : ${contact.full_name || contact.email}
           </View>
         </View>
       </Modal>
-
 
       {/* Modal partage */}
       <Modal visible={shareModalVisible} animationType="slide" transparent>

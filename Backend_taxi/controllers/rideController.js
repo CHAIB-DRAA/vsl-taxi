@@ -1,89 +1,116 @@
-import axios from 'axios';
-import { supabase } from '../lib/supabase';
+const Ride = require('../models/Ride');
+const RideShare = require('../models/RideShare');
 
-let token = null;
-const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
-
-// -----------------------------
-// Gestion du token
-// -----------------------------
-export const setToken = (t) => { token = t; };
-
-const getToken = async () => {
-  if (token) return token;
-  const { data: sessionData } = await supabase.auth.getSession();
-  return sessionData?.session?.access_token || null;
+// === Créer une course
+exports.createRide = async (req, res) => {
+  try {
+    const ride = new Ride({ ...req.body, chauffeurId: req.user.id });
+    await ride.save();
+    res.status(201).json(ride);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 };
 
-const getConfig = async () => {
-  const t = await getToken();
-  if (!t) throw new Error('Token manquant');
-  return { headers: { Authorization: `Bearer ${t}` } };
+// === Récupérer toutes les courses du chauffeur + courses partagées
+exports.getRides = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Courses créées par le chauffeur
+    const ownRides = await Ride.find({ chauffeurId: userId });
+
+    // Courses partagées avec lui
+    const sharedRidesIds = await RideShare.find({ toUserId: userId }).distinct('rideId');
+    const sharedRides = await Ride.find({ _id: { $in: sharedRidesIds } });
+
+    // Fusionner et trier par date
+    const rides = [...ownRides, ...sharedRides].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    res.json(rides);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 };
 
-// -----------------------------
-// Récupérer toutes les courses
-// -----------------------------
-export const getRides = async () => {
-  const config = await getConfig();
-  const response = await axios.get(API_URL, config);
-  return response.data;
+// === Mettre à jour une course
+exports.updateRide = async (req, res) => {
+  try {
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      req.body,
+      { new: true }
+    );
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
-// -----------------------------
-// Créer une course
-// -----------------------------
-export const createRide = async (ride) => {
-  const config = await getConfig();
-  const response = await axios.post(API_URL, ride, config);
-  return response.data;
+// === Supprimer une course
+exports.deleteRide = async (req, res) => {
+  try {
+    const ride = await Ride.findOneAndDelete({ _id: req.params.id, chauffeurId: req.user.id });
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou déjà supprimée" });
+    res.json({ message: "Course supprimée avec succès" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
-// -----------------------------
-// Mettre à jour une course (status, info, etc.)
-// -----------------------------
-export const updateRide = async (rideId, data) => {
-  const config = await getConfig();
-  const response = await axios.patch(`${API_URL}/${rideId}`, data, config);
-  return response.data;
+// === Démarrer une course
+exports.startRide = async (req, res) => {
+  try {
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { startTime: new Date() },
+      { new: true }
+    );
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
-// -----------------------------
-// Supprimer une course
-// -----------------------------
-export const deleteRide = async (rideId) => {
-  const config = await getConfig();
-  const response = await axios.delete(`${API_URL}/${rideId}`, config);
-  return response.data;
+// === Terminer une course avec distance
+exports.endRide = async (req, res) => {
+  try {
+    const { distance } = req.body;
+    if (!distance) return res.status(400).json({ message: "Distance non renseignée" });
+
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { endTime: new Date(), distance: parseFloat(distance) },
+      { new: true }
+    );
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
-// -----------------------------
-// Démarrer / Terminer une course
-// -----------------------------
-export const startRideById = async (id) => {
-  const config = await getConfig();
-  const response = await axios.patch(`${API_URL}/${id}/start`, {}, config);
-  return response.data;
-};
+// === Partager une course
+exports.shareRide = async (req, res) => {
+  const { rideId, fromUserId, toUserId } = req.body;
 
-export const finishRideById = async (id, distance) => {
-  if (!distance || isNaN(distance)) throw new Error('Distance invalide');
-  const config = await getConfig();
-  const response = await axios.patch(`${API_URL}/${id}/end`, { distance: parseFloat(distance) }, config);
-  return response.data;
-};
+  if (!rideId || !fromUserId || !toUserId) {
+    return res.status(400).json({ success: false, error: 'Données manquantes' });
+  }
 
-// -----------------------------
-// Partager une course
-// -----------------------------
-export const shareRide = async (rideId, toUserId) => {
-  if (!rideId || !toUserId) throw new Error('rideId ou toUserId manquant');
+  try {
+    // Vérifier si la course existe
+    const ride = await Ride.findById(rideId);
+    if (!ride) return res.status(404).json({ success: false, error: 'Course introuvable' });
 
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) throw new Error('Utilisateur non connecté');
-
-  const fromUserId = user.id;
-  const config = await getConfig();
-  const response = await axios.post(`${API_URL}/shareRide`, { rideId, fromUserId, toUserId }, config);
-  return response.data;
+    // Créer le partage
+    const share = await RideShare.create({ rideId, fromUserId, toUserId });
+    res.status(200).json({ success: true, shareId: share._id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 };
