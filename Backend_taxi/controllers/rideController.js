@@ -1,6 +1,21 @@
 const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
 
+// Utilitaire : récupérer une course autorisée pour l'utilisateur
+const findAuthorizedRide = async (rideId, userId) => {
+  // Chercher la course si c'est le propriétaire
+  let ride = await Ride.findOne({ _id: rideId, chauffeurId: userId });
+
+  // Sinon vérifier si elle est partagée
+  if (!ride) {
+    const shared = await RideShare.findOne({ rideId, toUserId: userId });
+    if (!shared) return null;
+    ride = await Ride.findById(rideId);
+  }
+
+  return ride;
+};
+
 // === Créer une course
 exports.createRide = async (req, res) => {
   try {
@@ -60,33 +75,38 @@ exports.deleteRide = async (req, res) => {
   }
 };
 
-// === Démarrer une course
+// === Démarrer une course (propriétaire ou partagé)
 exports.startRide = async (req, res) => {
   try {
-    const ride = await Ride.findOneAndUpdate(
-      { _id: req.params.id, chauffeurId: req.user.id },
-      { startTime: new Date() },
-      { new: true }
-    );
+    const userId = req.user.id;
+    const ride = await findAuthorizedRide(req.params.id, userId);
+
     if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+
+    ride.startTime = new Date();
+    await ride.save();
+
     res.json(ride);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// === Terminer une course avec distance
+// === Terminer une course avec distance (propriétaire ou partagé)
 exports.endRide = async (req, res) => {
   try {
     const { distance } = req.body;
     if (!distance) return res.status(400).json({ message: "Distance non renseignée" });
 
-    const ride = await Ride.findOneAndUpdate(
-      { _id: req.params.id, chauffeurId: req.user.id },
-      { endTime: new Date(), distance: parseFloat(distance) },
-      { new: true }
-    );
+    const userId = req.user.id;
+    const ride = await findAuthorizedRide(req.params.id, userId);
+
     if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+
+    ride.endTime = new Date();
+    ride.distance = parseFloat(distance);
+    await ride.save();
+
     res.json(ride);
   } catch (err) {
     res.status(500).json({ message: err.message });

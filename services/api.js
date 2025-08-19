@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 
-let token = null; // Token manuel optionnel
+let token = null; // Token manuel optionnel, peut être mis à jour via setToken
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 
 // -----------------------------
@@ -12,7 +12,7 @@ export const setToken = (t) => {
 };
 
 const getToken = async () => {
-  if (token) return token;
+  if (token) return token; // si token manuel défini, on l’utilise
   const { data: sessionData } = await supabase.auth.getSession();
   return sessionData?.session?.access_token || null;
 };
@@ -62,32 +62,11 @@ export const finishRideById = async (id, distance) => {
 };
 
 // -----------------------------
-// Supprimer une course
+// Mettre à jour une course (status, etc.)
 // -----------------------------
-export const deleteRide = async (rideId) => {
-  if (!rideId) throw new Error('ID de course manquant');
-
-  const { data: { user } } = await supabase.auth.getUser();
-  const chauffeurId = user?.id;
-  if (!chauffeurId) throw new Error('Utilisateur non connecté');
-
+export const updateRide = async (id, data) => {
   const config = await getConfig();
-  const response = await axios.delete(`${API_URL}/${rideId}?chauffeurId=${chauffeurId}`, config);
-  return response.data;
-};
-
-// -----------------------------
-// Mettre à jour une course
-// -----------------------------
-export const updateRide = async (rideId, data) => {
-  if (!rideId) throw new Error('ID de course manquant');
-
-  const { data: { user } } = await supabase.auth.getUser();
-  const chauffeurId = user?.id;
-  if (!chauffeurId) throw new Error('Utilisateur non connecté');
-
-  const config = await getConfig();
-  const response = await axios.patch(`${API_URL}/${rideId}?chauffeurId=${chauffeurId}`, data, config);
+  const response = await axios.patch(`${API_URL}/${id}`, data, config);
   return response.data;
 };
 
@@ -98,6 +77,8 @@ export const shareRide = async (rideId, toUserId) => {
   if (!rideId || !toUserId) throw new Error('rideId ou toUserId manquant');
 
   const config = await getConfig();
+
+  // Récupérer l'utilisateur connecté pour fromUserId
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) throw new Error('Utilisateur non connecté');
 
