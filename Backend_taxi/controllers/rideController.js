@@ -116,7 +116,7 @@ exports.endRide = async (req, res) => {
 // === Partager une course// rideController.js
 
 
-const shareRide = async (req, res) => {
+exports.shareRide = async (req, res) => {
   const { rideId, fromUserId, toUserId, newChauffeurId } = req.body;
 
   try {
@@ -138,4 +138,3 @@ const shareRide = async (req, res) => {
   }
 };
 
-module.exports = { shareRide };
