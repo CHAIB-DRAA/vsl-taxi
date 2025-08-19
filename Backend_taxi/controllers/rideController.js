@@ -1,4 +1,4 @@
-const RideShare = require('./models/RideShare');
+const RideShare = require('../models/RideShare');
 
 const Ride = require('../models/Ride');
 
