@@ -93,9 +93,8 @@ export const shareRide = async (rideId, toUserId) => {
   return response.data;
 };
 
-  export const updateRideStatus = async (id, status) => {
-    const config = await getConfig(); // récupère le token
-    const response = await axios.patch(`${API_URL}/${id}`, { status }, config);
-    return response.data;
-  };
-  
+export const updateRideStatus = async (id, status) => {
+  const config = await getConfig(); 
+  const response = await axios.patch(`${API_URL}/${id}`, { status }, config);
+  return response.data;
+};
