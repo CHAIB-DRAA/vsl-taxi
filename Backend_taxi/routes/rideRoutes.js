@@ -10,5 +10,8 @@ router.get('/', rideController.getRides);
 router.patch('/:id', rideController.updateRide);
 router.patch('/:id/start', rideController.startRide);
 router.patch('/:id/end', rideController.endRide);
+router.post('/shareRide', rideController.shareRide);
+
+
 
 module.exports = router;

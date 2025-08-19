@@ -23,6 +23,8 @@ mongoose.connect(process.env.MONGO_URI)
 // Routes
 app.use('/api/rides', rideRoutes); // Préfixe plus clair
 
+
+
 // Démarrage du serveur
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
