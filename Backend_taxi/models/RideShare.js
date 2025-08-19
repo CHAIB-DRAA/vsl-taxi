@@ -5,7 +5,7 @@ const rideShare = new mongoose.Schema({
   fromUserId: { type: String, required: true },
   toUserId: { type: String, required: true },
   sharedAt: { type: Date, default: Date.now },
-  status: { type: String, enum: ['pending', 'accepted', 'refused'], default: 'pending' }
+  statusPartage: { type: String, enum: ['pending', 'accepted', 'refused'], default: 'pending' }
 });
 
 
