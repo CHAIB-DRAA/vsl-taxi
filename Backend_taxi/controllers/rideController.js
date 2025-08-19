@@ -32,22 +32,40 @@ exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Courses créées par le chauffeur
-    const ownRides = await Ride.find({ chauffeurId: userId });
+    // 1️⃣ Courses créées par le chauffeur et non partagées
+    const ownRides = await Ride.find({ 
+      chauffeurId: userId,
+      isShared: { $ne: true } // ignore les rides déjà partagées
+    });
 
-    // Courses partagées avec lui
-    const sharedRidesIds = await RideShare.find({ toUserId: userId }).distinct('rideId');
-    const sharedRides = await Ride.find({ _id: { $in: sharedRidesIds } });
+    // 2️⃣ Courses partagées avec lui
+    const sharedLinks = await RideShare.find({ toUserId: userId });
+    const sharedRideIds = sharedLinks.map(link => link.rideId);
+    const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
 
-    // Fusionner et trier par date
-    const rides = [...ownRides, ...sharedRides].sort((a, b) => new Date(a.date) - new Date(b.date));
+    // 3️⃣ Ajouter les flags pour les courses partagées
+    const sharedRides = sharedRidesRaw.map(ride => {
+      const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
+      return { 
+        ...ride.toObject(), 
+        isShared: true, 
+        statusPartage: link?.statusPartage || 'pending' 
+      };
+    });
 
-    res.json(rides);
+    // 4️⃣ Fusionner les courses propres et partagées
+    const allRides = [...ownRides, ...sharedRides];
+
+    // 5️⃣ Trier par date (ancienne → récente)
+    allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    res.json(allRides);
   } catch (err) {
-    console.error(err);
+    console.error('Erreur getRides:', err);
     res.status(500).json({ error: err.message });
   }
 };
+
 
 // === Mettre à jour une course
 exports.updateRide = async (req, res) => {
