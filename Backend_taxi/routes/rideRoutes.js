@@ -10,7 +10,7 @@ router.get('/', rideController.getRides);
 router.patch('/:id', rideController.updateRide);
 router.patch('/:id/start', rideController.startRide);
 router.patch('/:id/end', rideController.endRide);
-router.post('/shareRide', verifyToken, shareRide);
+router.post('/shareRide', rideController.shareRide);
 
 
 
