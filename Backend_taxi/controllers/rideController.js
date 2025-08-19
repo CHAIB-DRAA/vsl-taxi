@@ -114,23 +114,30 @@ exports.endRide = async (req, res) => {
 };
 
 // === Partager une course
-exports.shareRide = async (req, res) => {
-  const { rideId, fromUserId, toUserId } = req.body;
-
-  if (!rideId || !fromUserId || !toUserId) {
-    return res.status(400).json({ success: false, error: 'Données manquantes' });
-  }
+router.post('/shareRide', verifyToken, async (req, res) => {
+  const { rideId, fromUserId, toUserId, newChauffeurId } = req.body;
 
   try {
-    // Vérifier si la course existe
     const ride = await Ride.findById(rideId);
-    if (!ride) return res.status(404).json({ success: false, error: 'Course introuvable' });
+    if (!ride) return res.status(404).json({ message: 'Course introuvable' });
 
-    // Créer le partage
-    const share = await RideShare.create({ rideId, fromUserId, toUserId });
-    res.status(200).json({ success: true, shareId: share._id });
+    // Vérifier que c'est bien le propriétaire qui partage
+    if (ride.chauffeurId.toString() !== fromUserId && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+
+    // Mettre à jour chauffeurId avec l'utilisateur avec qui on partage
+    ride.chauffeurId = newChauffeurId;
+
+    // Marquer comme partagé si tu veux
+    ride.shared = true;
+
+    await ride.save();
+
+    res.json(ride);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ message: 'Erreur serveur' });
   }
-};
+});
+

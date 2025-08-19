@@ -74,27 +74,36 @@ export const updateRide = async (id, data) => {
 // Partager une course avec un autre utilisateur
 // -----------------------------
 export const shareRide = async (rideId, toUserId) => {
-  if (!rideId || !toUserId) throw new Error('rideId ou toUserId manquant');
-
   const config = await getConfig();
-
-  // Récupérer l'utilisateur connecté pour fromUserId
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) throw new Error('Utilisateur non connecté');
-
+  const { data: { user } } = await supabase.auth.getUser();
   const fromUserId = user.id;
 
   const response = await axios.post(
     `${API_URL}/shareRide`,
-    { rideId, fromUserId, toUserId },
+    { rideId, fromUserId, toUserId, newChauffeurId: toUserId }, // ajouter newChauffeurId
     config
   );
 
   return response.data;
 };
 
+
 export const updateRideStatus = async (id, status) => {
-  const config = await getConfig(); 
-  const response = await axios.patch(`${API_URL}/${id}`, { status }, config);
-  return response.data;
+  if (!id) throw new Error('ID de course manquant');
+  if (!status) throw new Error('Status manquant');
+
+  const config = await getConfig();
+
+  try {
+    const response = await axios.patch(`${API_URL}/${id}`, { status }, config);
+    return response.data; // retourne la course mise à jour
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      const code = err.response?.status;
+      if (code === 403) throw new Error('Non autorisé : vous ne pouvez pas modifier cette course');
+      if (code === 404) throw new Error('Course introuvable');
+      if (code === 500) throw new Error('Erreur serveur');
+    }
+    throw err; // autre erreur
+  }
 };
