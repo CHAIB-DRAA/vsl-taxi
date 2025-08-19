@@ -61,37 +61,17 @@ const AgendaScreen = ({ userId }) => {
   const fetchAllRides = async () => {
     setLoading(true);
     try {
-      const config = await getConfig();
-      // 1. Récupérer l'utilisateur courant
-      const { data: { session } } = await supabase.auth.getSession();
-      const chauffeurId = session?.user?.id;
-  
-      // 2. Récupérer ses courses directes
-      const { data: myRides } = await axios.get(`${API_URL}?chauffeurId=${chauffeurId}`, config);
-  
-      // 3. Récupérer les partages où il est destinataire
-      const { data: sharedLinks } = await axios.get(`${API_URL}/shared?toUserId=${chauffeurId}`, config);
-  
-      // 4. Pour chaque partage, récupérer le détail de la course originale
-      const sharedRides = await Promise.all(
-        (sharedLinks || []).map(async (link) => {
-          const { data: ride } = await axios.get(`${API_URL}/${link.rideId}`, config);
-          return { ...ride, isShared: true, statusPartage: link.status }; 
-        })
-      );
-  
-      // 5. Fusionner les deux listes
-      const allRides = [...(myRides || []), ...sharedRides];
-      setRides(allRides);
-      updateMarkedDates(allRides);
+      const config = await getConfig(); // ajoute le token
+      const { data } = await axios.get(API_URL, config); // juste /api/rides
+      setRides(data || []);
+      updateMarkedDates(data || []);
     } catch (err) {
-      console.error(err);
+      console.error(err); // ici tu pourras voir si c’est 404 ou autre
       Alert.alert('Erreur', "Impossible de charger l'agenda");
     } finally {
       setLoading(false);
     }
   };
-  
 
   const shareRide = async (rideId, toUserId) => {
     const config = await getConfig();
