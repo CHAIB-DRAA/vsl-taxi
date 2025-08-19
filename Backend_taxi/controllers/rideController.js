@@ -111,12 +111,20 @@ exports.endRide = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-};exports.shareRide = async (req, res) => {
+};
+
+
+exports.shareRide = async (req, res) => {
   const { rideId, toUserId } = req.body;
 
   try {
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: 'Course introuvable' });
+
+    // Vérifie que l'utilisateur est bien le propriétaire
+    if (ride.chauffeurId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Non autorisé à partager cette course' });
+    }
 
     // Crée le partage
     const rideShare = new RideShare({
@@ -128,10 +136,11 @@ exports.endRide = async (req, res) => {
 
     await rideShare.save();
 
-    // Supprime la course du chauffeur actuel
-    await Ride.findByIdAndDelete(rideId);
+    // Marque la course comme partagée (au lieu de la supprimer)
+    ride.isShared = true;
+    await ride.save();
 
-    res.json({ message: 'Partage créé et course supprimée', rideShare });
+    res.json({ message: 'Partage créé', rideShare });
   } catch (err) {
     console.error('Erreur shareRide:', err);
     res.status(500).json({ message: 'Erreur serveur' });

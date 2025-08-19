@@ -62,9 +62,28 @@ const AgendaScreen = ({ userId }) => {
     setLoading(true);
     try {
       const config = await getConfig();
-      const { data } = await axios.get(API_URL, config);
-      setRides(data || []);
-      updateMarkedDates(data || []);
+      // 1. Récupérer l'utilisateur courant
+      const { data: { session } } = await supabase.auth.getSession();
+      const chauffeurId = session?.user?.id;
+  
+      // 2. Récupérer ses courses directes
+      const { data: myRides } = await axios.get(`${API_URL}?chauffeurId=${chauffeurId}`, config);
+  
+      // 3. Récupérer les partages où il est destinataire
+      const { data: sharedLinks } = await axios.get(`${API_URL}/shared?toUserId=${chauffeurId}`, config);
+  
+      // 4. Pour chaque partage, récupérer le détail de la course originale
+      const sharedRides = await Promise.all(
+        (sharedLinks || []).map(async (link) => {
+          const { data: ride } = await axios.get(`${API_URL}/${link.rideId}`, config);
+          return { ...ride, isShared: true, statusPartage: link.status }; 
+        })
+      );
+  
+      // 5. Fusionner les deux listes
+      const allRides = [...(myRides || []), ...sharedRides];
+      setRides(allRides);
+      updateMarkedDates(allRides);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', "Impossible de charger l'agenda");
@@ -72,6 +91,7 @@ const AgendaScreen = ({ userId }) => {
       setLoading(false);
     }
   };
+  
 
   const shareRide = async (rideId, toUserId) => {
     const config = await getConfig();
