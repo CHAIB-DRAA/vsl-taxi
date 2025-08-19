@@ -2,28 +2,26 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
-  ActivityIndicator,
-  Alert,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Modal,
+  Alert,
   LayoutAnimation,
   UIManager,
   Platform,
-  Modal,
   TextInput,
-  Linking,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
+import axios from 'axios';
 import { supabase } from '../lib/supabase';
-import { getRides, updateRide, deleteRide, shareRide } from '../services/api';
 
 moment.locale('fr');
+if (Platform.OS === 'android') UIManager.setLayoutAnimationEnabledExperimental?.(true);
 
-if (Platform.OS === 'android') {
-  UIManager.setLayoutAnimationEnabledExperimental?.(true);
-}
+const API_URL = 'https://vsl-taxi.onrender.com/api/rides'; // ton API
 
 const typeColors = {
   Aller: '#FF5722',
@@ -31,14 +29,14 @@ const typeColors = {
   autre: '#2196F3',
 };
 
-const AgendaScreen = () => {
-  const [events, setEvents] = useState([]);
+const AgendaScreen = ({ userId }) => {
+  const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
   const [markedDates, setMarkedDates] = useState({});
   const [showCalendar, setShowCalendar] = useState(true);
 
-  const [modalVisible, setModalVisible] = useState(false);
+  const [rideModalVisible, setRideModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
   const [formData, setFormData] = useState({ patientName: '', startLocation: '', endLocation: '', type: '', date: '' });
 
@@ -48,24 +46,25 @@ const AgendaScreen = () => {
 
   const scrollRef = useRef();
 
-  // 🔹 Fetch contacts Supabase
+  // ------------------ Fonctions API ------------------
+  const getConfig = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return { headers: { Authorization: `Bearer ${session?.access_token}` } };
+  };
+
   const fetchContacts = async () => {
     const { data, error } = await supabase.from('profiles').select('id, full_name, email');
-    if (error) console.error('Erreur fetch contacts:', error);
+    if (error) console.error(error);
     else setContacts(data || []);
   };
 
-  // 🔹 Fetch rides
-  const fetchEvents = async () => {
+  const fetchAllRides = async () => {
     setLoading(true);
     try {
-      const data = await getRides();
-      const formatted = (data || [])
-        .map(item => ({ ...item, date: new Date(item.date).toISOString(), isShared: !!item.shared }))
-        .sort((a, b) => new Date(a.date) - new Date(b.date));
-
-      setEvents(formatted);
-      updateMarkedDates(formatted);
+      const config = await getConfig();
+      const { data } = await axios.get(API_URL, config);
+      setRides(data || []);
+      updateMarkedDates(data || []);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', "Impossible de charger l'agenda");
@@ -74,15 +73,27 @@ const AgendaScreen = () => {
     }
   };
 
-  useEffect(() => {
-    fetchEvents();
-    fetchContacts();
-  }, []);
+  const shareRide = async (rideId, toUserId) => {
+    const config = await getConfig();
+    const response = await axios.post(`${API_URL}/shareRide`, { rideId, toUserId }, config);
+    return response.data;
+  };
 
-  // 🔹 Marquer les dates dans le calendrier
-  const updateMarkedDates = (rides) => {
+  const respondSharedRide = async (rideShareId, action) => {
+    const config = await getConfig();
+    try {
+      await axios.patch(`${API_URL}/respondSharedRide/${rideShareId}`, { action }, config);
+      fetchAllRides();
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', "Impossible de répondre à la course partagée");
+    }
+  };
+
+  // ------------------ Marquage calendrier ------------------
+  const updateMarkedDates = (ridesList) => {
     const marks = {};
-    rides.forEach(r => {
+    ridesList.forEach(r => {
       const day = moment(r.date).format('YYYY-MM-DD');
       if (!marks[day]) marks[day] = { dots: [] };
       const color = typeColors[r.type] || typeColors.autre;
@@ -93,17 +104,19 @@ const AgendaScreen = () => {
     setMarkedDates(marks);
   };
 
-  const groupedEvents = events.reduce((acc, ride) => {
+  const groupedRides = rides.reduce((acc, ride) => {
     const day = moment(ride.date).format('YYYY-MM-DD');
     acc[day] = acc[day] || [];
     acc[day].push(ride);
     return acc;
   }, {});
 
-  const formatTime = date => (date ? moment(date).format('HH:mm') : '');
-  const toggleCalendar = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut) && setShowCalendar(prev => !prev);
+  const toggleCalendar = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setShowCalendar(prev => !prev);
+  };
 
-  // 🔹 Modal ride
+  // ------------------ Ride Modal ------------------
   const openRideModal = ride => {
     setSelectedRide(ride);
     setFormData({
@@ -113,22 +126,23 @@ const AgendaScreen = () => {
       type: ride.type,
       date: ride.date,
     });
-    setModalVisible(true);
+    setRideModalVisible(true);
   };
 
-  const handleSave = async () => {
+  const handleSaveRide = async () => {
     try {
-      await updateRide(selectedRide._id, formData);
+      const config = await getConfig();
+      await axios.patch(`${API_URL}/${selectedRide._id}`, formData, config);
       Alert.alert('Succès', 'Course mise à jour');
-      setModalVisible(false);
-      fetchEvents();
+      setRideModalVisible(false);
+      fetchAllRides();
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', "Impossible de mettre à jour la course");
     }
   };
 
-  const handleDelete = async () => {
+  const handleDeleteRide = async () => {
     Alert.alert('Confirmer', 'Voulez-vous vraiment supprimer cette course ?', [
       { text: 'Annuler', style: 'cancel' },
       {
@@ -136,10 +150,11 @@ const AgendaScreen = () => {
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteRide(selectedRide._id);
+            const config = await getConfig();
+            await axios.delete(`${API_URL}/${selectedRide._id}`, config);
             Alert.alert('Supprimé', 'Course supprimée');
-            setModalVisible(false);
-            fetchEvents();
+            setRideModalVisible(false);
+            fetchAllRides();
           } catch (err) {
             console.error(err);
             Alert.alert('Erreur', 'Impossible de supprimer la course');
@@ -149,34 +164,133 @@ const AgendaScreen = () => {
     ]);
   };
 
-  // 🔹 Partage ride
+  // ------------------ Partage ------------------
   const shareRideWithContact = async (ride, contact) => {
     try {
       await shareRide(ride._id, contact.id);
-      // Supprimer localement la course partagée
-      setEvents(prev => prev.filter(e => e._id !== ride._id));
-
-      const message = `
-Course pour ${ride.patientName}
-Départ : ${ride.startLocation}
-Arrivée : ${ride.endLocation}
-Heure : ${moment(ride.date).format('YYYY-MM-DD HH:mm')}
-Type : ${ride.type}
-Pour : ${contact.full_name || contact.email}
-      `.trim();
-
-      const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
-      const supported = await Linking.canOpenURL(url);
-      if (!supported) Alert.alert('WhatsApp non installé');
-      else Linking.openURL(url);
-
       setShareModalVisible(false);
-      Alert.alert('Partagé', 'Course partagée avec ' + (contact.full_name || contact.email));
+      fetchAllRides();
+      Alert.alert('Partagé', `Course partagée avec ${contact.full_name || contact.email}`);
     } catch (err) {
       console.error('Erreur shareRide:', err);
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
+
+  useEffect(() => {
+    fetchAllRides();
+    fetchContacts();
+  }, []);
+
+  // ------------------ Composants RideCard ------------------
+  const RideCard = ({ ride }) => {
+    const isFinished = !!ride.endTime;
+    return (
+      <View style={{ marginBottom: 15 }}>
+        <TouchableOpacity onPress={() => !ride.isShared && openRideModal(ride)} disabled={isFinished || ride.isShared}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+            <View
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 6,
+                backgroundColor: typeColors[ride.type] || typeColors.autre,
+                marginTop: 8,
+                marginRight: 15,
+              }}
+            />
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: isFinished ? '#e0e0e0' : '#fff',
+                padding: 15,
+                borderRadius: 12,
+                shadowColor: '#000',
+                shadowOpacity: 0.1,
+                shadowOffset: { width: 0, height: 2 },
+                shadowRadius: 5,
+                elevation: 3,
+              }}
+            >
+              {isFinished && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: 10,
+                    right: 10,
+                    backgroundColor: '#4CAF50',
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    zIndex: 10,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Terminée</Text>
+                </View>
+              )}
+
+              <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 5, color: isFinished ? '#777' : '#000' }}>
+                {ride.patientName} {ride.isShared && <Text style={{ fontSize: 12, color: '#FF5722', fontWeight: 'bold' }}> (Partagée)</Text>}
+              </Text>
+              <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Départ : {ride.startLocation}</Text>
+              <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Arrivée : {ride.endLocation}</Text>
+              <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Heure : {ride.date ? moment(ride.date).format('HH:mm') : ''}</Text>
+              <Text style={{ color: isFinished ? '#777' : '#555', fontStyle: 'italic' }}>Type : {ride.type}</Text>
+
+              {ride.isShared && ride.statusPartage === 'pending' && (
+                <View style={{ flexDirection: 'row', marginTop: 10, justifyContent: 'space-between' }}>
+                  <TouchableOpacity
+                    onPress={() => respondSharedRide(ride._id, 'accepted')}
+                    style={{ flex: 1, backgroundColor: '#4CAF50', padding: 8, borderRadius: 6, marginRight: 5, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Accepter</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => respondSharedRide(ride._id, 'refused')}
+                    style={{ flex: 1, backgroundColor: 'red', padding: 8, borderRadius: 6, marginLeft: 5, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Refuser</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {!ride.isShared && (
+                <TouchableOpacity
+                  style={{ marginTop: 8, backgroundColor: '#25D366', padding: 8, borderRadius: 6, alignItems: 'center' }}
+                  onPress={() => { setSelectedShareRide(ride); setShareModalVisible(true); }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>Partager</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // ------------------ Modal partage ------------------
+  const ShareRideModal = ({ visible, contacts, onSelectContact, onClose }) => (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
+        <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20 }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>Partager la course</Text>
+          {contacts.map(contact => (
+            <TouchableOpacity
+              key={contact.id}
+              onPress={() => onSelectContact(contact)}
+              style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee' }}
+            >
+              <Text>{contact.full_name || contact.email}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity onPress={onClose} style={{ marginTop: 10 }}>
+            <Text style={{ textAlign: 'center', color: 'red', fontWeight: 'bold' }}>Fermer</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: '#f0f2f5' }}>
@@ -203,109 +317,76 @@ Pour : ${contact.full_name || contact.email}
             />
           )}
 
-          {(groupedEvents[selectedDate] || []).length === 0 ? (
-            <Text style={{ textAlign: 'center', marginTop: 20, fontSize: 16, color: '#777' }}>Aucune course ce jour</Text>
+          {(groupedRides[selectedDate] || []).length === 0 ? (
+            <Text style={{ textAlign: 'center', marginTop: 20, fontSize: 16, color: '#777' }}>
+              Aucune course ce jour
+            </Text>
           ) : (
             <ScrollView contentContainerStyle={{ padding: 20 }} ref={scrollRef}>
-              {groupedEvents[selectedDate].map((item, index) => {
-                const isFinished = !!item.endTime;
-                return (
-                  <TouchableOpacity
-                    key={`${item._id}-${item.isShared ? 'shared' : 'own'}-${index}`}
-                    onPress={() => openRideModal(item)}
-                    disabled={isFinished}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 15 }}>
-                      <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: typeColors[item.type] || typeColors.autre, marginTop: 8, marginRight: 15 }} />
-                      <View
-                        style={{
-                          flex: 1,
-                          backgroundColor: isFinished ? '#e0e0e0' : '#fff',
-                          padding: 15,
-                          borderRadius: 12,
-                          shadowColor: '#000',
-                          shadowOpacity: 0.1,
-                          shadowOffset: { width: 0, height: 2 },
-                          shadowRadius: 5,
-                          elevation: 3,
-                        }}
-                      >
-                        {isFinished && <View style={{ position: 'absolute', top: 10, right: 10, backgroundColor: '#4CAF50', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, zIndex: 10 }}>
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Terminée</Text>
-                        </View>}
-                        <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 5, color: isFinished ? '#777' : '#000' }}>
-                          {item.patientName} {item.isShared && <Text style={{ fontSize: 12, color: '#FF5722', fontWeight: 'bold' }}> (Partagée)</Text>}
-                        </Text>
-                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Départ : {item.startLocation}</Text>
-                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Arrivée : {item.endLocation}</Text>
-                        <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Heure : {formatTime(item.date)}</Text>
-                        <Text style={{ color: isFinished ? '#777' : '#555', fontStyle: 'italic' }}>Type : {item.type}</Text>
-
-                        {!item.isShared && (
-                          <TouchableOpacity
-                            style={{ marginTop: 8, backgroundColor: '#25D366', padding: 8, borderRadius: 6, alignItems: 'center' }}
-                            onPress={() => { setSelectedShareRide(item); setShareModalVisible(true); }}
-                          >
-                            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Partager</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+              {groupedRides[selectedDate].map(ride => (
+                <RideCard key={ride._id} ride={ride} />
+              ))}
             </ScrollView>
           )}
         </>
       )}
 
-      {/* Bouton Actualiser */}
+      {/* Actualiser */}
       <TouchableOpacity
-        onPress={fetchEvents}
+        onPress={fetchAllRides}
         style={{ position: 'absolute', bottom: 20, right: 20, backgroundColor: '#FF9800', padding: 12, borderRadius: 50, elevation: 5 }}
       >
         <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>Actualiser</Text>
       </TouchableOpacity>
 
       {/* Modals */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <ShareRideModal
+        visible={shareModalVisible}
+        contacts={contacts}
+        onSelectContact={contact => shareRideWithContact(selectedShareRide, contact)}
+        onClose={() => setShareModalVisible(false)}
+      />
+
+      {/* Ride Edit Modal */}
+      <Modal visible={rideModalVisible} animationType="slide" transparent>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20 }}>
-            <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Modifier la course</Text>
-            {['patientName', 'startLocation', 'endLocation', 'type', 'date'].map((field, i) => (
-              <TextInput
-                key={i}
-                placeholder={field === 'patientName' ? 'Nom du patient' : field === 'startLocation' ? 'Départ' : field === 'endLocation' ? 'Arrivée' : field === 'type' ? 'Type' : 'Date (YYYY-MM-DD HH:mm)'}
-                value={field === 'date' ? moment(formData.date).format('YYYY-MM-DD HH:mm') : formData[field]}
-                onChangeText={text => setFormData(prev => ({ ...prev, [field]: field === 'date' ? new Date(text).toISOString() : text }))}
-                style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
-              />
-            ))}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-              <TouchableOpacity onPress={handleSave} style={{ padding: 10, backgroundColor: '#2196F3', borderRadius: 8 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>Modifier la course</Text>
+            <TextInput
+              placeholder="Patient"
+              value={formData.patientName}
+              onChangeText={text => setFormData({ ...formData, patientName: text })}
+              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
+            />
+            <TextInput
+              placeholder="Départ"
+              value={formData.startLocation}
+              onChangeText={text => setFormData({ ...formData, startLocation: text })}
+              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
+            />
+            <TextInput
+              placeholder="Arrivée"
+              value={formData.endLocation}
+              onChangeText={text => setFormData({ ...formData, endLocation: text })}
+              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
+            />
+            <TextInput
+              placeholder="Type"
+              value={formData.type}
+              onChangeText={text => setFormData({ ...formData, type: text })}
+              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
+            />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 }}>
+              <TouchableOpacity onPress={handleSaveRide} style={{ flex: 1, backgroundColor: '#4CAF50', padding: 10, borderRadius: 6, marginRight: 5, alignItems: 'center' }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Enregistrer</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleDelete} style={{ padding: 10, backgroundColor: 'red', borderRadius: 8 }}>
+              <TouchableOpacity onPress={handleDeleteRide} style={{ flex: 1, backgroundColor: 'red', padding: 10, borderRadius: 6, marginLeft: 5, alignItems: 'center' }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Supprimer</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setModalVisible(false)} style={{ padding: 10, backgroundColor: '#555', borderRadius: 8 }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Fermer</Text>
-              </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
 
-      <Modal visible={shareModalVisible} animationType="slide" transparent>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
-          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20 }}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>Partager la course</Text>
-            {contacts.map(contact => (
-              <TouchableOpacity key={contact.id} onPress={() => shareRideWithContact(selectedShareRide, contact)} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
-                <Text>{contact.full_name || contact.email}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity onPress={() => setShareModalVisible(false)} style={{ marginTop: 10 }}>
+            <TouchableOpacity onPress={() => setRideModalVisible(false)} style={{ marginTop: 10 }}>
               <Text style={{ textAlign: 'center', color: 'red', fontWeight: 'bold' }}>Fermer</Text>
             </TouchableOpacity>
           </View>
