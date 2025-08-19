@@ -49,21 +49,26 @@ exports.getRides = async (req, res) => {
   }
 };
 
-// === Mettre à jour une course
+// === Mettre à jour une course (status ou autres champs) pour propriétaire OU partagé
 exports.updateRide = async (req, res) => {
   try {
-    const ride = await Ride.findOneAndUpdate(
-      { _id: req.params.id, chauffeurId: req.user.id },
-      req.body,
-      { new: true }
-    );
-    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+    const userId = req.user.id;
+    const ride = await findAuthorizedRide(req.params.id, userId);
+
+    if (!ride) {
+      return res.status(404).json({ message: "Course introuvable ou non autorisée" });
+    }
+
+    // Mettre à jour uniquement les champs envoyés
+    Object.assign(ride, req.body);
+    await ride.save();
+
     res.json(ride);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
-
 // === Supprimer une course
 exports.deleteRide = async (req, res) => {
   try {
