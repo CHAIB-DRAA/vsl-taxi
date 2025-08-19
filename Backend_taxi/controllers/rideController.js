@@ -111,26 +111,27 @@ exports.endRide = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-};
-
-exports.shareRide = async (req, res) => {
+};exports.shareRide = async (req, res) => {
   const { rideId, toUserId } = req.body;
 
   try {
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: 'Course introuvable' });
 
-    // Crée un document RideShare pour ce partage
+    // Crée le partage
     const rideShare = new RideShare({
       rideId,
       fromUserId: req.user.id,
       toUserId,
-      statusPartage: 'pending', // on met le partage en attente
+      statusPartage: 'pending',
     });
 
     await rideShare.save();
 
-    res.json({ message: 'Partage créé', rideShare });
+    // Supprime la course du chauffeur actuel
+    await Ride.findByIdAndDelete(rideId);
+
+    res.json({ message: 'Partage créé et course supprimée', rideShare });
   } catch (err) {
     console.error('Erreur shareRide:', err);
     res.status(500).json({ message: 'Erreur serveur' });
