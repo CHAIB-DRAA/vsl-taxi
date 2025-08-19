@@ -17,18 +17,12 @@ import { Calendar } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
 import { supabase } from '../lib/supabase';
-import {
-  getRides,
-  updateRide,
-  deleteRide,
-  shareRide,
-} from '../services/api';
+import { getRides, updateRide, deleteRide, shareRide } from '../services/api';
 
 moment.locale('fr');
 
 if (Platform.OS === 'android') {
-  UIManager.setLayoutAnimationEnabledExperimental &&
-    UIManager.setLayoutAnimationEnabledExperimental(true);
+  UIManager.setLayoutAnimationEnabledExperimental?.(true);
 }
 
 const typeColors = {
@@ -46,13 +40,7 @@ const AgendaScreen = () => {
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
-  const [formData, setFormData] = useState({
-    patientName: '',
-    startLocation: '',
-    endLocation: '',
-    type: '',
-    date: '',
-  });
+  const [formData, setFormData] = useState({ patientName: '', startLocation: '', endLocation: '', type: '', date: '' });
 
   const [contacts, setContacts] = useState([]);
   const [shareModalVisible, setShareModalVisible] = useState(false);
@@ -64,7 +52,7 @@ const AgendaScreen = () => {
   const fetchContacts = async () => {
     const { data, error } = await supabase.from('profiles').select('id, full_name, email');
     if (error) console.error('Erreur fetch contacts:', error);
-    else setContacts(data);
+    else setContacts(data || []);
   };
 
   // 🔹 Fetch rides
@@ -72,19 +60,14 @@ const AgendaScreen = () => {
     setLoading(true);
     try {
       const data = await getRides();
-
-      const formattedEvents = data
-        .map(item => ({
-          ...item,
-          date: new Date(item.date).toISOString(),
-          isShared: !!item.shared,
-        }))
+      const formatted = (data || [])
+        .map(item => ({ ...item, date: new Date(item.date).toISOString(), isShared: !!item.shared }))
         .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-      setEvents(formattedEvents);
-      updateMarkedDates(formattedEvents);
-    } catch (error) {
-      console.error(error);
+      setEvents(formatted);
+      updateMarkedDates(formatted);
+    } catch (err) {
+      console.error(err);
       Alert.alert('Erreur', "Impossible de charger l'agenda");
     } finally {
       setLoading(false);
@@ -96,37 +79,31 @@ const AgendaScreen = () => {
     fetchContacts();
   }, []);
 
-  // 🔹 Marquer les dates pour le calendrier
-  const updateMarkedDates = data => {
+  // 🔹 Marquer les dates dans le calendrier
+  const updateMarkedDates = (rides) => {
     const marks = {};
-    data.forEach(ride => {
-      const dateKey = moment(ride.date).format('YYYY-MM-DD');
-      if (!marks[dateKey]) marks[dateKey] = { dots: [] };
-      const color = typeColors[ride.type] || typeColors.autre;
-      if (!marks[dateKey].dots.find(d => d.color === color)) marks[dateKey].dots.push({ color });
+    rides.forEach(r => {
+      const day = moment(r.date).format('YYYY-MM-DD');
+      if (!marks[day]) marks[day] = { dots: [] };
+      const color = typeColors[r.type] || typeColors.autre;
+      if (!marks[day].dots.find(d => d.color === color)) marks[day].dots.push({ color });
     });
-    if (!marks[selectedDate]) marks[selectedDate] = { selected: true };
-    else marks[selectedDate].selected = true;
+    marks[selectedDate] = marks[selectedDate] || {};
+    marks[selectedDate].selected = true;
     setMarkedDates(marks);
   };
 
-  const groupByDate = data => {
-    const grouped = {};
-    data.forEach(item => {
-      const dateKey = moment(item.date).format('YYYY-MM-DD');
-      if (!grouped[dateKey]) grouped[dateKey] = [];
-      grouped[dateKey].push(item);
-    });
-    return grouped;
-  };
+  const groupedEvents = events.reduce((acc, ride) => {
+    const day = moment(ride.date).format('YYYY-MM-DD');
+    acc[day] = acc[day] || [];
+    acc[day].push(ride);
+    return acc;
+  }, {});
 
-  const groupedEvents = groupByDate(events);
   const formatTime = date => (date ? moment(date).format('HH:mm') : '');
-  const toggleCalendar = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setShowCalendar(!showCalendar);
-  };
+  const toggleCalendar = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut) && setShowCalendar(prev => !prev);
 
+  // 🔹 Modal ride
   const openRideModal = ride => {
     setSelectedRide(ride);
     setFormData({
@@ -145,40 +122,39 @@ const AgendaScreen = () => {
       Alert.alert('Succès', 'Course mise à jour');
       setModalVisible(false);
       fetchEvents();
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
       Alert.alert('Erreur', "Impossible de mettre à jour la course");
     }
   };
 
   const handleDelete = async () => {
-    Alert.alert(
-      'Confirmer la suppression',
-      'Voulez-vous vraiment supprimer cette course ?',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Supprimer',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteRide(selectedRide._id);
-              Alert.alert('Supprimé', 'Course supprimée');
-              setModalVisible(false);
-              fetchEvents();
-            } catch (err) {
-              console.error(err);
-              Alert.alert('Erreur', err.response?.data?.message || 'Impossible de supprimer la course');
-            }
-          },
+    Alert.alert('Confirmer', 'Voulez-vous vraiment supprimer cette course ?', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteRide(selectedRide._id);
+            Alert.alert('Supprimé', 'Course supprimée');
+            setModalVisible(false);
+            fetchEvents();
+          } catch (err) {
+            console.error(err);
+            Alert.alert('Erreur', 'Impossible de supprimer la course');
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
+  // 🔹 Partage ride
   const shareRideWithContact = async (ride, contact) => {
     try {
       await shareRide(ride._id, contact.id);
+      // Supprimer localement la course partagée
+      setEvents(prev => prev.filter(e => e._id !== ride._id));
 
       const message = `
 Course pour ${ride.patientName}
@@ -192,14 +168,13 @@ Pour : ${contact.full_name || contact.email}
       const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
       const supported = await Linking.canOpenURL(url);
       if (!supported) Alert.alert('WhatsApp non installé');
-      else {
-        Linking.openURL(url);
-        setShareModalVisible(false);
-        Alert.alert('Partagé', 'Course partagée avec ' + (contact.full_name || contact.email));
-      }
+      else Linking.openURL(url);
+
+      setShareModalVisible(false);
+      Alert.alert('Partagé', 'Course partagée avec ' + (contact.full_name || contact.email));
     } catch (err) {
-      console.error(err);
-      Alert.alert('Erreur', err.message || 'Impossible de partager la course.');
+      console.error('Erreur shareRide:', err);
+      Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
 
@@ -229,30 +204,19 @@ Pour : ${contact.full_name || contact.email}
           )}
 
           {(groupedEvents[selectedDate] || []).length === 0 ? (
-            <Text style={{ textAlign: 'center', marginTop: 20, fontSize: 16, color: '#777' }}>
-              Aucune course ce jour
-            </Text>
+            <Text style={{ textAlign: 'center', marginTop: 20, fontSize: 16, color: '#777' }}>Aucune course ce jour</Text>
           ) : (
             <ScrollView contentContainerStyle={{ padding: 20 }} ref={scrollRef}>
-              {groupedEvents[selectedDate].map(item => {
+              {groupedEvents[selectedDate].map((item, index) => {
                 const isFinished = !!item.endTime;
                 return (
                   <TouchableOpacity
-                    key={`${item._id}-${item.isShared ? 'shared' : 'own'}-${item.date}`}
+                    key={`${item._id}-${item.isShared ? 'shared' : 'own'}-${index}`}
                     onPress={() => openRideModal(item)}
                     disabled={isFinished}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 15 }}>
-                      <View
-                        style={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: 6,
-                          backgroundColor: typeColors[item.type] || typeColors.autre,
-                          marginTop: 8,
-                          marginRight: 15,
-                        }}
-                      />
+                      <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: typeColors[item.type] || typeColors.autre, marginTop: 8, marginRight: 15 }} />
                       <View
                         style={{
                           flex: 1,
@@ -266,27 +230,11 @@ Pour : ${contact.full_name || contact.email}
                           elevation: 3,
                         }}
                       >
-                        {isFinished && (
-                          <View
-                            style={{
-                              position: 'absolute',
-                              top: 10,
-                              right: 10,
-                              backgroundColor: '#4CAF50',
-                              paddingHorizontal: 8,
-                              paddingVertical: 2,
-                              borderRadius: 4,
-                              zIndex: 10,
-                            }}
-                          >
-                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Terminée</Text>
-                          </View>
-                        )}
+                        {isFinished && <View style={{ position: 'absolute', top: 10, right: 10, backgroundColor: '#4CAF50', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, zIndex: 10 }}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Terminée</Text>
+                        </View>}
                         <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 5, color: isFinished ? '#777' : '#000' }}>
-                          {item.patientName}{' '}
-                          {item.isShared && (
-                            <Text style={{ fontSize: 12, color: '#FF5722', fontWeight: 'bold' }}> (Partagée)</Text>
-                          )}
+                          {item.patientName} {item.isShared && <Text style={{ fontSize: 12, color: '#FF5722', fontWeight: 'bold' }}> (Partagée)</Text>}
                         </Text>
                         <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Départ : {item.startLocation}</Text>
                         <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Arrivée : {item.endLocation}</Text>
@@ -314,64 +262,32 @@ Pour : ${contact.full_name || contact.email}
       {/* Bouton Actualiser */}
       <TouchableOpacity
         onPress={fetchEvents}
-        style={{
-          position: 'absolute',
-          bottom: 20,
-          right: 20,
-          backgroundColor: '#FF9800',
-          padding: 12,
-          borderRadius: 50,
-          elevation: 5,
-        }}
+        style={{ position: 'absolute', bottom: 20, right: 20, backgroundColor: '#FF9800', padding: 12, borderRadius: 50, elevation: 5 }}
       >
         <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>Actualiser</Text>
       </TouchableOpacity>
 
-      {/* Modal modification */}
+      {/* Modals */}
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20 }}>
             <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 10 }}>Modifier la course</Text>
-            <TextInput
-              placeholder="Nom du patient"
-              value={formData.patientName}
-              onChangeText={text => setFormData({ ...formData, patientName: text })}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
-            />
-            <TextInput
-              placeholder="Départ"
-              value={formData.startLocation}
-              onChangeText={text => setFormData({ ...formData, startLocation: text })}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
-            />
-            <TextInput
-              placeholder="Arrivée"
-              value={formData.endLocation}
-              onChangeText={text => setFormData({ ...formData, endLocation: text })}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
-            />
-            <TextInput
-              placeholder="Type"
-              value={formData.type}
-              onChangeText={text => setFormData({ ...formData, type: text })}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
-            />
-            <TextInput
-              placeholder="Date (YYYY-MM-DD HH:mm)"
-              value={moment(formData.date).format('YYYY-MM-DD HH:mm')}
-              onChangeText={text => setFormData({ ...formData, date: new Date(text).toISOString() })}
-              style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
-            />
-
+            {['patientName', 'startLocation', 'endLocation', 'type', 'date'].map((field, i) => (
+              <TextInput
+                key={i}
+                placeholder={field === 'patientName' ? 'Nom du patient' : field === 'startLocation' ? 'Départ' : field === 'endLocation' ? 'Arrivée' : field === 'type' ? 'Type' : 'Date (YYYY-MM-DD HH:mm)'}
+                value={field === 'date' ? moment(formData.date).format('YYYY-MM-DD HH:mm') : formData[field]}
+                onChangeText={text => setFormData(prev => ({ ...prev, [field]: field === 'date' ? new Date(text).toISOString() : text }))}
+                style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 10 }}
+              />
+            ))}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
               <TouchableOpacity onPress={handleSave} style={{ padding: 10, backgroundColor: '#2196F3', borderRadius: 8 }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Enregistrer</Text>
               </TouchableOpacity>
-
               <TouchableOpacity onPress={handleDelete} style={{ padding: 10, backgroundColor: 'red', borderRadius: 8 }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Supprimer</Text>
               </TouchableOpacity>
-
               <TouchableOpacity onPress={() => setModalVisible(false)} style={{ padding: 10, backgroundColor: '#555', borderRadius: 8 }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Fermer</Text>
               </TouchableOpacity>
@@ -380,17 +296,12 @@ Pour : ${contact.full_name || contact.email}
         </View>
       </Modal>
 
-      {/* Modal partage */}
       <Modal visible={shareModalVisible} animationType="slide" transparent>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20 }}>
             <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>Partager la course</Text>
             {contacts.map(contact => (
-              <TouchableOpacity
-                key={contact.id}
-                onPress={() => shareRideWithContact(selectedShareRide, contact)}
-                style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee' }}
-              >
+              <TouchableOpacity key={contact.id} onPress={() => shareRideWithContact(selectedShareRide, contact)} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee' }}>
                 <Text>{contact.full_name || contact.email}</Text>
               </TouchableOpacity>
             ))}
