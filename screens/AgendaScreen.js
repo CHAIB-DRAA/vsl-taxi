@@ -178,17 +178,20 @@ const AgendaScreen = () => {
 
   const shareRideWithContact = async (ride, contact) => {
     try {
-      await shareRide(ride._id, contact.id);
-
+      const updatedRide = await shareRide(ride._id, contact.id); // API qui renvoie la course mise à jour
+  
+      // Supprimer la course de mes courses locales
+      setEvents(prev => prev.filter(e => e._id !== ride._id));
+  
       const message = `
-Course pour ${ride.patientName}
-Départ : ${ride.startLocation}
-Arrivée : ${ride.endLocation}
-Heure : ${moment(ride.date).format('YYYY-MM-DD HH:mm')}
-Type : ${ride.type}
-Pour : ${contact.full_name || contact.email}
+  Course pour ${ride.patientName}
+  Départ : ${ride.startLocation}
+  Arrivée : ${ride.endLocation}
+  Heure : ${moment(ride.date).format('YYYY-MM-DD HH:mm')}
+  Type : ${ride.type}
+  Pour : ${contact.full_name || contact.email}
       `.trim();
-
+  
       const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
       const supported = await Linking.canOpenURL(url);
       if (!supported) Alert.alert('WhatsApp non installé');
@@ -202,7 +205,7 @@ Pour : ${contact.full_name || contact.email}
       Alert.alert('Erreur', err.message || 'Impossible de partager la course.');
     }
   };
-
+  
   return (
     <View style={{ flex: 1, backgroundColor: '#f0f2f5' }}>
       {loading ? (

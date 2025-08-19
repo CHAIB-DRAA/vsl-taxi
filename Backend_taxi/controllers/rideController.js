@@ -117,18 +117,20 @@ exports.endRide = async (req, res) => {
 
 
 exports.shareRide = async (req, res) => {
-  const { rideId, fromUserId, toUserId, newChauffeurId } = req.body;
+  const { rideId, toUserId } = req.body;
 
   try {
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: 'Course introuvable' });
 
-    if (ride.chauffeurId.toString() !== fromUserId && req.user.role !== 'admin') {
+    // Vérifier que l'utilisateur actuel est le chauffeur
+    if (ride.chauffeurId.toString() !== req.user.id ) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
-    ride.chauffeurId = newChauffeurId;
-    ride.shared = true;
+    // Partager la course → remplacer chauffeurId par celui du contact
+    ride.chauffeurId = toUserId;
+    ride.shared = true; // marque comme partagée
 
     await ride.save();
     res.json(ride);
@@ -137,4 +139,3 @@ exports.shareRide = async (req, res) => {
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };
-
