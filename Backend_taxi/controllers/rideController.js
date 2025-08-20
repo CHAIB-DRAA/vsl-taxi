@@ -8,7 +8,7 @@ const findAuthorizedRide = async (rideId, userId) => {
 
   // Sinon vérifier si elle est partagée
   if (!ride) {
-    const shared = await RideShare.findOne({ rideId, toUserId: userId });
+    const shared = await RideShare.findOne({ rideId, toUserId: userId, statusPartage: 'accepted' });
     if (!shared) return null;
     ride = await Ride.findById(rideId);
   }
@@ -27,45 +27,37 @@ exports.createRide = async (req, res) => {
   }
 };
 
-// === Récupérer toutes les courses du chauffeur + courses partagées
+// === Récupérer toutes les courses (propres + partagées acceptées)
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 1️⃣ Courses créées par le chauffeur et non partagées
-    const ownRides = await Ride.find({ 
-      chauffeurId: userId,
-      isShared: { $ne: true } // ignore les rides déjà partagées
-    });
+    // Courses créées par le chauffeur
+    const ownRides = await Ride.find({ chauffeurId: userId });
 
-    // 2️⃣ Courses partagées avec lui
-    const sharedLinks = await RideShare.find({ toUserId: userId });
+    // Courses partagées avec lui et acceptées
+    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
     const sharedRideIds = sharedLinks.map(link => link.rideId);
     const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
 
-    // 3️⃣ Ajouter les flags pour les courses partagées
     const sharedRides = sharedRidesRaw.map(ride => {
       const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
       return { 
-        ...ride.toObject(), 
-        isShared: true, 
-        statusPartage: link?.statusPartage || 'pending' 
+        ...ride.toObject(),
+        isShared: true,
+        statusPartage: link?.statusPartage || 'pending'
       };
     });
 
-    // 4️⃣ Fusionner les courses propres et partagées
     const allRides = [...ownRides, ...sharedRides];
-
-    // 5️⃣ Trier par date (ancienne → récente)
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
   } catch (err) {
     console.error('Erreur getRides:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
   }
 };
-
 
 // === Mettre à jour une course
 exports.updateRide = async (req, res) => {
@@ -93,15 +85,14 @@ exports.deleteRide = async (req, res) => {
   }
 };
 
-// === Démarrer une course (propriétaire ou partagé)
+// === Démarrer une course (propriétaire ou partagé accepté)
 exports.startRide = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const ride = await findAuthorizedRide(req.params.id, userId);
-
+    const ride = await findAuthorizedRide(req.params.id, req.user.id);
     if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
 
     ride.startTime = new Date();
+    ride.status = 'En cours';
     await ride.save();
 
     res.json(ride);
@@ -110,19 +101,18 @@ exports.startRide = async (req, res) => {
   }
 };
 
-// === Terminer une course avec distance (propriétaire ou partagé)
+// === Terminer une course avec distance
 exports.endRide = async (req, res) => {
   try {
     const { distance } = req.body;
     if (!distance) return res.status(400).json({ message: "Distance non renseignée" });
 
-    const userId = req.user.id;
-    const ride = await findAuthorizedRide(req.params.id, userId);
-
+    const ride = await findAuthorizedRide(req.params.id, req.user.id);
     if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
 
     ride.endTime = new Date();
     ride.distance = parseFloat(distance);
+    ride.status = 'Terminée';
     await ride.save();
 
     res.json(ride);
@@ -131,6 +121,7 @@ exports.endRide = async (req, res) => {
   }
 };
 
+// === Partager une course
 exports.shareRide = async (req, res) => {
   const { rideId, toUserId } = req.body;
 
@@ -138,22 +129,54 @@ exports.shareRide = async (req, res) => {
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: 'Course introuvable' });
 
-    // Vérifie que l'utilisateur est bien le propriétaire
-    if (ride.chauffeurId.toString() !== req.user.id) {
+    if (ride.chauffeurId !== req.user.id) {
       return res.status(403).json({ message: 'Non autorisé à partager cette course' });
     }
 
-    // Met à jour le chauffeur de la course pour le destinataire
-    ride.chauffeurId = toUserId;
+    const existing = await RideShare.findOne({ rideId, toUserId });
+    if (existing) return res.json({ message: 'Course déjà partagée avec cet utilisateur' });
 
-    // Optionnel : tu peux garder un champ "sharedBy" pour savoir qui a partagé la course
+    const share = new RideShare({
+      rideId,
+      fromUserId: req.user.id,
+      toUserId,
+      statusPartage: 'pending'
+    });
+    await share.save();
+
+    ride.isShared = true;
     ride.sharedBy = req.user.id;
-
     await ride.save();
 
-    res.json({ message: 'Course partagée et transférée au destinataire', ride });
+    res.json({ message: 'Course partagée avec succès', share });
   } catch (err) {
     console.error('Erreur shareRide:', err);
+    res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+// === Accepter ou refuser une course partagée
+exports.respondToShare = async (req, res) => {
+  const { shareId, action } = req.body; // action = 'accepted' | 'declined'
+
+  if (!['accepted', 'declined'].includes(action)) {
+    return res.status(400).json({ message: 'Action invalide' });
+  }
+
+  try {
+    const share = await RideShare.findById(shareId);
+    if (!share) return res.status(404).json({ message: 'Partage introuvable' });
+
+    if (share.toUserId !== req.user.id) {
+      return res.status(403).json({ message: 'Non autorisé à répondre à ce partage' });
+    }
+
+    share.statusPartage = action;
+    await share.save();
+
+    res.json({ message: `Course ${action}`, share });
+  } catch (err) {
+    console.error('Erreur respondToShare:', err);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };

@@ -4,6 +4,7 @@ import RideForm from '../components/RideForm';
 import { createRide } from '../services/api';
 import { supabase } from '../lib/supabase';
 
+// Nettoyage des chaînes pour éviter injection ou caractères indésirables
 const sanitizeString = (str) => str ? str.replace(/["']/g, '').trim() : '';
 
 const CreateRideScreen = () => {
@@ -11,56 +12,59 @@ const CreateRideScreen = () => {
 
   useEffect(() => {
     const fetchSession = async () => {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error) {
-        console.error(error);
-        return;
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (session?.user?.id) setChauffeurId(session.user.id);
+      } catch (err) {
+        console.error('Erreur session Supabase:', err);
+        Alert.alert('Erreur', 'Impossible de récupérer l’utilisateur connecté.');
       }
-      if (session?.user?.id) setChauffeurId(session.user.id);
     };
     fetchSession();
   }, []);
 
   const handleCreate = async (ride) => {
     if (!chauffeurId) {
-      Alert.alert('Erreur', 'Impossible de récupérer l’utilisateur connecté.');
+      Alert.alert('Erreur', 'Utilisateur non connecté.');
       return;
     }
 
     try {
-      // Préparer la course Aller
-      const allerRide = {
-        patientName: sanitizeString(ride.patientName),
-        startLocation: sanitizeString(ride.startLocation),
-        endLocation: sanitizeString(ride.endLocation),
-        date: ride.date,
-        type: 'Aller',
-        chauffeurId,
-        isRoundTrip: ride.isRoundTrip || false,
+      // Fonction pour préparer et envoyer la course
+      const sendRide = async ({ patientName, startLocation, endLocation, date, type }) => {
+        const payload = {
+          patientName: sanitizeString(patientName),
+          startLocation: sanitizeString(startLocation),
+          endLocation: sanitizeString(endLocation),
+          date,
+          type,
+          chauffeurId,
+          isRoundTrip: !!ride.isRoundTrip,
+        };
+        console.log(`Envoi ${type} → MongoDB :`, payload);
+        const response = await createRide(payload);
+        console.log(`Réponse MongoDB ${type} :`, response);
       };
 
-      console.log('Envoi Aller → MongoDB :', allerRide);
-      const responseAller = await createRide(allerRide);
-      console.log('Réponse MongoDB Aller :', responseAller);
+      // Créer course Aller
+      await sendRide({
+        patientName: ride.patientName,
+        startLocation: ride.startLocation,
+        endLocation: ride.endLocation,
+        date: ride.date,
+        type: 'Aller',
+      });
 
-      // Si Aller-Retour, préparer la course Retour
+      // Si Aller-Retour, créer course Retour
       if (ride.isRoundTrip && ride.returnDate) {
-        const retourRide = {
-          ...ride,
+        await sendRide({
+          patientName: ride.patientName,
           startLocation: ride.endLocation,
           endLocation: ride.startLocation,
-          type: 'Retour',
           date: ride.returnDate,
-          patientName: ride.patientName,
-          chauffeurId,
-        };
-        console.log('Course retour envoyée:', retourRide);
-        
-
-        console.log('Envoi Retour → MongoDB :', retourRide);
-        const responseRetour = await createRide(retourRide);
-        console.log('Réponse MongoDB Retour :', responseRetour);
-
+          type: 'Retour',
+        });
         Alert.alert('Succès', 'Courses Aller et Retour créées !');
       } else {
         Alert.alert('Succès', 'Course créée !');

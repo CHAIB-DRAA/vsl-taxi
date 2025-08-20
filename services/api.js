@@ -1,18 +1,13 @@
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 
-let token = null; // Token manuel optionnel, peut être mis à jour via setToken
+let token = null;
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 
-// -----------------------------
-// Gestion du token
-// -----------------------------
-export const setToken = (t) => {
-  token = t;
-};
+export const setToken = (t) => { token = t; };
 
 const getToken = async () => {
-  if (token) return token; // si token manuel défini, on l’utilise
+  if (token) return token;
   const { data: sessionData } = await supabase.auth.getSession();
   return sessionData?.session?.access_token || null;
 };
@@ -23,87 +18,56 @@ const getConfig = async () => {
   return { headers: { Authorization: `Bearer ${t}` } };
 };
 
-// -----------------------------
-// Récupérer toutes les courses
-// -----------------------------
+// === Courses
 export const getRides = async () => {
   const config = await getConfig();
   const response = await axios.get(API_URL, config);
   return response.data;
 };
 
-// -----------------------------
-// Créer une course
-// -----------------------------
 export const createRide = async (ride) => {
   const config = await getConfig();
   const response = await axios.post(API_URL, ride, config);
   return response.data;
 };
 
-// -----------------------------
-// Démarrer une course
-// -----------------------------
-export const startRideById = async (id) => {
-  if (!id) throw new Error('ID de course manquant');
-  const config = await getConfig();
-  const response = await axios.patch(`${API_URL}/${id}/start`, {}, config);
-  return response.data;
-};
-
-// -----------------------------
-// Terminer une course avec distance
-// -----------------------------
-export const finishRideById = async (id, distance) => {
-  if (!distance || isNaN(distance)) throw new Error('Distance invalide');
-  const config = await getConfig();
-  const response = await axios.patch(`${API_URL}/${id}/end`, { distance: parseFloat(distance) }, config);
-  return response.data;
-};
-
-// -----------------------------
-// Mettre à jour une course (status, etc.)
-// -----------------------------
 export const updateRide = async (id, data) => {
   const config = await getConfig();
   const response = await axios.patch(`${API_URL}/${id}`, data, config);
   return response.data;
 };
 
-// -----------------------------
-// Partager une course avec un autre utilisateur
-// -----------------------------
-export const shareRide = async (rideId, toUserId) => {
+export const deleteRide = async (id) => {
   const config = await getConfig();
-  const { data: { user } } = await supabase.auth.getUser();
-  const fromUserId = user.id;
-
-  const response = await axios.post(
-    `${API_URL}/shareRide`,
-    { rideId, fromUserId, toUserId, newChauffeurId: toUserId }, // ajouter newChauffeurId
-    config
-  );
-
+  const response = await axios.delete(`${API_URL}/${id}`, config);
   return response.data;
 };
 
-
-export const updateRideStatus = async (id, status) => {
+// === Statut
+export const startRideById = async (id) => {
   if (!id) throw new Error('ID de course manquant');
-  if (!status) throw new Error('Status manquant');
-
   const config = await getConfig();
+  const response = await axios.post(`${API_URL}/${id}/start`, {}, config);
+  return response.data;
+};
 
-  try {
-    const response = await axios.patch(`${API_URL}/${id}`, { status }, config);
-    return response.data; // retourne la course mise à jour
-  } catch (err) {
-    if (axios.isAxiosError(err)) {
-      const code = err.response?.status;
-      if (code === 403) throw new Error('Non autorisé : vous ne pouvez pas modifier cette course');
-      if (code === 404) throw new Error('Course introuvable');
-      if (code === 500) throw new Error('Erreur serveur');
-    }
-    throw err; // autre erreur
-  }
+export const finishRideById = async (id, distance) => {
+  if (!distance || isNaN(distance)) throw new Error('Distance invalide');
+  const config = await getConfig();
+  const response = await axios.post(`${API_URL}/${id}/end`, { distance: parseFloat(distance) }, config);
+  return response.data;
+};
+
+// === Partage
+export const shareRide = async (rideId, toUserId) => {
+  const config = await getConfig();
+  const response = await axios.post(`${API_URL}/share`, { rideId, toUserId }, config);
+  return response.data;
+};
+
+export const respondToShare = async (shareId, action) => {
+  if (!['accepted', 'declined'].includes(action)) throw new Error('Action invalide');
+  const config = await getConfig();
+  const response = await axios.post(`${API_URL}/share/respond`, { shareId, action }, config);
+  return response.data;
 };

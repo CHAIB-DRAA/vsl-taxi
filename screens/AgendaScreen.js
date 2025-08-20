@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,7 @@ import { supabase } from '../lib/supabase';
 moment.locale('fr');
 if (Platform.OS === 'android') UIManager.setLayoutAnimationEnabledExperimental?.(true);
 
-const API_URL = 'https://vsl-taxi.onrender.com/api/rides'; // ton API
+const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 
 const typeColors = {
   Aller: '#FF5722',
@@ -29,7 +29,7 @@ const typeColors = {
   autre: '#2196F3',
 };
 
-const AgendaScreen = ({ userId }) => {
+const AgendaScreen = () => {
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
@@ -46,52 +46,38 @@ const AgendaScreen = ({ userId }) => {
 
   const scrollRef = useRef();
 
-  // ------------------ Fonctions API ------------------
-  const getConfig = async () => {
+  // ---------------- Config Axios avec token Supabase ----------------
+  const getConfig = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    return { headers: { Authorization: `Bearer ${session?.access_token}` } };
-  };
+    if (!session?.access_token) throw new Error('Token manquant');
+    return { headers: { Authorization: `Bearer ${session.access_token}` } };
+  }, []);
 
-  const fetchContacts = async () => {
+  // ---------------- Fetch contacts ----------------
+  const fetchContacts = useCallback(async () => {
     const { data, error } = await supabase.from('profiles').select('id, full_name, email');
-    if (error) console.error(error);
+    if (error) console.error('Erreur fetch contacts:', error);
     else setContacts(data || []);
-  };
+  }, []);
 
-  const fetchAllRides = async () => {
+  // ---------------- Fetch rides ----------------
+  const fetchAllRides = useCallback(async () => {
     setLoading(true);
     try {
-      const config = await getConfig(); // ajoute le token
-      const { data } = await axios.get(API_URL, config); // juste /api/rides
+      const config = await getConfig();
+      const { data } = await axios.get(API_URL, config);
       setRides(data || []);
       updateMarkedDates(data || []);
     } catch (err) {
-      console.error(err); // ici tu pourras voir si c’est 404 ou autre
+      console.error('Erreur fetch rides:', err.response?.data || err.message);
       Alert.alert('Erreur', "Impossible de charger l'agenda");
     } finally {
       setLoading(false);
     }
-  };
+  }, [getConfig]);
 
-  const shareRide = async (rideId, toUserId) => {
-    const config = await getConfig();
-    const response = await axios.post(`${API_URL}/shareRide`, { rideId, toUserId }, config);
-    return response.data;
-  };
-
-  const respondSharedRide = async (rideShareId, action) => {
-    const config = await getConfig();
-    try {
-      await axios.patch(`${API_URL}/respondSharedRide/${rideShareId}`, { action }, config);
-      fetchAllRides();
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Erreur', "Impossible de répondre à la course partagée");
-    }
-  };
-
-  // ------------------ Marquage calendrier ------------------
-  const updateMarkedDates = (ridesList) => {
+  // ---------------- Marked dates ----------------
+  const updateMarkedDates = useCallback((ridesList) => {
     const marks = {};
     ridesList.forEach(r => {
       const day = moment(r.date).format('YYYY-MM-DD');
@@ -102,7 +88,7 @@ const AgendaScreen = ({ userId }) => {
     marks[selectedDate] = marks[selectedDate] || {};
     marks[selectedDate].selected = true;
     setMarkedDates(marks);
-  };
+  }, [selectedDate]);
 
   const groupedRides = rides.reduce((acc, ride) => {
     const day = moment(ride.date).format('YYYY-MM-DD');
@@ -111,12 +97,13 @@ const AgendaScreen = ({ userId }) => {
     return acc;
   }, {});
 
+  // ---------------- Toggle calendar ----------------
   const toggleCalendar = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setShowCalendar(prev => !prev);
   };
 
-  // ------------------ Ride Modal ------------------
+  // ---------------- Ride Modal ----------------
   const openRideModal = ride => {
     setSelectedRide(ride);
     setFormData({
@@ -164,16 +151,29 @@ const AgendaScreen = ({ userId }) => {
     ]);
   };
 
-  // ------------------ Partage ------------------
+  // ---------------- Share Ride ----------------
   const shareRideWithContact = async (ride, contact) => {
     try {
-      await shareRide(ride._id, contact.id);
+      const config = await getConfig();
+      await axios.post(`${API_URL}/shareRide`, { rideId: ride._id, toUserId: contact.id }, config);
       setShareModalVisible(false);
+      setSelectedShareRide(null);
       fetchAllRides();
       Alert.alert('Partagé', `Course partagée avec ${contact.full_name || contact.email}`);
     } catch (err) {
-      console.error('Erreur shareRide:', err);
+      console.error('Erreur shareRide:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de partager la course.');
+    }
+  };
+
+  const respondSharedRide = async (rideShareId, action) => {
+    try {
+      const config = await getConfig();
+      await axios.patch(`${API_URL}/respondSharedRide/${rideShareId}`, { action }, config);
+      fetchAllRides();
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', "Impossible de répondre à la course partagée");
     }
   };
 
@@ -182,12 +182,64 @@ const AgendaScreen = ({ userId }) => {
     fetchContacts();
   }, []);
 
-  // ------------------ Composants RideCard ------------------
+  // ---------------- RideCard ----------------
   const RideCard = ({ ride }) => {
+    const [loadingAction, setLoadingAction] = useState(false);
     const isFinished = !!ride.endTime;
+    const isStarted = !!ride.startTime;
+
+    const handleStartRide = async () => {
+      setLoadingAction(true);
+      try {
+        const config = await getConfig();
+        await axios.patch(`${API_URL}/${ride._id}/start`, {}, config);
+        Alert.alert('Succès', 'Course démarrée');
+        fetchAllRides();
+      } catch (err) {
+        console.error(err);
+        Alert.alert('Erreur', "Impossible de démarrer la course");
+      } finally {
+        setLoadingAction(false);
+      }
+    };
+
+    const handleFinishRide = async () => {
+      Alert.prompt(
+        'Terminer la course',
+        'Entrez la distance parcourue (km)',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Terminer',
+            onPress: async (distance) => {
+              if (!distance || isNaN(distance)) {
+                Alert.alert('Erreur', 'Distance invalide');
+                return;
+              }
+              setLoadingAction(true);
+              try {
+                const config = await getConfig();
+                await axios.patch(`${API_URL}/${ride._id}/end`, { distance: parseFloat(distance) }, config);
+                Alert.alert('Succès', 'Course terminée');
+                fetchAllRides();
+              } catch (err) {
+                console.error(err);
+                Alert.alert('Erreur', "Impossible de terminer la course");
+              } finally {
+                setLoadingAction(false);
+              }
+            },
+          },
+        ],
+        'plain-text',
+        '',
+        'numeric'
+      );
+    };
+
     return (
       <View style={{ marginBottom: 15 }}>
-        <TouchableOpacity onPress={() => !ride.isShared && openRideModal(ride)} disabled={isFinished || ride.isShared}>
+        <TouchableOpacity onPress={() => !ride.isShared && openRideModal(ride)} disabled={loadingAction || ride.isShared}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
             <View
               style={{
@@ -230,12 +282,52 @@ const AgendaScreen = ({ userId }) => {
               )}
 
               <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 5, color: isFinished ? '#777' : '#000' }}>
-                {ride.patientName} {ride.isShared && <Text style={{ fontSize: 12, color: '#FF5722', fontWeight: 'bold' }}> (Partagée)</Text>}
+                {ride.patientName}
+                {ride.isShared && (
+                  <Text style={{ fontSize: 12, color: '#FF5722', fontWeight: 'bold' }}> (Partagée)</Text>
+                )}
               </Text>
+
               <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Départ : {ride.startLocation}</Text>
               <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Arrivée : {ride.endLocation}</Text>
               <Text style={{ color: isFinished ? '#777' : '#555', marginBottom: 3 }}>Heure : {ride.date ? moment(ride.date).format('HH:mm') : ''}</Text>
               <Text style={{ color: isFinished ? '#777' : '#555', fontStyle: 'italic' }}>Type : {ride.type}</Text>
+
+              {!ride.isShared && !isFinished && (
+                <View style={{ flexDirection: 'row', marginTop: 10, justifyContent: 'space-between' }}>
+                  {!isStarted && (
+                    <TouchableOpacity
+                      onPress={handleStartRide}
+                      style={{ flex: 1, backgroundColor: '#2196F3', padding: 8, borderRadius: 6, marginRight: 5, alignItems: 'center' }}
+                      disabled={loadingAction}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>Démarrer</Text>
+                    </TouchableOpacity>
+                  )}
+                  {isStarted && (
+                    <TouchableOpacity
+                      onPress={handleFinishRide}
+                      style={{ flex: 1, backgroundColor: '#4CAF50', padding: 8, borderRadius: 6, marginLeft: 5, alignItems: 'center' }}
+                      disabled={loadingAction}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>Terminer</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {!ride.isShared && !isFinished && (
+                <TouchableOpacity
+                  style={{ marginTop: 8, backgroundColor: '#25D366', padding: 8, borderRadius: 6, alignItems: 'center' }}
+                  onPress={() => {
+                    setSelectedShareRide(ride);
+                    setShareModalVisible(true);
+                  }}
+                  disabled={loadingAction}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>Partager</Text>
+                </TouchableOpacity>
+              )}
 
               {ride.isShared && ride.statusPartage === 'pending' && (
                 <View style={{ flexDirection: 'row', marginTop: 10, justifyContent: 'space-between' }}>
@@ -253,15 +345,6 @@ const AgendaScreen = ({ userId }) => {
                   </TouchableOpacity>
                 </View>
               )}
-
-              {!ride.isShared && (
-                <TouchableOpacity
-                  style={{ marginTop: 8, backgroundColor: '#25D366', padding: 8, borderRadius: 6, alignItems: 'center' }}
-                  onPress={() => { setSelectedShareRide(ride); setShareModalVisible(true); }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>Partager</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </TouchableOpacity>
@@ -269,7 +352,7 @@ const AgendaScreen = ({ userId }) => {
     );
   };
 
-  // ------------------ Modal partage ------------------
+  // ---------------- Share Modal ----------------
   const ShareRideModal = ({ visible, contacts, onSelectContact, onClose }) => (
     <Modal visible={visible} animationType="slide" transparent>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
@@ -339,59 +422,18 @@ const AgendaScreen = ({ userId }) => {
         <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>Actualiser</Text>
       </TouchableOpacity>
 
-      {/* Modals */}
+      {/* Modal Partage */}
       <ShareRideModal
         visible={shareModalVisible}
         contacts={contacts}
-        onSelectContact={contact => shareRideWithContact(selectedShareRide, contact)}
-        onClose={() => setShareModalVisible(false)}
+        onSelectContact={contact => {
+          if (selectedShareRide) shareRideWithContact(selectedShareRide, contact);
+        }}
+        onClose={() => {
+          setShareModalVisible(false);
+          setSelectedShareRide(null);
+        }}
       />
-
-      {/* Ride Edit Modal */}
-      <Modal visible={rideModalVisible} animationType="slide" transparent>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
-          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20 }}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>Modifier la course</Text>
-            <TextInput
-              placeholder="Patient"
-              value={formData.patientName}
-              onChangeText={text => setFormData({ ...formData, patientName: text })}
-              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
-            />
-            <TextInput
-              placeholder="Départ"
-              value={formData.startLocation}
-              onChangeText={text => setFormData({ ...formData, startLocation: text })}
-              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
-            />
-            <TextInput
-              placeholder="Arrivée"
-              value={formData.endLocation}
-              onChangeText={text => setFormData({ ...formData, endLocation: text })}
-              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
-            />
-            <TextInput
-              placeholder="Type"
-              value={formData.type}
-              onChangeText={text => setFormData({ ...formData, type: text })}
-              style={{ borderBottomWidth: 1, borderBottomColor: '#ccc', marginBottom: 10 }}
-            />
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 }}>
-              <TouchableOpacity onPress={handleSaveRide} style={{ flex: 1, backgroundColor: '#4CAF50', padding: 10, borderRadius: 6, marginRight: 5, alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Enregistrer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleDeleteRide} style={{ flex: 1, backgroundColor: 'red', padding: 10, borderRadius: 6, marginLeft: 5, alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Supprimer</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity onPress={() => setRideModalVisible(false)} style={{ marginTop: 10 }}>
-              <Text style={{ textAlign: 'center', color: 'red', fontWeight: 'bold' }}>Fermer</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 };
