@@ -21,9 +21,7 @@ export default function Auth() {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-
       Alert.alert('Succès', 'Connexion réussie !');
-      // navigation vers dashboard/agenda ici
     } catch (err) {
       Alert.alert('Erreur', err.message || 'Connexion échouée');
     } finally {
@@ -43,40 +41,29 @@ export default function Auth() {
       const { data: supaData, error: supaError } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { full_name: fullName } }, // stocker full_name si besoin
+        options: { data: { full_name: fullName } },
       });
-
       if (supaError) throw supaError;
 
-      const userId = supaData.user?.id;
-      if (!userId) {
-        Alert.alert('Erreur', 'Impossible de récupérer l’identifiant Supabase.');
+      const supabaseId = supaData.user?.id;
+      if (!supabaseId) {
+        Alert.alert('Erreur', 'Impossible de récupérer l’identifiant utilisateur Supabase.');
         setLoading(false);
         return;
       }
 
-      console.log('Supabase user created:', userId);
+      // 2️⃣ Créer l’utilisateur dans MongoDB
+      const mongoRes = await axios.post(`${API_URL}/sync`, {
+        supabaseId,
+        email,
+        fullName,
+      });
 
-      // 2️⃣ Synchroniser l’utilisateur dans MongoDB
-      try {
-        const response = await axios.post(`${API_URL}/sync`, {
-          supabaseId: userId, // ⚠️ doit correspondre à backend
-          email,
-          fullName
-        });
-        console.log('MongoDB user sync response:', response.data);
-      } catch (mongoErr) {
-        console.error('Erreur création utilisateur Mongo:', mongoErr.response?.data || mongoErr.message);
-        Alert.alert('Attention', 'Utilisateur Supabase créé mais erreur Mongo.');
-      }
-
-      Alert.alert(
-        'Inscription réussie',
-        'Vérifiez votre boîte mail pour confirmer votre compte.'
-      );
-
+      console.log('MongoDB response:', mongoRes.data);
+      Alert.alert('Inscription réussie', 'Vérifiez votre boîte mail pour confirmer votre compte.');
     } catch (err) {
-      Alert.alert('Erreur', err.message || 'Inscription échouée');
+      console.error('Signup error:', err.response?.data || err.message);
+      Alert.alert('Erreur', err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
     }
@@ -84,28 +71,9 @@ export default function Auth() {
 
   return (
     <View style={styles.container}>
-      <TextInput
-        style={styles.input}
-        placeholder="Nom complet (optionnel)"
-        value={fullName}
-        onChangeText={setFullName}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="email@address.com"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Mot de passe"
-        secureTextEntry
-        autoCapitalize="none"
-        value={password}
-        onChangeText={setPassword}
-      />
+      <TextInput style={styles.input} placeholder="Nom complet (optionnel)" value={fullName} onChangeText={setFullName} />
+      <TextInput style={styles.input} placeholder="email@address.com" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+      <TextInput style={styles.input} placeholder="Mot de passe" secureTextEntry autoCapitalize="none" value={password} onChangeText={setPassword} />
 
       {loading ? (
         <ActivityIndicator size="large" color="#2196F3" style={{ marginVertical: 10 }} />
@@ -125,33 +93,9 @@ export default function Auth() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    marginTop: 60,
-    padding: 20,
-  },
-  input: {
-    height: 50,
-    borderColor: '#ccc',
-    borderWidth: 1,
-    borderRadius: 8,
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
-  },
-  button: {
-    backgroundColor: '#2196F3',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  signUpButton: {
-    backgroundColor: '#4CAF50',
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
+  container: { marginTop: 60, padding: 20 },
+  input: { height: 50, borderColor: '#ccc', borderWidth: 1, borderRadius: 8, marginBottom: 12, paddingHorizontal: 12, fontSize: 16, backgroundColor: '#fff' },
+  button: { backgroundColor: '#2196F3', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
+  signUpButton: { backgroundColor: '#4CAF50' },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
 });
