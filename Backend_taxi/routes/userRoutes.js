@@ -2,18 +2,11 @@
 const express = require('express');
 const router = express.Router();
 const { signupUser, loginUser, getUsers, addContact } = require('../controllers/userController');
-const { authenticateUser } = require('../middleware/auth'); // assure-toi que le fichier existe
+const { authenticateUser } = require('../middleware/auth'); // ✅ à importer
 
-// Créer un utilisateur (signup)
 router.post('/signup', signupUser);
-
-// Connexion utilisateur (login)
 router.post('/login', loginUser);
-
-// Récupérer tous les utilisateurs (authentifié)
-router.get('/users', authenticateUser, getUsers);
-
-// Ajouter un contact (authentifié)
+router.get('/users', authenticateUser, getUsers); // ✅ route sécurisée
 router.post('/addContact', authenticateUser, addContact);
 
 module.exports = router;
