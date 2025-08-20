@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const ridesController = require('../controllers/ridesController');
+const ridesController = require('../controllers/rideController');
 
 // Créer une course
 router.post('/create', ridesController.createRide);
