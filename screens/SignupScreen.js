@@ -4,7 +4,7 @@ import axios from 'axios';
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/user';
 
-export default function SignUpScreen({ navigation, onSignUp }) {
+export default function SignUpScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +19,7 @@ export default function SignUpScreen({ navigation, onSignUp }) {
     try {
       const res = await axios.post(`${API_URL}/signup`, { email, fullName, password });
       Alert.alert('Succès', 'Compte créé avec succès');
-      onSignUp(res.data.user); // remonte l'utilisateur à App.js
+      navigation.navigate('SignIn'); // redirige vers SignIn
     } catch (err) {
       console.error('Signup error:', err.response?.data || err.message);
       Alert.alert('Erreur', err.response?.data?.error || 'Impossible de créer le compte');

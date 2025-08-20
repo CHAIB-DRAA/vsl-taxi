@@ -17,10 +17,10 @@ export default function SignInScreen({ navigation, onSignIn }) {
     setLoading(true);
     try {
       const res = await axios.post(`${API_URL}/login`, { email, password });
-      const user = res.data.user;
-      onSignIn(user); // remonte l'utilisateur à App.js pour MainTabs
+      Alert.alert('Succès', 'Connexion réussie');
+      onSignIn(res.data.user); // remonte l'utilisateur à App.js
     } catch (err) {
-      console.error('Login error:', err.response?.data || err.message);
+      console.error('Signin error:', err.response?.data || err.message);
       Alert.alert('Erreur', err.response?.data?.error || 'Impossible de se connecter');
     } finally {
       setLoading(false);
@@ -58,7 +58,7 @@ export default function SignInScreen({ navigation, onSignIn }) {
             style={[styles.button, styles.signUpButton]}
             onPress={() => navigation.navigate('SignUp')}
           >
-            <Text style={styles.buttonText}>Créer un compte</Text>
+            <Text style={styles.buttonText}>Pas de compte ? S'inscrire</Text>
           </TouchableOpacity>
         </>
       )}

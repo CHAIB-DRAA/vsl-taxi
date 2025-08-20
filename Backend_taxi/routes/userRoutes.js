@@ -5,6 +5,9 @@ const { signupUser, getUsers, addContact } = require('../controllers/userControl
 // Créer un utilisateur (signup)
 router.post('/signup', signupUser);
 
+// Connexion utilisateur
+router.post('/login', loginUser);
+
 // Récupérer tous les utilisateurs
 router.get('/', getUsers);
 
