@@ -1,28 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { View, Text, Alert } from 'react-native';
 import RideForm from '../components/RideForm';
 import { createRide } from '../services/api';
-import { supabase } from '../lib/supabase';
 
-// Nettoyage des chaînes pour éviter injection ou caractères indésirables
 const sanitizeString = (str) => str ? str.replace(/["']/g, '').trim() : '';
 
 const CreateRideScreen = () => {
-  const [chauffeurId, setChauffeurId] = useState(null);
-
-  useEffect(() => {
-    const fetchSession = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        if (session?.user?.id) setChauffeurId(session.user.id);
-      } catch (err) {
-        console.error('Erreur session Supabase:', err);
-        Alert.alert('Erreur', 'Impossible de récupérer l’utilisateur connecté.');
-      }
-    };
-    fetchSession();
-  }, []);
+  // Ici on simule un chauffeur connecté
+  const chauffeurId = "123456789abcdef"; // Remplace par l'ID réel de ton utilisateur
 
   const handleCreate = async (ride) => {
     if (!chauffeurId) {
@@ -31,7 +16,6 @@ const CreateRideScreen = () => {
     }
 
     try {
-      // Fonction pour préparer et envoyer la course
       const sendRide = async ({ patientName, startLocation, endLocation, date, type }) => {
         const payload = {
           patientName: sanitizeString(patientName),
@@ -42,9 +26,9 @@ const CreateRideScreen = () => {
           chauffeurId,
           isRoundTrip: !!ride.isRoundTrip,
         };
-        console.log(`Envoi ${type} → MongoDB :`, payload);
+        console.log(`Envoi ${type} → backend :`, payload);
         const response = await createRide(payload);
-        console.log(`Réponse MongoDB ${type} :`, response);
+        console.log(`Réponse ${type} :`, response);
       };
 
       // Créer course Aller

@@ -21,18 +21,32 @@ const getConfig = async () => {
   return { headers: { Authorization: `Bearer ${t}` } };
 };
 
-// === Courses
-export const getRides = async () => {
-  const config = await getConfig();
-  const response = await axios.get(API_URL, config);
-  return response.data;
+
+
+// Créer une course
+export const createRide = async (rideData) => {
+  try {
+    // rideData doit contenir :
+    // patientName, startLocation, endLocation, date, type, chauffeurId, isRoundTrip
+    const response = await axios.post(API_URL, rideData);
+    return response.data; // renvoie la course créée
+  } catch (err) {
+    console.error('Erreur API createRide:', err.response?.data || err.message);
+    throw err;
+  }
 };
 
-export const createRide = async (ride) => {
-  const config = await getConfig();
-  const response = await axios.post(API_URL, ride, config);
-  return response.data;
+// Récupérer toutes les courses (optionnel pour AgendaScreen)
+export const getRides = async () => {
+  try {
+    const response = await axios.get(API_URL);
+    return response.data;
+  } catch (err) {
+    console.error('Erreur API getRides:', err.response?.data || err.message);
+    throw err;
+  }
 };
+
 
 export const updateRide = async (id, data) => {
   const config = await getConfig();
