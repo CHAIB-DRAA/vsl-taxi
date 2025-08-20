@@ -1,50 +1,61 @@
-import React, { useEffect, useState } from 'react';
-import { 
-  View, Text, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, ScrollView, TextInput 
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://vsl-taxi.onrender.com/api';
+const API_URL = 'https://vsl-taxi.onrender.com/api/contacts';
 
 export default function ContactsScreen() {
   const [users, setUsers] = useState([]);
   const [contacts, setContacts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  // Récupérer token
+  // Récupérer le token
   const getToken = async () => {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) throw new Error('Token manquant');
-    return token;
+    return await AsyncStorage.getItem('token');
   };
 
-  // Charger tous les utilisateurs (sauf soi-même)
-  const fetchUsers = async () => {
-    try {
-      const token = await getToken();
-      const res = await axios.get(`${API_URL}/users`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setUsers(res.data);
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Erreur', err.response?.data?.error || err.message);
-    }
-  };
-
-  // Charger mes contacts
+  // Charger les contacts
   const fetchContacts = async () => {
     try {
+      setLoading(true);
       const token = await getToken();
-      const res = await axios.get(`${API_URL}/contacts`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const res = await axios.get(API_URL, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       setContacts(res.data);
     } catch (err) {
       console.error(err);
-      Alert.alert('Erreur', err.response?.data?.error || err.message);
+      Alert.alert('Erreur', 'Impossible de charger les contacts.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Charger les utilisateurs (sauf soi-même) avec recherche
+  const fetchUsers = async (query = '') => {
+    try {
+      setLoading(true);
+      const token = await getToken();
+      const res = await axios.get(`${API_URL}/users${query ? `?search=${query}` : ''}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setUsers(res.data);
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de charger les utilisateurs.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -52,107 +63,117 @@ export default function ContactsScreen() {
   const addContact = async (contactId) => {
     try {
       const token = await getToken();
-      await axios.post(`${API_URL}/contacts`, { contactId }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await axios.post(
+        API_URL,
+        { contactId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       Alert.alert('Succès', 'Contact ajouté !');
       fetchContacts();
     } catch (err) {
       console.error(err);
-      Alert.alert('Erreur', err.response?.data?.error || err.message);
+      Alert.alert('Erreur', err.response?.data?.error || 'Impossible d’ajouter le contact.');
     }
   };
 
   // Supprimer un contact
-  const removeContact = async (contactId) => {
+  const deleteContact = async (contactId) => {
     try {
       const token = await getToken();
-      await axios.delete(`${API_URL}/contacts/${contactId}`, {
-        headers: { Authorization: `Bearer ${token}` }
+      await axios.delete(`${API_URL}/${contactId}`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       Alert.alert('Succès', 'Contact supprimé !');
       fetchContacts();
     } catch (err) {
       console.error(err);
-      Alert.alert('Erreur', err.response?.data?.error || err.message);
+      Alert.alert('Erreur', err.response?.data?.error || 'Impossible de supprimer le contact.');
     }
   };
 
+  // Charger au montage
   useEffect(() => {
-    Promise.all([fetchUsers(), fetchContacts()]).finally(() => setLoading(false));
+    fetchContacts();
+    fetchUsers();
   }, []);
 
-  const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(search.toLowerCase()) || 
-    u.email.toLowerCase().includes(search.toLowerCase())
-  );
+  // Recherche
+  const handleSearch = (text) => {
+    setSearch(text);
+    fetchUsers(text);
+  };
 
-  if (loading) return <ActivityIndicator size="large" color="#4CAF50" style={{ flex: 1, justifyContent: 'center' }} />;
+  if (loading) return <ActivityIndicator size="large" color="#4CAF50" style={{ flex: 1 }} />;
 
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Mes contacts</Text>
-      {contacts.length === 0 ? (
-        <Text style={styles.emptyText}>Vous n'avez aucun contact pour le moment.</Text>
-      ) : (
-        <FlatList
-          data={contacts}
-          keyExtractor={(item) => item._id}
-          renderItem={({ item }) => (
-            <View style={styles.contactCard}>
-              <View>
-                <Text style={styles.contactName}>{item.contactId.name}</Text>
-                <Text style={styles.contactEmail}>{item.contactId.email}</Text>
-              </View>
-              <TouchableOpacity onPress={() => removeContact(item.contactId._id)} style={styles.deleteButton}>
-                <Text style={styles.deleteText}>Supprimer</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-          style={{ marginBottom: 20 }}
-        />
-      )}
-
-      <Text style={styles.header}>Ajouter un contact</Text>
-      <TextInput
-        placeholder="Rechercher par nom ou email"
-        style={styles.searchInput}
-        value={search}
-        onChangeText={setSearch}
+      <FlatList
+        data={contacts}
+        keyExtractor={(item) => item._id}
+        ListEmptyComponent={<Text>Aucun contact ajouté.</Text>}
+        renderItem={({ item }) => (
+          <View style={styles.contactItem}>
+            <Text>{item.fullName || item.email}</Text>
+            <TouchableOpacity
+              onPress={() => deleteContact(item.contactId._id)}
+              style={styles.deleteButton}
+            >
+              <Text style={styles.deleteText}>Supprimer</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       />
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
-        {filteredUsers.map(user => (
+      <Text style={[styles.header, { marginTop: 20 }]}>Ajouter un contact</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Rechercher par email ou nom"
+        value={search}
+        onChangeText={handleSearch}
+      />
+      <FlatList
+        data={users}
+        keyExtractor={(item) => item._id}
+        ListEmptyComponent={<Text>Aucun utilisateur trouvé.</Text>}
+        renderItem={({ item }) => (
           <TouchableOpacity
-            key={user._id}
             style={styles.addButton}
-            onPress={() => addContact(user._id)}
+            onPress={() => addContact(item._id)}
           >
-            <Text style={styles.addText}>{user.name}</Text>
-            <Text style={styles.addEmail}>{user.email}</Text>
+            <Text style={styles.addText}>{item.fullName || item.email}</Text>
           </TouchableOpacity>
-        ))}
-      </ScrollView>
+        )}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 15, backgroundColor: '#fff' },
-  header: { fontSize: 20, fontWeight: 'bold', color: '#222', marginBottom: 10 },
-  emptyText: { fontSize: 16, color: '#888', textAlign: 'center', marginVertical: 20 },
-  contactCard: { 
-    backgroundColor: '#F5F5F5', padding: 12, borderRadius: 10, marginBottom: 10, 
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' 
+  container: { flex: 1, padding: 15, backgroundColor: '#FFF' },
+  header: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
+  contactItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5F5F5',
+    padding: 10,
+    marginBottom: 8,
+    borderRadius: 8,
   },
-  contactName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  contactEmail: { fontSize: 14, color: '#555' },
-  deleteButton: { backgroundColor: '#FF3B30', padding: 6, borderRadius: 8 },
-  deleteText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  searchInput: { 
-    backgroundColor: '#F5F5F5', padding: 10, borderRadius: 8, fontSize: 14, marginBottom: 10 
+  deleteButton: { backgroundColor: '#FF5252', padding: 5, borderRadius: 5 },
+  deleteText: { color: '#FFF', fontWeight: 'bold' },
+  input: {
+    borderWidth: 1,
+    borderColor: '#CCC',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
   },
-  addButton: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 10, marginRight: 10, width: 150 },
-  addText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  addEmail: { color: '#fff', fontSize: 12, marginTop: 2 },
+  addButton: {
+    backgroundColor: '#4CAF50',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  addText: { color: '#FFF', fontWeight: 'bold' },
 });
