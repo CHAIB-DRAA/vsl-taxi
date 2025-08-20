@@ -36,3 +36,12 @@ exports.loginUser = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// Récupérer tous les utilisateurs
+exports.getUsers = async (req, res) => {
+  try {
+    const users = await User.find({}, 'fullName email'); // sélectionne uniquement nom + email
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
