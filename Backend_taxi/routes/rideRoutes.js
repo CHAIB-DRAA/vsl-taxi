@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const rideController = require('../controllers/rideController');
-const authMiddleware = require('../middlewares/auth'); // si tu as un middleware d’auth
+const authMiddleware = require('../middleware/auth'); // si tu as un middleware d’auth
 
 // Toutes les routes utilisent authMiddleware
 router.post('/', authMiddleware, rideController.createRide); // ← POST /api/rides
