@@ -6,15 +6,8 @@ import { createRide } from '../services/api';
 const sanitizeString = (str) => str ? str.replace(/["']/g, '').trim() : '';
 
 const CreateRideScreen = () => {
-  // Ici on simule un chauffeur connecté
-  const chauffeurId = "123456789abcdef"; // Remplace par l'ID réel de ton utilisateur
 
   const handleCreate = async (ride) => {
-    if (!chauffeurId) {
-      Alert.alert('Erreur', 'Utilisateur non connecté.');
-      return;
-    }
-
     try {
       const sendRide = async ({ patientName, startLocation, endLocation, date, type }) => {
         const payload = {
@@ -23,9 +16,9 @@ const CreateRideScreen = () => {
           endLocation: sanitizeString(endLocation),
           date,
           type,
-          chauffeurId,
           isRoundTrip: !!ride.isRoundTrip,
         };
+
         console.log(`Envoi ${type} → backend :`, payload);
         const response = await createRide(payload);
         console.log(`Réponse ${type} :`, response);
@@ -54,7 +47,7 @@ const CreateRideScreen = () => {
         Alert.alert('Succès', 'Course créée !');
       }
     } catch (err) {
-      console.error('Erreur création course :', err);
+      console.error('Erreur création course :', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de créer la course. Vérifiez les champs.');
     }
   };
