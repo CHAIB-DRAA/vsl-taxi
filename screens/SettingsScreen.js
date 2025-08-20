@@ -2,30 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ContactScreen from './ContactScreen';
-import { supabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SettingsScreen() {
   const [showContacts, setShowContacts] = useState(false);
-  const [session, setSession] = useState(null);
+  const [token, setToken] = useState(null);
 
-  // Récupérer la session Supabase
+  // Récupérer le token JWT stocké (ex: après login)
   useEffect(() => {
-    const getSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
+    const getToken = async () => {
+      const storedToken = await AsyncStorage.getItem('token');
+      setToken(storedToken);
     };
-    getSession();
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => listener.subscription.unsubscribe();
+    getToken();
   }, []);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await AsyncStorage.removeItem('token');
     Alert.alert('Déconnexion', 'Vous avez été déconnecté.');
+    setToken(null);
   };
 
   const options = [
@@ -56,8 +51,8 @@ export default function SettingsScreen() {
       />
 
       <Modal visible={showContacts} animationType="slide">
-        {session ? (
-          <ContactScreen session={session} />
+        {token ? (
+          <ContactScreen token={token} />
         ) : (
           <Text style={{ padding: 20 }}>Chargement...</Text>
         )}
