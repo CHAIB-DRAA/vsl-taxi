@@ -25,7 +25,7 @@ mongoose.connect(process.env.MONGO_URI)
 app.use('/api/rides', rideRoutes);
 
 app.use('/api/rides', rideRoutes);
-app.use('/api/users', userRoutes); // si tu veux séparer users
+app.use('/api/user', userRoutes);
 app.use('/api/contacts', contactRoutes); // <- nouveau
 
 // Démarrage du serveur
