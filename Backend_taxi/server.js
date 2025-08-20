@@ -22,8 +22,7 @@ mongoose.connect(process.env.MONGO_URI)
 .catch((err) => console.error('❌ Erreur de connexion à MongoDB :', err));
 
 // Routes
-app.use('/api/rides', rideRoutes); // Préfixe plus clair
-
+app.use('/api/rides', rideRoutes);
 
 app.use('/api/user', userRoutes);
 
