@@ -105,3 +105,22 @@ export const respondToShare = async (shareId, action) => {
   const res = await axios.post(`${API_URL}/share/respond`, { shareId, action }, config);
   return res.data;
 };
+
+
+
+
+export const getContacts = async () => {
+  try {
+    const token = await AsyncStorage.getItem('token');
+    if (!token) throw new Error('Token manquant');
+
+    const res = await axios.get(API_URL, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    return res.data;
+  } catch (err) {
+    console.error('Erreur getContacts:', err.response?.data || err.message);
+    return [];
+  }
+};
