@@ -1,6 +1,5 @@
 const User = require('../models/User');
 
-const User = require('../models/User');
 
 // Créer ou synchroniser un utilisateur Mongo après signup Supabase
 exports.syncUser = async (req, res) => {
