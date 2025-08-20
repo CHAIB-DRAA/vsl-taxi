@@ -1,20 +1,23 @@
 import axios from 'axios';
-import { supabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 let token = null;
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 
+// Définir manuellement le token (après login)
 export const setToken = (t) => { token = t; };
 
+// Récupérer le token (depuis la variable ou AsyncStorage)
 const getToken = async () => {
   if (token) return token;
-  const { data: sessionData } = await supabase.auth.getSession();
-  return sessionData?.session?.access_token || null;
+  const t = await AsyncStorage.getItem('token');
+  if (!t) throw new Error('Token manquant');
+  return t;
 };
 
+// Config Axios avec Authorization
 const getConfig = async () => {
   const t = await getToken();
-  if (!t) throw new Error('Token manquant');
   return { headers: { Authorization: `Bearer ${t}` } };
 };
 
