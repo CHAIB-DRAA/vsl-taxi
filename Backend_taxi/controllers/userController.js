@@ -1,8 +1,11 @@
-// controllers/userController.js
 const User = require('../models/User');
 const bcrypt = require('bcrypt');
 
-// Signup
+
+
+// Créer un utilisateur (signup)const User = require('../models/User');
+const bcrypt = require('bcrypt');
+
 exports.signupUser = async (req, res) => {
   try {
     const { email, fullName, password } = req.body;
@@ -17,11 +20,10 @@ exports.signupUser = async (req, res) => {
 
     res.json({ message: 'Utilisateur créé', user: { id: user._id, email: user.email, fullName: user.fullName } });
   } catch (err) {
+    console.error('signupUser error:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
-
-// Login
 exports.loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -33,14 +35,38 @@ exports.loginUser = async (req, res) => {
 
     res.json({ message: 'Connexion réussie', user: { id: user._id, email: user.email, fullName: user.fullName } });
   } catch (err) {
+    console.error('loginUser error:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
-// Récupérer tous les utilisateurs
+
+
+// Récupérer tous les utilisateurs sauf soi
 exports.getUsers = async (req, res) => {
   try {
-    const users = await User.find({}, 'fullName email'); // sélectionne uniquement nom + email
+    const { userId } = req.query;
+    const users = await User.find({ _id: { $ne: userId } }, 'email fullName');
     res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Ajouter un contact
+exports.addContact = async (req, res) => {
+  try {
+    const { userId, contactId } = req.body;
+
+    const user = await User.findById(userId);
+    const contact = await User.findById(contactId);
+    if (!user || !contact) return res.status(404).json({ message: 'Utilisateur introuvable' });
+
+    if (!user.contacts.includes(contact._id)) {
+      user.contacts.push(contact._id);
+      await user.save();
+    }
+
+    res.json({ message: 'Contact ajouté', contacts: user.contacts });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
