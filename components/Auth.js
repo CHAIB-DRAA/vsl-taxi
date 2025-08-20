@@ -21,6 +21,7 @@ export default function Auth() {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+
       Alert.alert('Succès', 'Connexion réussie !');
       // navigation vers dashboard/agenda ici
     } catch (err) {
@@ -42,8 +43,9 @@ export default function Auth() {
       const { data: supaData, error: supaError } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { full_name: fullName } },
+        options: { data: { full_name: fullName } }, // stocker full_name si besoin
       });
+
       if (supaError) throw supaError;
 
       const userId = supaData.user?.id;
@@ -53,26 +55,26 @@ export default function Auth() {
         return;
       }
 
+      console.log('Supabase user created:', userId);
+
       // 2️⃣ Synchroniser l’utilisateur dans MongoDB
       try {
-        await axios.post(`${API_URL}/sync`, {
-          id: userId,
+        const response = await axios.post(`${API_URL}/sync`, {
+          supabaseId: userId, // ⚠️ doit correspondre à backend
           email,
-          fullName,
+          fullName
         });
-        console.log('Utilisateur Mongo synchronisé ✅');
-        Alert.alert(
-          'Inscription réussie',
-          'Vérifiez votre boîte mail pour confirmer votre compte.'
-        );
+        console.log('MongoDB user sync response:', response.data);
       } catch (mongoErr) {
-        if (mongoErr.response?.status === 409) {
-          Alert.alert('Info', 'Utilisateur déjà présent dans MongoDB');
-        } else {
-          console.error('Erreur création utilisateur Mongo:', mongoErr.response?.data || mongoErr.message);
-          Alert.alert('Erreur', 'Impossible de synchroniser l’utilisateur Mongo.');
-        }
+        console.error('Erreur création utilisateur Mongo:', mongoErr.response?.data || mongoErr.message);
+        Alert.alert('Attention', 'Utilisateur Supabase créé mais erreur Mongo.');
       }
+
+      Alert.alert(
+        'Inscription réussie',
+        'Vérifiez votre boîte mail pour confirmer votre compte.'
+      );
+
     } catch (err) {
       Alert.alert('Erreur', err.message || 'Inscription échouée');
     } finally {

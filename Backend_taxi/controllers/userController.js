@@ -1,30 +1,30 @@
 const User = require('../models/User');
 
-// Synchroniser ou créer un utilisateur Mongo après connexion Supabase
+const User = require('../models/User');
+
+// Créer ou synchroniser un utilisateur Mongo après signup Supabase
 exports.syncUser = async (req, res) => {
   try {
     const { id: supabaseId, email, fullName } = req.body;
 
     if (!supabaseId || !email) {
-      return res.status(400).json({ error: 'supabaseId et email requis' });
+      return res.status(400).json({ error: 'supabaseId et email obligatoires' });
     }
 
-    // Vérifier si l’utilisateur existe déjà
     let user = await User.findOne({ supabaseId });
+
     if (!user) {
       user = new User({ supabaseId, email, fullName });
       await user.save();
     }
 
-    res.json(user);
+    res.json({ message: 'Utilisateur synchronisé', user });
   } catch (err) {
-    // Détecter un doublon et renvoyer un message plus clair
-    if (err.code === 11000) {
-      return res.status(409).json({ error: 'Utilisateur déjà existant' });
-    }
+    console.error('Erreur syncUser:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
+
 
 // Récupérer tous les utilisateurs sauf soi
 exports.getUsers = async (req, res) => {
