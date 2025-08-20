@@ -1,73 +1,61 @@
 import React, { useState } from 'react';
-import { Alert, StyleSheet, View, TextInput, Button } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { View, TextInput, TouchableOpacity, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import axios from 'axios';
 
-export default function Auth() {
+const API_URL = 'https://vsl-taxi.onrender.com/api/users';
+
+export default function AuthScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function signInWithEmail() {
+  const handleSignup = async () => {
+    if (!email || !password) return Alert.alert('Erreur', 'Email et mot de passe requis');
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) Alert.alert(error.message);
-    setLoading(false);
-  }
+    try {
+      const { data } = await axios.post(`${API_URL}/signup`, { email, password, fullName });
+      Alert.alert('Succès', 'Inscription terminée, connectez-vous');
+    } catch (err) {
+      Alert.alert('Erreur', err.response?.data?.error || 'Inscription échouée');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  async function signUpWithEmail() {
+  const handleLogin = async () => {
+    if (!email || !password) return Alert.alert('Erreur', 'Email et mot de passe requis');
     setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) Alert.alert(error.message);
-    if (!data.session) Alert.alert('Please check your inbox for email verification!');
-    setLoading(false);
-  }
+    try {
+      const { data } = await axios.post(`${API_URL}/login`, { email, password });
+      console.log('JWT token:', data.token);
+      navigation.navigate('Contacts', { userId: data.userId, token: data.token });
+    } catch (err) {
+      Alert.alert('Erreur', err.response?.data?.error || 'Connexion échouée');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
-      <TextInput
-        style={styles.input}
-        placeholder="email@address.com"
-        autoCapitalize="none"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        secureTextEntry
-        autoCapitalize="none"
-        value={password}
-        onChangeText={setPassword}
-      />
-      <View style={styles.button}>
-        <Button title="Sign In" onPress={signInWithEmail} disabled={loading} />
-      </View>
-      <View style={styles.button}>
-        <Button title="Sign Up" onPress={signUpWithEmail} disabled={loading} />
-      </View>
+      <TextInput style={styles.input} placeholder="Nom complet" value={fullName} onChangeText={setFullName} />
+      <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" />
+      <TextInput style={styles.input} placeholder="Mot de passe" value={password} onChangeText={setPassword} secureTextEntry />
+      {loading ? <ActivityIndicator size="large" color="#2196F3" /> : (
+        <>
+          <TouchableOpacity style={styles.button} onPress={handleSignup}><Text style={styles.buttonText}>S'inscrire</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.button, styles.loginButton]} onPress={handleLogin}><Text style={styles.buttonText}>Se connecter</Text></TouchableOpacity>
+        </>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    marginTop: 40,
-    padding: 12,
-  },
-  input: {
-    height: 50,
-    borderColor: 'gray',
-    borderWidth: 1,
-    marginBottom: 12,
-    paddingHorizontal: 8,
-  },
-  button: {
-    marginVertical: 6,
-  },
+  container: { marginTop: 60, padding: 20 },
+  input: { height: 50, borderColor: '#ccc', borderWidth: 1, borderRadius: 8, marginBottom: 12, paddingHorizontal: 12 },
+  button: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
+  loginButton: { backgroundColor: '#2196F3' },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
 });

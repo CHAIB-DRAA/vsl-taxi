@@ -24,6 +24,7 @@ mongoose.connect(process.env.MONGO_URI)
 // Routes
 app.use('/api/rides', rideRoutes); // Préfixe plus clair
 
+
 app.use('/api/user', userRoutes);
 
 // Démarrage du serveur

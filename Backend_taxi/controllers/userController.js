@@ -1,53 +1,45 @@
 const User = require('../models/User');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
-// Synchroniser ou créer un utilisateur Mongo après signup Supabase
-exports.syncUser = async (req, res) => {
+const JWT_SECRET = process.env.JWT_SECRET || 'secretkey';
+
+// Signup
+exports.signup = async (req, res) => {
   try {
-    const { supabaseId, email, fullName } = req.body;
+    const { email, password, fullName } = req.body;
 
-    if (!supabaseId || !email) {
-      return res.status(400).json({ error: 'supabaseId et email obligatoires' });
-    }
+    if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
 
-    let user = await User.findOne({ supabaseId });
-    if (!user) {
-      user = new User({ supabaseId, email, fullName });
-      await user.save();
-    }
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ error: 'Email déjà utilisé' });
 
-    res.json({ message: 'Utilisateur synchronisé', user });
-  } catch (err) {
-    console.error('Erreur syncUser:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-};
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-// Récupérer tous les utilisateurs sauf soi
-exports.getUsers = async (req, res) => {
-  try {
-    const { supabaseId } = req.query;
-    const users = await User.find({ supabaseId: { $ne: supabaseId } }, 'email fullName');
-    res.json(users);
+    const user = new User({ email, password: hashedPassword, fullName });
+    await user.save();
+
+    res.json({ message: 'Utilisateur créé', userId: user._id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// Ajouter un contact
-exports.addContact = async (req, res) => {
+// Login
+exports.login = async (req, res) => {
   try {
-    const { userSupabaseId, contactSupabaseId } = req.body;
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email et mot de passe requis' });
 
-    const user = await User.findOne({ supabaseId: userSupabaseId });
-    const contact = await User.findOne({ supabaseId: contactSupabaseId });
-    if (!user || !contact) return res.status(404).json({ message: 'Utilisateur introuvable' });
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
-    if (!user.contacts.includes(contact._id)) {
-      user.contacts.push(contact._id);
-      await user.save();
-    }
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ error: 'Mot de passe incorrect' });
 
-    res.json({ message: 'Contact ajouté', contacts: user.contacts });
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.json({ message: 'Connexion réussie', token, userId: user._id, fullName: user.fullName });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
