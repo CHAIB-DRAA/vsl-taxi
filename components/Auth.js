@@ -22,7 +22,7 @@ export default function Auth() {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       Alert.alert('Succès', 'Connexion réussie !');
-      // navigation vers ton dashboard/agenda
+      // navigation vers dashboard/agenda ici
     } catch (err) {
       Alert.alert('Erreur', err.message || 'Connexion échouée');
     } finally {
@@ -42,13 +42,14 @@ export default function Auth() {
       const { data: supaData, error: supaError } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { full_name: fullName } }, // stocker full_name si besoin
+        options: { data: { full_name: fullName } },
       });
       if (supaError) throw supaError;
 
       const userId = supaData.user?.id;
       if (!userId) {
-        Alert.alert('Erreur', 'Impossible de récupérer l’identifiant utilisateur Supabase.');
+        Alert.alert('Erreur', 'Impossible de récupérer l’identifiant Supabase.');
+        setLoading(false);
         return;
       }
 
@@ -60,14 +61,18 @@ export default function Auth() {
           fullName,
         });
         console.log('Utilisateur Mongo synchronisé ✅');
+        Alert.alert(
+          'Inscription réussie',
+          'Vérifiez votre boîte mail pour confirmer votre compte.'
+        );
       } catch (mongoErr) {
-        console.error('Erreur création utilisateur Mongo:', mongoErr.response?.data || mongoErr.message);
+        if (mongoErr.response?.status === 409) {
+          Alert.alert('Info', 'Utilisateur déjà présent dans MongoDB');
+        } else {
+          console.error('Erreur création utilisateur Mongo:', mongoErr.response?.data || mongoErr.message);
+          Alert.alert('Erreur', 'Impossible de synchroniser l’utilisateur Mongo.');
+        }
       }
-
-      Alert.alert(
-        'Inscription réussie',
-        'Vérifiez votre boîte mail pour confirmer votre compte.'
-      );
     } catch (err) {
       Alert.alert('Erreur', err.message || 'Inscription échouée');
     } finally {

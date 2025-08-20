@@ -5,6 +5,11 @@ exports.syncUser = async (req, res) => {
   try {
     const { id: supabaseId, email, fullName } = req.body;
 
+    if (!supabaseId || !email) {
+      return res.status(400).json({ error: 'supabaseId et email requis' });
+    }
+
+    // Vérifier si l’utilisateur existe déjà
     let user = await User.findOne({ supabaseId });
     if (!user) {
       user = new User({ supabaseId, email, fullName });
@@ -13,6 +18,10 @@ exports.syncUser = async (req, res) => {
 
     res.json(user);
   } catch (err) {
+    // Détecter un doublon et renvoyer un message plus clair
+    if (err.code === 11000) {
+      return res.status(409).json({ error: 'Utilisateur déjà existant' });
+    }
     res.status(500).json({ error: err.message });
   }
 };
