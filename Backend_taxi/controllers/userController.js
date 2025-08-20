@@ -3,8 +3,7 @@ const bcrypt = require('bcrypt');
 
 
 
-// Créer un utilisateur (signup)const User = require('../models/User');
-const bcrypt = require('bcrypt');
+
 
 exports.signupUser = async (req, res) => {
   try {
