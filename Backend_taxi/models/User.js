@@ -4,7 +4,7 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   fullName: { type: String },
   password: { type: String, required: true },
-  contacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-});
+  contacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+}, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

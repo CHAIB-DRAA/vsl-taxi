@@ -1,35 +1,22 @@
+// screens/SignInScreen.js
 import React, { useState } from 'react';
-import { View, TextInput, TouchableOpacity, Text, Alert, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, TextInput, Button, Alert, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import axios from 'axios';
 
-const API_URL = 'https://vsl-taxi.onrender.com/api/user'; // ton backend Mongo
+const API_URL = 'http://YOUR_BACKEND_URL/api/user';
 
-export default function SigninScreen({ navigation }) {
+export default function SignInScreen({ navigation, setUser }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSignin = async () => {
-    if (!email || !password) {
-      Alert.alert('Erreur', 'Email et mot de passe requis');
-      return;
-    }
-
+  const handleLogin = async () => {
     setLoading(true);
     try {
-      // Ici on simule la connexion : vérifier email + password
-      const res = await axios.get(`${API_URL}`, { params: { email } });
-      const user = res.data.find(u => u.email === email);
-
-      if (!user || user.password !== password) {
-        Alert.alert('Erreur', 'Email ou mot de passe incorrect');
-      } else {
-        Alert.alert('Succès', `Bienvenue ${user.fullName || user.email}`);
-        // Ici tu peux naviguer vers ton dashboard
-      }
+      const { data } = await axios.post(`${API_URL}/login`, { email, password });
+      setUser(data.user);
     } catch (err) {
-      console.error(err.response?.data || err.message);
-      Alert.alert('Erreur', 'Impossible de se connecter');
+      Alert.alert('Erreur', err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
     }
@@ -37,36 +24,17 @@ export default function SigninScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <TextInput
-        placeholder="Email"
-        style={styles.input}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        placeholder="Mot de passe"
-        style={styles.input}
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-
-      {loading ? (
-        <ActivityIndicator size="large" color="#2196F3" />
-      ) : (
-        <TouchableOpacity style={styles.button} onPress={handleSignin}>
-          <Text style={styles.buttonText}>Se connecter</Text>
-        </TouchableOpacity>
-      )}
+      <TextInput placeholder="Email" value={email} onChangeText={setEmail} style={styles.input} />
+      <TextInput placeholder="Mot de passe" secureTextEntry value={password} onChangeText={setPassword} style={styles.input} />
+      <Button title="Se connecter" onPress={handleLogin} disabled={loading} />
+      <TouchableOpacity onPress={() => navigation.navigate('SignUp')} style={{ marginTop: 20 }}>
+        <Text style={{ color: 'blue' }}>Créer un compte</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', padding: 20 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 12 },
-  button: { backgroundColor: '#2196F3', padding: 15, borderRadius: 8, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  input: { height: 50, borderColor: '#ccc', borderWidth: 1, marginBottom: 12, paddingHorizontal: 10 },
 });
