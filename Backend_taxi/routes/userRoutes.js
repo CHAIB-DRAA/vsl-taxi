@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { signup, getUsers, addContact } = require('../controllers/userController');
+const { signupUser, loginUser, getUsers, addContact } = require('../controllers/userController');
 
-// Créer un utilisateur
-router.post('/signup', signup);
+// Signup
+router.post('/signup', signupUser);
 
-// Récupérer tous les utilisateurs sauf soi
+// Login
+router.post('/login', loginUser);
+
+// Récupérer tous les utilisateurs
 router.get('/', getUsers);
 
 // Ajouter un contact
