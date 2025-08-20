@@ -2,13 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { syncUser, getUsers, addContact } = require('../controllers/userController');
 
-// Synchroniser l'utilisateur Mongo après signup Supabase
-router.post('/sync', syncUser);
-
-// Récupérer tous les utilisateurs
-router.get('/', getUsers);
-
-// Ajouter un contact
+router.post('/sync', syncUser);       // Sync MongoDB après signup Supabase
+router.get('/', getUsers);            // Récupérer tous les utilisateurs sauf soi
 router.post('/addContact', addContact);
 
 module.exports = router;

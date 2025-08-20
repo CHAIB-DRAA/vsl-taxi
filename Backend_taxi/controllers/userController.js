@@ -9,7 +9,6 @@ exports.syncUser = async (req, res) => {
       return res.status(400).json({ error: 'supabaseId et email obligatoires' });
     }
 
-    // Vérifier si l'utilisateur existe déjà
     let user = await User.findOne({ supabaseId });
     if (!user) {
       user = new User({ supabaseId, email, fullName });
@@ -18,7 +17,7 @@ exports.syncUser = async (req, res) => {
 
     res.json({ message: 'Utilisateur synchronisé', user });
   } catch (err) {
-    console.error('Erreur syncUser full:', err); // logs complets pour debug
+    console.error('Erreur syncUser:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
@@ -30,7 +29,6 @@ exports.getUsers = async (req, res) => {
     const users = await User.find({ supabaseId: { $ne: supabaseId } }, 'email fullName');
     res.json(users);
   } catch (err) {
-    console.error('Erreur getUsers full:', err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -42,7 +40,6 @@ exports.addContact = async (req, res) => {
 
     const user = await User.findOne({ supabaseId: userSupabaseId });
     const contact = await User.findOne({ supabaseId: contactSupabaseId });
-
     if (!user || !contact) return res.status(404).json({ message: 'Utilisateur introuvable' });
 
     if (!user.contacts.includes(contact._id)) {
@@ -52,7 +49,6 @@ exports.addContact = async (req, res) => {
 
     res.json({ message: 'Contact ajouté', contacts: user.contacts });
   } catch (err) {
-    console.error('Erreur addContact full:', err);
     res.status(500).json({ error: err.message });
   }
 };
