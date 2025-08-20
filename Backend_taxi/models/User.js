@@ -1,25 +1,10 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  supabase_user_id: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  name: {
-    type: String,
-    default: ''
-  },
-  email: {
-    type: String,
-    required: true
-  },
-  phone: {
-    type: String,
-    default: ''
-  }
-}, {
-  timestamps: true // crée automatiquement createdAt et updatedAt
-});
+  supabaseId: { type: String, required: true, unique: true }, // ID Supabase
+  email: { type: String, required: true, unique: true },
+  fullName: { type: String },
+  contacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+}, { timestamps: true });
 
-module.exports = mongoose.model('Driver', userSchema);
+module.exports = mongoose.model('User', userSchema);

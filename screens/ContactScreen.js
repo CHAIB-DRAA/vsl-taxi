@@ -1,56 +1,120 @@
-const addContact = async () => {
-  if (!newEmail || !newEmail.trim()) {
-    Alert.alert('Erreur', 'Veuillez entrer un email.');
-    return;
-  }
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Alert, FlatList, ActivityIndicator } from 'react-native';
+import axios from 'axios';
+import { supabase } from '../lib/supabase';
 
-  try {
-    const email = newEmail.trim();
+const API_URL = 'https://vsl-taxi.onrender.com/api/users'; // endpoint Mongo
 
-    // Vérifier si l’utilisateur existe
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, email, full_name')
-      .eq('email', email)
-      .single();
+export default function ContactsScreen() {
+  const [contacts, setContacts] = useState([]);
+  const [newEmail, setNewEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [userId, setUserId] = useState(null);
 
-    if (profileError || !profile) {
-      Alert.alert('Utilisateur introuvable', 'Aucun utilisateur avec cet email.');
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) setUserId(session.user.id);
+    };
+    fetchUser();
+    fetchContacts();
+  }, []);
+
+  const fetchContacts = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_URL}/contacts/${userId}`);
+      setContacts(response.data || []);
+    } catch (err) {
+      console.error('Erreur fetch contacts:', err.response?.data || err.message);
+      Alert.alert('Erreur', 'Impossible de charger les contacts.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addContact = async () => {
+    if (!newEmail.trim()) {
+      Alert.alert('Erreur', 'Veuillez entrer un email.');
       return;
     }
-
-    // Interdire d'ajouter soi-même
-    if (profile.id === userId) {
+    if (newEmail.trim() === userId) {
       Alert.alert('Erreur', 'Vous ne pouvez pas vous ajouter vous-même.');
       return;
     }
 
-    // Vérifier si le contact existe déjà
-    const { data: existing } = await supabase
-      .from('contacts')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('contact_id', profile.id)
-      .single();
-
-    if (existing) {
-      Alert.alert('Contact existant', 'Ce contact est déjà ajouté.');
-      return;
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/contacts`, {
+        userId,
+        email: newEmail.trim(),
+      });
+      setContacts(prev => [...prev, response.data]);
+      setNewEmail('');
+      Alert.alert('Succès', `Contact ajouté : ${response.data.fullName || response.data.email}`);
+    } catch (err) {
+      console.error('Erreur add contact:', err.response?.data || err.message);
+      Alert.alert('Erreur', err.response?.data?.message || 'Impossible d’ajouter le contact.');
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // Ajouter le contact
-    const { error: insertError } = await supabase
-      .from('contacts')
-      .insert({ user_id: userId, contact_id: profile.id });
+  return (
+    <View style={{ flex: 1, padding: 20 }}>
+      <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 10 }}>Mes contacts</Text>
 
-    if (insertError) throw insertError;
+      <View style={{ flexDirection: 'row', marginBottom: 20 }}>
+        <TextInput
+          placeholder="Email du contact"
+          value={newEmail}
+          onChangeText={setNewEmail}
+          style={{
+            flex: 1,
+            height: 50,
+            borderColor: '#ccc',
+            borderWidth: 1,
+            borderRadius: 8,
+            paddingHorizontal: 12,
+            backgroundColor: '#fff',
+          }}
+        />
+        <TouchableOpacity
+          onPress={addContact}
+          style={{
+            marginLeft: 10,
+            backgroundColor: '#4CAF50',
+            paddingHorizontal: 20,
+            justifyContent: 'center',
+            borderRadius: 8,
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ajouter</Text>
+        </TouchableOpacity>
+      </View>
 
-    // Mise à jour locale immédiate
-    setContacts(prev => [...prev, profile]);
-    setNewEmail('');
-    Alert.alert('Succès', `Contact ${profile.full_name || profile.email} ajouté.`);
-  } catch (err) {
-    console.error('Erreur add contact:', err);
-    Alert.alert('Erreur', 'Impossible d’ajouter le contact.');
-  }
-};
+      {loading ? (
+        <ActivityIndicator size="large" color="#2196F3" />
+      ) : (
+        <FlatList
+          data={contacts}
+          keyExtractor={(item) => item._id}
+          renderItem={({ item }) => (
+            <View
+              style={{
+                padding: 15,
+                borderBottomWidth: 1,
+                borderBottomColor: '#eee',
+                backgroundColor: '#fff',
+                borderRadius: 8,
+                marginBottom: 10,
+              }}
+            >
+              <Text>{item.fullName || item.email}</Text>
+            </View>
+          )}
+        />
+      )}
+    </View>
+  );
+}

@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const rideRoutes = require('./routes/rideRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 // Chargement des variables d'environnement
 dotenv.config();
@@ -23,7 +24,7 @@ mongoose.connect(process.env.MONGO_URI)
 // Routes
 app.use('/api/rides', rideRoutes); // Préfixe plus clair
 
-
+app.use('/api/user', userRoutes);
 
 // Démarrage du serveur
 const PORT = process.env.PORT || 10000;
