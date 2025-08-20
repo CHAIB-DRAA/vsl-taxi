@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { View, TextInput, TouchableOpacity, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/user';
 
-export default function SignUpScreen({ navigation }) {
+export default function SignUpScreen({ navigation, onSignUp }) {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
@@ -15,11 +16,16 @@ export default function SignUpScreen({ navigation }) {
       Alert.alert('Erreur', 'Veuillez remplir tous les champs');
       return;
     }
+
     setLoading(true);
     try {
       const res = await axios.post(`${API_URL}/signup`, { email, fullName, password });
+      
+      // Sauvegarder le token JWT
+      await AsyncStorage.setItem('token', res.data.token);
+
       Alert.alert('Succès', 'Compte créé avec succès');
-      navigation.navigate('SignIn'); // redirige vers SignIn
+      onSignUp(res.data.user); // remonte l'utilisateur à App.js
     } catch (err) {
       console.error('Signup error:', err.response?.data || err.message);
       Alert.alert('Erreur', err.response?.data?.error || 'Impossible de créer le compte');
