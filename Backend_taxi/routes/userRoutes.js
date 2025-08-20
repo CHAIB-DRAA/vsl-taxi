@@ -13,5 +13,6 @@ router.get('/', getUsers);
 
 // Ajouter un contact
 router.post('/addContact', addContact);
+router.get('/users', authenticateUser, getUsers);
 
 module.exports = router;
