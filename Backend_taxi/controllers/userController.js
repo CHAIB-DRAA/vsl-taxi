@@ -3,8 +3,15 @@ const bcrypt = require('bcrypt');
 
 
 
+// controllers/userController.js
+const User = require('../models/User');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
+// Temps d'expiration du token
+const TOKEN_EXPIRATION = '7d'; // 7 jours
 
+// Signup
 exports.signupUser = async (req, res) => {
   try {
     const { email, fullName, password } = req.body;
@@ -17,12 +24,20 @@ exports.signupUser = async (req, res) => {
     const user = new User({ email, fullName, password: hashedPassword });
     await user.save();
 
-    res.json({ message: 'Utilisateur créé', user: { id: user._id, email: user.email, fullName: user.fullName } });
+    // Générer le token JWT
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: TOKEN_EXPIRATION });
+
+    res.json({ 
+      message: 'Utilisateur créé', 
+      user: { id: user._id, email: user.email, fullName: user.fullName },
+      token
+    });
   } catch (err) {
-    console.error('signupUser error:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
+
+// Login
 exports.loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -32,19 +47,23 @@ exports.loginUser = async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: 'Mot de passe incorrect' });
 
-    res.json({ message: 'Connexion réussie', user: { id: user._id, email: user.email, fullName: user.fullName } });
+    // Générer le token JWT
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: TOKEN_EXPIRATION });
+
+    res.json({ 
+      message: 'Connexion réussie', 
+      user: { id: user._id, email: user.email, fullName: user.fullName },
+      token
+    });
   } catch (err) {
-    console.error('loginUser error:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
 
-
-// Récupérer tous les utilisateurs sauf soi
+// Récupérer tous les utilisateurs
 exports.getUsers = async (req, res) => {
   try {
-    const { userId } = req.query;
-    const users = await User.find({ _id: { $ne: userId } }, 'email fullName');
+    const users = await User.find({}, 'fullName email'); 
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });

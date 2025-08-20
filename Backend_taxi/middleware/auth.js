@@ -1,12 +1,8 @@
 require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
+const jwt = require('jsonwebtoken');
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
-const authenticateUser = async (req, res, next) => {
+// Middleware d'authentification JWT
+const authenticateUser = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.status(401).json({ error: 'Token manquant' });
@@ -14,14 +10,15 @@ const authenticateUser = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Token invalide' });
 
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data.user) return res.status(401).json({ error: 'Utilisateur non valide' });
+    // Vérifie le token JWT
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded || !decoded.id) return res.status(401).json({ error: 'Token invalide' });
 
-    // Injecte l'id Supabase dans req.user
-    req.user = { id: data.user.id };
+    // Injecte l'id de l'utilisateur dans req.user
+    req.user = { id: decoded.id };
     next();
   } catch (err) {
-    console.error('Erreur authMiddleware:', err);
+    console.error('Erreur authMiddleware:', err.message);
     res.status(401).json({ error: 'Erreur d\'authentification' });
   }
 };

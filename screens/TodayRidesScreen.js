@@ -101,7 +101,7 @@ const TodayRidesScreen = () => {
     let buttonLabel = 'Démarrer';
     let buttonAction = () => handleStartRide(item._id);
     let cardBackground = '#e3f2fd';
-    let buttonColor = '#2196F3';
+    let buttonColor = '#007bff'; // couleur btn principale
     let textColor = '#000';
 
     if (item.startTime && !item.endTime) {
@@ -149,7 +149,7 @@ const TodayRidesScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#2196F3" />
+        <ActivityIndicator size="large" color="#007bff" />
       </View>
     );
   }
@@ -172,7 +172,6 @@ const TodayRidesScreen = () => {
         <Text style={styles.floatingButtonText}>Actualiser</Text>
       </TouchableOpacity>
 
-      {/* Modal pour saisir distance */}
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
@@ -202,19 +201,19 @@ const TodayRidesScreen = () => {
 const styles = StyleSheet.create({
   container: { padding: 10, paddingBottom: 80 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  card: { padding: 15, marginVertical: 8, borderRadius: 12, elevation: 3, position: 'relative' },
+  card: { padding: 15, marginVertical: 8, borderRadius: 8, elevation: 3, position: 'relative' },
   title: { fontWeight: 'bold', fontSize: 16, marginBottom: 4 },
-  button: { marginTop: 10, padding: 10, borderRadius: 6, alignItems: 'center' },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
-  floatingButton: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#FF9800', padding: 15, borderRadius: 50, elevation: 5 },
+  button: { marginTop: 10, padding: 12, borderRadius: 8, alignItems: 'center' },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  floatingButton: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#007bff', padding: 15, borderRadius: 50, elevation: 5 },
   floatingButtonText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
   finishedBadge: { position: 'absolute', top: 10, right: 10, backgroundColor: '#4CAF50', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, zIndex: 10 },
   finishedText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  swipeButton: { backgroundColor: '#FF9800', justifyContent: 'center', alignItems: 'center', width: 90, marginVertical: 8, borderRadius: 12 },
+  swipeButton: { backgroundColor: '#FF9800', justifyContent: 'center', alignItems: 'center', width: 90, marginVertical: 8, borderRadius: 8 },
   swipeButtonText: { color: '#fff', fontWeight: 'bold' },
   modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalContainer: { width: '80%', backgroundColor: '#fff', padding: 20, borderRadius: 10 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10 },
+  modalContainer: { width: '80%', backgroundColor: '#fff', padding: 20, borderRadius: 12 },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 10 },
 });
 
 export default TodayRidesScreen;
