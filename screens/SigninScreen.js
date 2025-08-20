@@ -1,22 +1,27 @@
-// screens/SignInScreen.js
 import React, { useState } from 'react';
-import { View, TextInput, Button, Alert, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { View, TextInput, TouchableOpacity, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import axios from 'axios';
 
-const API_URL = 'http://YOUR_BACKEND_URL/api/user';
+const API_URL = 'https://vsl-taxi.onrender.com/api/user';
 
-export default function SignInScreen({ navigation, setUser }) {
+export default function SignInScreen({ navigation, onSignIn }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const handleSignIn = async () => {
+    if (!email || !password) {
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
+      return;
+    }
     setLoading(true);
     try {
-      const { data } = await axios.post(`${API_URL}/login`, { email, password });
-      setUser(data.user);
+      const res = await axios.post(`${API_URL}/login`, { email, password });
+      const user = res.data.user;
+      onSignIn(user); // remonte l'utilisateur à App.js pour MainTabs
     } catch (err) {
-      Alert.alert('Erreur', err.response?.data?.error || err.message);
+      console.error('Login error:', err.response?.data || err.message);
+      Alert.alert('Erreur', err.response?.data?.error || 'Impossible de se connecter');
     } finally {
       setLoading(false);
     }
@@ -24,17 +29,47 @@ export default function SignInScreen({ navigation, setUser }) {
 
   return (
     <View style={styles.container}>
-      <TextInput placeholder="Email" value={email} onChangeText={setEmail} style={styles.input} />
-      <TextInput placeholder="Mot de passe" secureTextEntry value={password} onChangeText={setPassword} style={styles.input} />
-      <Button title="Se connecter" onPress={handleLogin} disabled={loading} />
-      <TouchableOpacity onPress={() => navigation.navigate('SignUp')} style={{ marginTop: 20 }}>
-        <Text style={{ color: 'blue' }}>Créer un compte</Text>
-      </TouchableOpacity>
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={email}
+        onChangeText={setEmail}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Mot de passe"
+        secureTextEntry
+        autoCapitalize="none"
+        value={password}
+        onChangeText={setPassword}
+      />
+
+      {loading ? (
+        <ActivityIndicator size="large" color="#007bff" style={{ marginVertical: 10 }} />
+      ) : (
+        <>
+          <TouchableOpacity style={styles.button} onPress={handleSignIn}>
+            <Text style={styles.buttonText}>Se connecter</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.button, styles.signUpButton]}
+            onPress={() => navigation.navigate('SignUp')}
+          >
+            <Text style={styles.buttonText}>Créer un compte</Text>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', padding: 20 },
-  input: { height: 50, borderColor: '#ccc', borderWidth: 1, marginBottom: 12, paddingHorizontal: 10 },
+  input: { height: 50, borderColor: '#ccc', borderWidth: 1, borderRadius: 8, marginBottom: 12, paddingHorizontal: 12 },
+  button: { backgroundColor: '#007bff', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
+  signUpButton: { backgroundColor: '#4CAF50' },
+  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
 });

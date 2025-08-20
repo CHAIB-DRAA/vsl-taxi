@@ -1,6 +1,5 @@
 import axios from 'axios';
-const API_URL = 'https://ton-backend.com/api/user';
-
+const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 export const signUp = async (email, fullName, password) => {
   const res = await axios.post(`${API_URL}/signup`, { email, fullName, password });
   return res.data;

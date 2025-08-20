@@ -1,59 +1,58 @@
 // --- Polyfills et Librairies ---
 import 'react-native-url-polyfill/auto';
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Ionicons } from '@expo/vector-icons';
-
-// --- Navigation ---
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 
-// --- Services / API / Auth ---
+// --- Services / Auth ---
 import { supabase } from './lib/supabase';
 import { getRides, setToken } from './services/api';
 
-// --- Composants internes ---
-import Auth from './components/Auth';
+// --- Screens ---
+import SignInScreen from './screens/SignInScreen';
+import SignUpScreen from './screens/SignUpScreen';
 import CreateRideScreen from './screens/CreateRideScreen';
-import HistoryScreen from './screens/HistoryScreen';
-import AgendaScreen from './screens/AgendaScreen';
 import TodayRidesScreen from './screens/TodayRidesScreen';
+import AgendaScreen from './screens/AgendaScreen';
+import HistoryScreen from './screens/HistoryScreen';
 import SettingsScreen from './screens/SettingsScreen';
-import SignupScreen from './screens/SignupScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-function MainTabs({ session, todayRidesCount, fetchTodayRidesCount, navigation }) {
+// --- MainTabs ---
+function MainTabs({ todayRidesCount, fetchTodayRidesCount, navigation }) {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ color, size }) => {
           const icons = {
-            'Créer': 'add-circle-outline',
-            'Agenda': 'calendar-outline',
-            'Historique': 'list-outline',
-            'Aujourd’hui': 'today-outline',
+            Créer: 'add-circle-outline',
+            Aujourd_hui: 'today-outline',
+            Agenda: 'calendar-outline',
+            Historique: 'list-outline',
           };
           return <Ionicons name={icons[route.name]} size={size} color={color} />;
         },
         tabBarActiveTintColor: '#007bff',
         tabBarInactiveTintColor: 'gray',
         headerRight: () => (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
+          <Ionicons
+            name="person-circle-outline"
+            size={30}
+            color="#007bff"
             style={{ marginRight: 15 }}
-          >
-            <Ionicons name="person-circle-outline" size={30} color="#007bff" />
-          </TouchableOpacity>
+            onPress={() => navigation.navigate('Settings')}
+          />
         ),
       })}
     >
       <Tab.Screen name="Créer" component={CreateRideScreen} />
       <Tab.Screen
-        name="Aujourd’hui"
+        name="Aujourd_hui"
         component={TodayRidesScreen}
         options={{ tabBarBadge: todayRidesCount || null }}
         listeners={{ focus: fetchTodayRidesCount }}
@@ -64,6 +63,7 @@ function MainTabs({ session, todayRidesCount, fetchTodayRidesCount, navigation }
   );
 }
 
+// --- App principal ---
 export default function App() {
   const [session, setSession] = useState(null);
   const [todayRidesCount, setTodayRidesCount] = useState(0);
@@ -103,32 +103,31 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, [fetchTodayRidesCount]);
 
-  if (!session || !session.user) return <SignupScreen />;
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <NavigationContainer>
-        <Stack.Navigator>
-          <Stack.Screen
-            name="Main"
-            options={{ headerShown: false }}
-          >
-            {props => (
-              <MainTabs
-                {...props}
-                session={session}
-                todayRidesCount={todayRidesCount}
-                fetchTodayRidesCount={fetchTodayRidesCount}
-              />
-            )}
-          </Stack.Screen>
-          <Stack.Screen
-            name="Settings"
-            component={SettingsScreen}
-            options={{ title: 'Paramètres' }}
-          />
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {!session ? (
+            <>
+              <Stack.Screen name="SignIn" component={SignInScreen} />
+              <Stack.Screen name="SignUp" component={SignUpScreen} />
+            </>
+          ) : (
+            <>
+              <Stack.Screen name="Main">
+                {props => (
+                  <MainTabs
+                    {...props}
+                    todayRidesCount={todayRidesCount}
+                    fetchTodayRidesCount={fetchTodayRidesCount}
+                  />
+                )}
+              </Stack.Screen>
+              <Stack.Screen name="Settings" component={SettingsScreen} />
+            </>
+          )}
         </Stack.Navigator>
       </NavigationContainer>
     </GestureHandlerRootView>
   );
-} 
+}
