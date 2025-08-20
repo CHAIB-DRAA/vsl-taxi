@@ -4,12 +4,12 @@ const authMiddleware = require('../middleware/auth');
 const { addContact, getContacts, deleteContact } = require('../controllers/contactController');
 
 // Ajouter un contact
-router.post('/contacts', authMiddleware, addContact);
+router.post('/', authMiddleware, addContact);
 
 // Récupérer mes contacts
-router.get('/contacts', authMiddleware, getContacts);
+router.get('/', authMiddleware, getContacts);
 
 // Supprimer un contact
-router.delete('/contacts/:contactId', authMiddleware, deleteContact);
+router.delete('/:contactId', authMiddleware, deleteContact);
 
 module.exports = router;
