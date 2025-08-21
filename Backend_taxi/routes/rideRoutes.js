@@ -10,7 +10,12 @@ router.patch('/:id', authMiddleware, rideController.updateRide);
 router.delete('/:id', authMiddleware, rideController.deleteRide);
 router.post('/:id/start', authMiddleware, rideController.startRide);
 router.post('/:id/end', authMiddleware, rideController.endRide);
-router.post('/share', authMiddleware, rideController.shareRide);
-router.post('/share/respond', authMiddleware, rideController.respondToShare);
+
+
+// Partager une course
+router.post('/share', verifyToken, rideController.shareRide);
+
+// Accepter / Refuser un partage
+router.post('/respond', verifyToken, rideController.respondToShare);
 
 module.exports = router;

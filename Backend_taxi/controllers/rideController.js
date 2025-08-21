@@ -101,10 +101,12 @@ exports.shareRide = async (req, res) => {
   try {
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: 'Course introuvable' });
-    if (ride.chauffeurId.toString() !== req.user.id) return res.status(403).json({ message: 'Non autorisé' });
+
+    if (ride.chauffeurId.toString() !== req.user.id)
+      return res.status(403).json({ message: 'Non autorisé' });
 
     const existing = await RideShare.findOne({ rideId, toUserId });
-    if (existing) return res.json({ message: 'Course déjà partagée' });
+    if (existing) return res.status(400).json({ message: 'Course déjà partagée' });
 
     const share = new RideShare({
       rideId,
@@ -114,7 +116,7 @@ exports.shareRide = async (req, res) => {
     });
     await share.save();
 
-    // Marquer la course comme partagée → disparaît de la liste propre
+    // Marquer la course comme partagée
     ride.sharedToOthers = true;
     await ride.save();
 
