@@ -1,6 +1,6 @@
 const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
-const User = require('../models/User'); // <--- il manquait ça
+const User = require('../models/User'); // <--- Assure que le modèle User existe
 
 // Utilitaire : récupérer une course autorisée pour un utilisateur
 const findAuthorizedRide = async (rideId, userId) => {
@@ -18,7 +18,7 @@ const findAuthorizedRide = async (rideId, userId) => {
 // === Créer une course
 exports.createRide = async (req, res) => {
   try {
-    const chauffeurId = req.user.id; // depuis token
+    const chauffeurId = req.user.id;
     const ride = new Ride({ ...req.body, chauffeurId });
     await ride.save();
     res.status(201).json(ride);
@@ -63,6 +63,7 @@ exports.getRides = async (req, res) => {
       return {
         ...ride.toObject(),
         isShared: true,
+        sharedTo: link.toUserId,
         sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
         statusPartage: link.statusPartage
       };
@@ -163,7 +164,16 @@ exports.shareRide = async (req, res) => {
     ride.sharedBy = req.user.id;
     await ride.save();
 
-    res.json({ message: 'Course partagée', share });
+    // Récupérer noms pour frontend
+    const toUser = await User.findById(toUserId).select('fullName email');
+
+    res.json({ 
+      message: 'Course partagée', 
+      share: {
+        ...share.toObject(),
+        toUserName: toUser?.fullName || toUser?.email || 'Utilisateur'
+      } 
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -182,7 +192,18 @@ exports.respondToShare = async (req, res) => {
     share.statusPartage = action;
     await share.save();
 
-    res.json({ message: `Course ${action}`, share });
+    // Récupérer noms pour frontend
+    const fromUser = await User.findById(share.fromUserId).select('fullName email');
+    const toUser = await User.findById(share.toUserId).select('fullName email');
+
+    res.json({
+      message: `Course ${action}`,
+      share: {
+        ...share.toObject(),
+        fromUserName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
+        toUserName: toUser?.fullName || toUser?.email || 'Utilisateur'
+      }
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
