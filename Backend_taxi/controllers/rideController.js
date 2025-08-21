@@ -1,7 +1,7 @@
 const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
 const User = require('../models/User'); // Assure que le modèle User existe
-
+const { verifyToken } = require('../middleware/auth'); // <-- Ajoute cette ligne
 // -------------------
 // Utilitaire : récupérer une course autorisée
 // -------------------

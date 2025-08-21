@@ -13,9 +13,9 @@ router.post('/:id/end', authMiddleware, rideController.endRide);
 
 
 // Partager une course
-router.post('/share', verifyToken, rideController.shareRide);
+router.post('/share', authMiddleware, rideController.shareRide);
 
 // Accepter / Refuser un partage
-router.post('/respond', verifyToken, rideController.respondToShare);
+router.post('/respond', authMiddleware, rideController.respondToShare);
 
 module.exports = router;
