@@ -193,7 +193,6 @@ exports.respondToShare = async (req, res) => {
     const share = await RideShare.findById(shareId);
     if (!share) return res.status(404).json({ message: 'Invitation introuvable' });
 
-    // Seul le destinataire peut répondre
     if (String(share.toUserId) !== String(req.user.id)) {
       return res.status(403).json({ message: 'Non autorisé' });
     }
@@ -202,32 +201,41 @@ exports.respondToShare = async (req, res) => {
       return res.status(400).json({ message: `Invitation déjà ${share.statusPartage}` });
     }
 
-    // Récupérer la course
     const ride = await Ride.findById(share.rideId);
     if (!ride) return res.status(404).json({ message: 'Course introuvable' });
 
+    // === CAS DECLINED ===
     if (action === 'declined') {
       share.statusPartage = 'declined';
       await share.save();
-      return res.json({ message: 'Invitation refusée', share });
+
+      // Si plus aucune invitation active => isShared false
+      const stillShared = await RideShare.countDocuments({
+        rideId: ride._id,
+        statusPartage: { $in: ['pending', 'accepted'] }
+      });
+
+      if (!stillShared) {
+        ride.isShared = false;
+        await ride.save();
+      }
+
+      return res.json({ message: 'Invitation refusée', share, ride });
     }
 
-    // === ACCEPTED => TRANSFERT DE PROPRIÉTÉ ===
-    // Par sécurité : la course doit toujours appartenir à l’émetteur
+    // === CAS ACCEPTED ===
     if (String(ride.chauffeurId) !== String(share.fromUserId)) {
       return res.status(409).json({ message: 'La course a changé de propriétaire entre-temps' });
     }
 
-    // Transférer la propriété au destinataire
     ride.chauffeurId = share.toUserId;
+    ride.isShared = true; // toujours partagé vers le nouveau chauffeur
     await ride.save();
 
-    // Marquer l’invitation comme acceptée
     share.statusPartage = 'accepted';
     share.acceptedAt = new Date();
     await share.save();
 
-    // Annuler toutes les autres invitations encore "pending" pour la même course
     await RideShare.updateMany(
       { rideId: ride._id, _id: { $ne: share._id }, statusPartage: 'pending' },
       { $set: { statusPartage: 'cancelled' } }
@@ -239,6 +247,7 @@ exports.respondToShare = async (req, res) => {
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };
+
 
 
 // -------------------

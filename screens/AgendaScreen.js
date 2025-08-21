@@ -37,14 +37,21 @@ export default function AgendaScreen() {
       });
 
       const ridesData = res.data || [];
+      // Filtrer les courses déclinées
       const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'declined');
 
-      console.log('📊 Courses récupérées:', visibleRides);
+      console.log('📊 Courses récupérées:', visibleRides.map(r => ({
+        _id: r._id,
+        patientName: r.patientName,
+        isShared: r.isShared,
+        sharedByName: r.sharedByName,
+        statusPartage: r.statusPartage
+      })));
 
       setRides(visibleRides);
       markRidesOnCalendar(visibleRides);
     } catch (err) {
-      console.error(err);
+      console.error('Erreur fetchRides:', err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
     } finally {
       setLoading(false);
@@ -61,7 +68,7 @@ export default function AgendaScreen() {
       setContacts(res.data || []);
       console.log('📤 Contacts récupérés:', res.data);
     } catch (err) {
-      console.error(err);
+      console.error('Erreur fetchContacts:', err);
       Alert.alert('Erreur', 'Impossible de récupérer les contacts.');
     }
   };
@@ -74,26 +81,36 @@ export default function AgendaScreen() {
   // --- Partager une course ---
   const handleShareRide = async (rideId, contact) => {
     try {
+      // ✅ Récupérer l'ID du chauffeur réel depuis contactId
+      const toUserId = contact.contactId;
+  
+      if (!toUserId) {
+        return Alert.alert('Erreur', 'Impossible de partager : ID du chauffeur manquant.');
+      }
+  
+      console.log('🔹 Tentative partage:', { rideId, toUserId });
+  
       const token = await AsyncStorage.getItem('token');
-      const res = await axios.post(`${API_URL}/share`, { rideId, toUserId: contact.userId }, {
+      const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-
+  
       console.log('📤 Résultat partage:', res.data);
-
+  
       if (res.data.share) {
-        Alert.alert('Succès', 'Course partagée !');
+        Alert.alert('Succès', `Course partagée avec ${contact.fullName || contact.email} !`);
         setShareModalVisible(false);
-        fetchRides();
+        fetchRides(); // recharge pour voir la course partagée
       } else {
         Alert.alert('Erreur', res.data.message);
       }
     } catch (err) {
-      console.error(err);
+      console.error('Erreur handleShareRide:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
-
+  
+  
   // --- Accepter / Refuser un partage ---
   const respondToShare = async (shareId, action) => {
     try {
@@ -104,37 +121,45 @@ export default function AgendaScreen() {
 
       setRides(prev => prev.map(r => {
         if (r.shareId === shareId) {
-          if (action === 'declined') return null;
-          return { ...r, statusPartage: action };
+          if (action === 'declined') {
+            // Retire complètement la course partagée OU met à jour son isShared
+            return { ...r, statusPartage: 'declined', isShared: false };
+          }
+          return { ...r, statusPartage: 'accepted', isShared: true };
         }
         return r;
       }).filter(Boolean));
-
-      console.log(`🔄 Partage ${action}:`, shareId);
+      
     } catch (err) {
-      console.error(err);
+      console.error('Erreur respondToShare:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
     }
   };
 
-  // --- Marquer les jours avec dots ---
+  // --- Marquer uniquement les jours avec courses ---
   const markRidesOnCalendar = (ridesList) => {
     const marks = {};
-    ridesList.forEach(ride => {
-      const day = moment(ride.date).format('YYYY-MM-DD');
-      if (!marks[day]) marks[day] = { dots: [] };
+    const uniqueDates = [...new Set(ridesList.map(r => moment(r.date).format('YYYY-MM-DD')))];
 
-      if (!ride.isShared) marks[day].dots.push({ key: `${ride._id}-own`, color: '#4CAF50' });
-      else if (ride.isShared && ride.sharedBy && !ride.sharedToName)
-        marks[day].dots.push({ key: `${ride._id}-toMe`, color: '#FF9800' });
-      else if (ride.isShared && ride.sharedToName)
-        marks[day].dots.push({ key: `${ride._id}-byMe`, color: '#2196F3' });
+    uniqueDates.forEach(day => {
+      const dayRides = ridesList.filter(r => moment(r.date).format('YYYY-MM-DD') === day);
+      marks[day] = { dots: [] };
+
+      dayRides.forEach(ride => {
+        if (!ride.isShared) marks[day].dots.push({ key: `${ride._id}-own`, color: '#4CAF50' });
+        else if (ride.isShared && ride.sharedBy && !ride.sharedToName)
+          marks[day].dots.push({ key: `${ride._id}-toMe`, color: '#FF9800' });
+        else if (ride.isShared && ride.sharedToName)
+          marks[day].dots.push({ key: `${ride._id}-byMe`, color: '#2196F3' });
+      });
     });
 
     if (!marks[selectedDate]) marks[selectedDate] = { dots: [] };
     marks[selectedDate].selected = true;
     marks[selectedDate].selectedColor = '#4CAF50';
     setMarkedDates(marks);
+
+    console.log('📅 Calendrier marqué:', marks);
   };
 
   const getRideColor = (ride) => {
@@ -288,5 +313,6 @@ const styles = StyleSheet.create({
   modalContent: { width: '90%', backgroundColor: '#fff', padding: 15, borderRadius: 8 },
   modalTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10 },
   contactButton: { padding: 10, backgroundColor: '#E0E0E0', borderRadius: 6 },
-  contactText: { fontSize: 14 }
+  contactText: { fontSize: 14 },
+  emptyText: { textAlign: 'center', marginTop: 20, color: '#888' }
 });
