@@ -102,7 +102,6 @@ exports.getRides = async (req, res) => {
 
 
 // --- POST /api/rides/share ---
-// Crée une invitation de partage (statut 'pending'). NE TRANSFÈRE PAS encore.
 exports.shareRide = async (req, res) => {
   try {
     const { rideId, toUserId } = req.body;
@@ -126,6 +125,7 @@ exports.shareRide = async (req, res) => {
     const exists = await RideShare.findOne({ rideId, toUserId });
     if (exists) return res.status(400).json({ message: 'Course déjà partagée avec cet utilisateur' });
 
+    // 1️⃣ Créer l’invitation
     const share = await RideShare.create({
       rideId,
       fromUserId: req.user.id,
@@ -133,12 +133,29 @@ exports.shareRide = async (req, res) => {
       statusPartage: 'pending'
     });
 
-    return res.status(201).json({ message: 'Invitation envoyée', share });
+    // 2️⃣ Mettre à jour la course pour indiquer qu’elle est partagée
+    if (!ride.isShared) {
+      ride.isShared = true;
+      ride.sharedBy = [req.user.id]; // tableau pour multiples partages
+    } else {
+      if (!Array.isArray(ride.sharedBy)) ride.sharedBy = [];
+      if (!ride.sharedBy.includes(req.user.id)) ride.sharedBy.push(req.user.id);
+    }
+    ride.updatedAt = new Date();
+    await ride.save();
+
+    // 3️⃣ Rendre la course visible pour le destinataire
+    // Dans la plupart des apps, on filtre côté front / backend en joignant Ride et RideShare
+    // Exemple pour MongoDB: trouver toutes les courses partagées à l'utilisateur
+    // rides = await Ride.find({ $or: [{ chauffeurId: userId }, { _id: { $in: rideshareIds } }] });
+
+    return res.status(201).json({ message: 'Invitation envoyée et course partagée', share });
   } catch (err) {
     console.error('shareRide error:', err);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };
+
 
 
 // --- POST /api/rides/respond ---
