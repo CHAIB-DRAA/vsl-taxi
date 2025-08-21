@@ -87,7 +87,6 @@ exports.addContact = async (req, res) => {
 };
 
 
-/ Nouvelle route : rechercher des utilisateurs
 router.get('/search', authMiddleware, async (req, res) => {
   try {
     const { search } = req.query;
