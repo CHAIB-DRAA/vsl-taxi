@@ -86,22 +86,14 @@ exports.addContact = async (req, res) => {
   }
 };
 
-
-router.get('/search', authMiddleware, async (req, res) => {
+exports.searchUsers = async (req, res) => {
   try {
-    const { search } = req.query;
-    const regex = search ? { $regex: search, $options: 'i' } : {};
-
-    const users = await User.find(
-      { $or: [{ fullName: regex }, { email: regex }] },
-      '_id fullName email'
-    );
-
-    // Optionnel : exclure l'utilisateur courant
-    const filteredUsers = users.filter(u => u._id.toString() !== req.user.id);
-
-    res.json(filteredUsers);
+    const searchQuery = req.query.search || '';
+    const users = await User.find({
+      fullName: { $regex: searchQuery, $options: 'i' }
+    }, 'fullName email');
+    res.json(users);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
