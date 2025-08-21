@@ -54,40 +54,66 @@ exports.getRides = async (req, res) => {
     const userId = req.user.id;
     const { date } = req.query;
 
+    console.log('📅 Paramètres reçus:', { userId, date });
+
     let start = null, end = null;
     if (date) {
       const d = new Date(date);
-      if (isNaN(d.valueOf())) return res.status(400).json({ message: 'Date invalide' });
-      start = new Date(d.setHours(0,0,0,0));
-      end   = new Date(d.setHours(23,59,59,999));
+      if (isNaN(d.valueOf())) {
+        console.log('❌ Date invalide:', date);
+        return res.status(400).json({ message: 'Date invalide' });
+      }
+      start = new Date(d.setHours(0, 0, 0, 0));
+      end = new Date(d.setHours(23, 59, 59, 999));
     }
 
-    // 1️⃣ Courses propres
+    // 1️⃣ Tes courses (propriétaire)
     const ownQuery = { chauffeurId: userId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
+    console.log('✅ Courses propres trouvées:', ownRides.length);
 
-    // 2️⃣ Courses partagées vers moi (pending ou accepted)
+    // 2️⃣ Partages reçus (pending + accepted)
     const shares = await RideShare.find({ toUserId: userId }).lean();
-    const sharedIds = shares.map(s => s.rideId);
-    const sharedQuery = { _id: { $in: sharedIds } };
-    if (start && end) sharedQuery.date = { $gte: start, $lte: end };
-    const sharedRidesRaw = await Ride.find(sharedQuery).lean();
+    console.log('🔄 Shares reçus:', shares.length);
 
-    // 3️⃣ Décoration pour le front
-    const sharedRides = sharedRidesRaw.map(ride => {
-      const link = shares.find(s => String(s.rideId) === String(ride._id));
-      return {
-        ...ride,
-        isShared: true,
-        sharedBy: link.fromUserId,
-        sharedByName: link.fromUserId, // ou récupérer le nom depuis User.findById si besoin
-        statusPartage: link.statusPartage,
-        shareId: link._id
-      };
-    });
+    const shareIds = shares.map(s => s.rideId);
+    console.log('🔑 RideIds partagés:', shareIds);
 
-    const allRides = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
+    let sharedRidesRaw = [];
+    if (shareIds.length > 0) {
+      const sharedQuery = { _id: { $in: shareIds } };
+      if (start && end) sharedQuery.date = { $gte: start, $lte: end };
+      sharedRidesRaw = await Ride.find(sharedQuery).lean();
+    }
+    console.log('🚀 Courses partagées trouvées:', sharedRidesRaw.length);
+
+    const sharedRides = await Promise.all(
+      sharedRidesRaw.map(async (ride) => {
+        const link = shares.find(s => String(s.rideId) === String(ride._id));
+        if (!link) {
+          console.log('⚠️ Aucun lien trouvé pour rideId:', ride._id);
+          return null;
+        }
+        const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
+        return {
+          ...ride,
+          isShared: true,
+          sharedBy: link.fromUserId,
+          sharedByName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
+          statusPartage: link.statusPartage, // pending ou accepted
+          shareId: link._id
+        };
+      })
+    ).then(arr => arr.filter(Boolean));
+
+    console.log('📦 SharedRides décorés:', sharedRides.length);
+
+    // 3️⃣ Combine tout et trie
+    const allRides = [...ownRides, ...sharedRides].sort(
+      (a, b) => new Date(a.date) - new Date(b.date)
+    );
+    console.log('📊 Total courses envoyées:', allRides.length);
 
     res.json(allRides);
   } catch (err) {
@@ -95,7 +121,6 @@ exports.getRides = async (req, res) => {
     res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };
-
 
 
 exports.shareRide = async (req, res) => {

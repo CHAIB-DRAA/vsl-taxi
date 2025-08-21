@@ -4,19 +4,22 @@ import {
   Alert, TouchableOpacity, Modal, FlatList
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
+import axios from 'axios';
 import moment from 'moment';
 import 'moment/locale/fr';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { getRides, getContacts, shareRide, respondToShare } from '../services/api'; // ton fichier API
-
 moment.locale('fr');
+
+const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
+const CONTACTS_API = 'https://vsl-taxi.onrender.com/api/contacts';
+const SHARE_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
 
 export default function AgendaScreen() {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
   const [rides, setRides] = useState([]);
-  const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [contacts, setContacts] = useState([]);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
   const [markedDates, setMarkedDates] = useState({});
@@ -26,9 +29,17 @@ export default function AgendaScreen() {
   const fetchRides = async () => {
     try {
       setLoading(true);
-      const data = await getRides(selectedDate);
-      setRides(data.filter(r => r.statusPartage !== 'declined'));
-      markRidesOnCalendar(data);
+      const token = await AsyncStorage.getItem('token');
+      if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
+
+      const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const ridesData = res.data || [];
+      const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'declined');
+      setRides(visibleRides);
+      markRidesOnCalendar(visibleRides);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
@@ -40,8 +51,11 @@ export default function AgendaScreen() {
   // --- Fetch contacts ---
   const fetchContacts = async () => {
     try {
-      const data = await getContacts();
-      setContacts(data);
+      const token = await AsyncStorage.getItem('token');
+      const res = await axios.get(CONTACTS_API, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setContacts(res.data || []);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de récupérer les contacts.');
@@ -56,10 +70,18 @@ export default function AgendaScreen() {
   // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
     try {
-      await shareRide(rideId, contactId);
-      Alert.alert('Succès', 'Invitation envoyée !');
-      setShareModalVisible(false);
-      fetchRides(); // rafraîchir la liste pour voir le partage
+      const token = await AsyncStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/share`, { rideId, toUserId: contactId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data.share) {
+        Alert.alert('Succès', 'Course partagée !');
+        setShareModalVisible(false);
+        fetchRides(); // recharge pour voir la course partagée
+      } else {
+        Alert.alert('Erreur', res.data.message);
+      }
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de partager la course.');
@@ -67,10 +89,13 @@ export default function AgendaScreen() {
   };
 
   // --- Accepter / Refuser un partage ---
-  const handleRespondToShare = async (shareId, action) => {
+  const respondToShare = async (shareId, action) => {
     try {
-      await respondToShare(shareId, action);
-      fetchRides(); // rafraîchir la liste
+      const token = await AsyncStorage.getItem('token');
+      await axios.post(SHARE_API, { shareId, action }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchRides(); // recharge après réponse
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
@@ -164,13 +189,13 @@ export default function AgendaScreen() {
                 <View style={{ flexDirection: 'row', marginTop: 5 }}>
                   <TouchableOpacity
                     style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-                    onPress={() => handleRespondToShare(ride.shareId, 'accepted')}
+                    onPress={() => respondToShare(ride.shareId, 'accepted')}
                   >
                     <Text style={styles.shareButtonText}>Accepter</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-                    onPress={() => handleRespondToShare(ride.shareId, 'declined')}
+                    onPress={() => respondToShare(ride.shareId, 'declined')}
                   >
                     <Text style={styles.shareButtonText}>Refuser</Text>
                   </TouchableOpacity>
