@@ -28,34 +28,31 @@ exports.createRide = async (req, res) => {
 };
 
 // === Récupérer toutes les courses (propres + partagées)
-// === Récupérer toutes les courses (propres + partagées) avec noms des utilisateurs
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Courses propres
+    // 1️⃣ Courses propres
     const ownRides = await Ride.find({ chauffeurId: userId });
 
-    // Partages vers moi
+    // 2️⃣ Courses partagées vers moi
     const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
     const sharedRideIds = sharedLinks.map(l => l.rideId);
     const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
 
-    // Ajouter informations sur partage
     const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
       const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const sharedByUser = await User.findById(link.fromUserId); // récupérer nom de l’expéditeur
-
+      const sharedByUser = await User.findById(link.fromUserId);
       return {
         ...ride.toObject(),
         isShared: true,
-        statusPartage: link?.statusPartage || 'pending',
         sharedBy: link.fromUserId,
-        sharedByName: sharedByUser?.fullName || sharedByUser?.email || 'Utilisateur'
+        sharedByName: sharedByUser?.fullName || sharedByUser?.email || 'Utilisateur',
+        statusPartage: link.statusPartage
       };
     }));
 
-    // Courses que j’ai partagées à d’autres
+    // 3️⃣ Courses que j’ai partagées à d’autres
     const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
     const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
     const sharedByMeRidesRaw = await Ride.find({ _id: { $in: sharedByMeIds } });
@@ -66,21 +63,21 @@ exports.getRides = async (req, res) => {
       return {
         ...ride.toObject(),
         isShared: true,
-        statusPartage: link.statusPartage,
-        sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur'
+        sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
+        statusPartage: link.statusPartage
       };
     }));
 
+    // 4️⃣ Combiner toutes les courses et trier par date
     const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
-
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
-
 
 // === Mettre à jour une course
 exports.updateRide = async (req, res) => {

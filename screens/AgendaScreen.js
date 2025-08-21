@@ -23,7 +23,7 @@ export default function AgendaScreen() {
   const [selectedRide, setSelectedRide] = useState(null);
   const [showCalendar, setShowCalendar] = useState(true);
 
-  // --- Fetch courses ---
+  // --- Charger courses ---
   const fetchRides = async () => {
     try {
       setLoading(true);
@@ -42,7 +42,7 @@ export default function AgendaScreen() {
     }
   };
 
-  // --- Fetch contacts ---
+  // --- Charger contacts ---
   const fetchContacts = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
@@ -61,7 +61,7 @@ export default function AgendaScreen() {
     fetchContacts();
   }, [selectedDate]);
 
-  // --- Partager une course ---
+  // --- Partager course ---
   const handleShareRide = async (rideId, contactId) => {
     try {
       const token = await AsyncStorage.getItem('token');
@@ -70,17 +70,17 @@ export default function AgendaScreen() {
       });
       Alert.alert('Succès', 'Course partagée !');
       setShareModalVisible(false);
-      fetchRides();
+      fetchRides(); // rafraîchir les courses
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
 
-  // --- Déterminer couleur ---
+  // --- Couleur selon type de course ---
   const getRideColor = (ride) => {
-    if (ride.isShared && ride.sharedBy !== ride.chauffeurId) return '#FF9800'; // partagée vers toi
-    if (ride.isShared && ride.sharedBy === ride.chauffeurId) return '#2196F3'; // tu as partagé
+    if (ride.isShared && ride.sharedBy !== ride.chauffeurId) return '#FF9800'; // Partagée vers moi
+    if (ride.isShared && ride.sharedBy === ride.chauffeurId) return '#2196F3'; // Je l’ai partagée
     if (ride.type === 'Aller') return '#4CAF50';
     if (ride.type === 'Retour') return '#607D8B';
     return '#888';
