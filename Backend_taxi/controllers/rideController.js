@@ -42,13 +42,6 @@ exports.createRide = async (req, res) => {
   }
 };
 
-// -------------------
-// Récupérer toutes les courses (propres + partagées)
-// -------------------
-// === Récupérer toutes les courses (propres + partagées) ===
-const Ride = require('../models/Ride');
-const RideShare = require('../models/RideShare');
-const User = require('../models/User');
 
 // --- GET /api/rides?date=YYYY-MM-DD ---
 // Renvoie :
