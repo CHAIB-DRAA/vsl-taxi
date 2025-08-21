@@ -4,9 +4,10 @@ const User = require('../models/User');
 // -----------------------------
 // Ajouter un contact
 // -----------------------------
+// Ajouter un contact
 exports.addContact = async (req, res) => {
   try {
-    const userId = req.user?._id?.toString(); // sécurisation
+    const userId = req.user?.id; // <-- ici
     const { contactId } = req.body;
 
     if (!userId) return res.status(401).json({ error: 'Utilisateur non authentifié' });
@@ -36,18 +37,16 @@ exports.addContact = async (req, res) => {
   }
 };
 
-// -----------------------------
 // Récupérer tous les contacts
-// -----------------------------
 exports.getContacts = async (req, res) => {
   try {
-    const userId = req.user?._id?.toString();
+    const userId = req.user?.id; // <-- ici
     if (!userId) return res.status(401).json({ error: 'Utilisateur non authentifié' });
 
     console.log('📥 Récupération contacts pour userId =', userId);
     const contacts = await Contact.find({ userId })
                                   .sort({ createdAt: -1 })
-                                  .populate('contactId', 'fullName email'); // assure-toi que ref: 'User' est correct dans le modèle
+                                  .populate('contactId', 'fullName email');
 
     console.log('📤 Contacts trouvés :', contacts.length);
     res.json(contacts);
@@ -58,12 +57,10 @@ exports.getContacts = async (req, res) => {
   }
 };
 
-// -----------------------------
 // Supprimer un contact
-// -----------------------------
 exports.deleteContact = async (req, res) => {
   try {
-    const userId = req.user?._id?.toString();
+    const userId = req.user?.id; // <-- ici
     const contactId = req.params.contactId;
 
     if (!userId) return res.status(401).json({ error: 'Utilisateur non authentifié' });

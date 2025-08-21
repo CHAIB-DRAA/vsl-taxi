@@ -9,52 +9,36 @@ import {
   Alert,
   StyleSheet,
 } from 'react-native';
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const CONTACTS_URL = 'https://vsl-taxi.onrender.com/api/contacts';
-const USERS_URL = 'https://vsl-taxi.onrender.com/api/user/search';
+import { getContacts, addContact, deleteContact, searchUsers } from '../services/contactService';
 
 export default function ContactsScreen() {
-  const [users, setUsers] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Récupérer le token
-  const getToken = async () => {
-    return await AsyncStorage.getItem('token');
-  };
-
-  // Charger les contacts
+  // Charger contacts
   const fetchContacts = async () => {
     try {
       setLoading(true);
-      const token = await getToken();
-      const res = await axios.get(CONTACTS_URL, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setContacts(res.data);
+      const data = await getContacts();
+      setContacts(data);
     } catch (err) {
-      console.error(err);
+      console.error('❌ Erreur getContacts:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de charger les contacts.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Charger les utilisateurs (sauf soi-même) avec recherche
+  // Charger utilisateurs
   const fetchUsers = async (query = '') => {
     try {
       setLoading(true);
-      const token = await getToken();
-      const url = `${USERS_URL}${query ? `?search=${query}` : ''}`;
-      const res = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setUsers(res.data);
+      const data = await searchUsers(query);
+      setUsers(data);
     } catch (err) {
-      console.error(err);
+      console.error('❌ Erreur searchUsers:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de charger les utilisateurs.');
     } finally {
       setLoading(false);
@@ -62,48 +46,40 @@ export default function ContactsScreen() {
   };
 
   // Ajouter un contact
-  const addContact = async (contactId) => {
+  const handleAddContact = async (contactId) => {
     try {
-      const token = await getToken();
-      await axios.post(
-        CONTACTS_URL,
-        { contactId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await addContact(contactId);
       Alert.alert('Succès', 'Contact ajouté !');
       fetchContacts();
     } catch (err) {
-      console.error(err);
+      console.error('❌ Erreur addContact:', err.response?.data || err.message);
       Alert.alert('Erreur', err.response?.data?.error || 'Impossible d’ajouter le contact.');
     }
   };
 
   // Supprimer un contact
-  const deleteContact = async (contactId) => {
+  const handleDeleteContact = async (contactId) => {
     try {
-      const token = await getToken();
-      await axios.delete(`${CONTACTS_URL}/${contactId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await deleteContact(contactId);
       Alert.alert('Succès', 'Contact supprimé !');
       fetchContacts();
     } catch (err) {
-      console.error(err);
+      console.error('❌ Erreur deleteContact:', err.response?.data || err.message);
       Alert.alert('Erreur', err.response?.data?.error || 'Impossible de supprimer le contact.');
     }
   };
-
-  // Charger au montage
-  useEffect(() => {
-    fetchContacts();
-    fetchUsers();
-  }, []);
 
   // Recherche
   const handleSearch = (text) => {
     setSearch(text);
     fetchUsers(text);
   };
+
+  // Initial load
+  useEffect(() => {
+    fetchContacts();
+    fetchUsers();
+  }, []);
 
   if (loading) return <ActivityIndicator size="large" color="#4CAF50" style={{ flex: 1 }} />;
 
@@ -118,8 +94,8 @@ export default function ContactsScreen() {
           <View style={styles.contactItem}>
             <Text>{item.fullName || item.email}</Text>
             <TouchableOpacity
-              onPress={() => deleteContact(item.contactId._id)}
               style={styles.deleteButton}
+              onPress={() => handleDeleteContact(item.contactId._id)}
             >
               <Text style={styles.deleteText}>Supprimer</Text>
             </TouchableOpacity>
@@ -141,7 +117,7 @@ export default function ContactsScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.addButton}
-            onPress={() => addContact(item._id)}
+            onPress={() => handleAddContact(item._id)}
           >
             <Text style={styles.addText}>{item.fullName || item.email}</Text>
           </TouchableOpacity>

@@ -1,31 +1,39 @@
 import axios from 'axios';
-import { supabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/contacts';
+const USERS_URL = 'https://vsl-taxi.onrender.com/api/user/search';
 
+// Récupérer config Axios avec token
 const getConfig = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
-  return { headers: { Authorization: `Bearer ${session?.access_token}` } };
+  const token = await AsyncStorage.getItem('token');
+  if (!token) throw new Error('Token manquant');
+  return { headers: { Authorization: `Bearer ${token}` } };
 };
 
-export const addContactMongo = async (profile) => {
+// --- Contacts ---
+export const getContacts = async () => {
   const config = await getConfig();
-  const response = await axios.post(API_URL, {
-    contactId: profile.id,
-    email: profile.email,
-    fullName: profile.full_name,
-  }, config);
-  return response.data;
+  const res = await axios.get(API_URL, config);
+  return res.data;
 };
 
-export const getContactsMongo = async () => {
+export const addContact = async (contactId) => {
   const config = await getConfig();
-  const response = await axios.get(API_URL, config);
-  return response.data;
+  const res = await axios.post(API_URL, { contactId }, config);
+  return res.data;
 };
 
-export const deleteContactMongo = async (contactId) => {
+export const deleteContact = async (contactId) => {
   const config = await getConfig();
-  const response = await axios.delete(`${API_URL}/${contactId}`, config);
-  return response.data;
+  const res = await axios.delete(`${API_URL}/${contactId}`, config);
+  return res.data;
+};
+
+// --- Utilisateurs (recherche) ---
+export const searchUsers = async (query = '') => {
+  const config = await getConfig();
+  const url = `${USERS_URL}${query ? `?search=${query}` : ''}`;
+  const res = await axios.get(url, config);
+  return res.data;
 };
