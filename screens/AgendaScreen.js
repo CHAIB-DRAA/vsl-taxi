@@ -23,6 +23,7 @@ export default function AgendaScreen() {
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
   const [markedDates, setMarkedDates] = useState({});
+  const [calendarVisible, setCalendarVisible] = useState(true); // pour masquer/afficher le calendrier
 
   // --- Fetch courses ---
   const fetchRides = async () => {
@@ -71,21 +72,24 @@ export default function AgendaScreen() {
     fetchContacts();
   }, [selectedDate]);
 
-  // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
     try {
       const token = await AsyncStorage.getItem('token');
       await axios.post(`${API_URL}/share`, { rideId, toUserId: contactId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+  
+      // Supprimer localement la course partagée
+      setRides(prev => prev.filter(r => r._id !== rideId));
+  
       Alert.alert('Succès', 'Course partagée !');
       setShareModalVisible(false);
-      fetchRides();
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
+  
 
   // --- Accepter / Refuser un partage ---
   const respondToShare = async (shareId, action) => {
@@ -126,7 +130,6 @@ export default function AgendaScreen() {
     setMarkedDates(marks);
   };
 
-  // --- Couleur pour affichage ---
   const getRideColor = (ride) => {
     if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) return '#FF9800';
     if (ride.isShared && ride.sharedToName) return '#2196F3';
@@ -135,7 +138,6 @@ export default function AgendaScreen() {
     return '#888';
   };
 
-  // --- Texte pour statut partagé ---
   const getSharedText = (ride) => {
     if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) {
       return `Partagée par : ${ride.sharedByName} (${ride.statusPartage})`;
@@ -148,17 +150,29 @@ export default function AgendaScreen() {
 
   return (
     <View style={styles.container}>
-      <Calendar
-        onDayPress={(day) => setSelectedDate(day.dateString)}
-        markedDates={markedDates}
-        markingType={'multi-dot'}
-        theme={{
-          todayTextColor: '#FF9800',
-          arrowColor: '#4CAF50',
-          monthTextColor: '#000',
-          textMonthFontWeight: 'bold'
-        }}
-      />
+
+      <TouchableOpacity
+        style={[styles.shareButton, { backgroundColor: '#607D8B', marginBottom: 10 }]}
+        onPress={() => setCalendarVisible(!calendarVisible)}
+      >
+        <Text style={styles.shareButtonText}>
+          {calendarVisible ? 'Masquer le calendrier' : 'Afficher le calendrier'}
+        </Text>
+      </TouchableOpacity>
+
+      {calendarVisible && (
+        <Calendar
+          onDayPress={(day) => setSelectedDate(day.dateString)}
+          markedDates={markedDates}
+          markingType={'multi-dot'}
+          theme={{
+            todayTextColor: '#FF9800',
+            arrowColor: '#4CAF50',
+            monthTextColor: '#000',
+            textMonthFontWeight: 'bold'
+          }}
+        />
+      )}
 
       <Text style={styles.title}>
         Courses du {moment(selectedDate).format('DD MMMM YYYY')}
@@ -170,45 +184,49 @@ export default function AgendaScreen() {
         <ScrollView style={styles.ridesList}>
           {rides.length === 0 ? (
             <Text style={styles.emptyText}>Aucune course prévue.</Text>
-          ) : rides.map((ride) => (
-            <View key={ride._id} style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}>
-              <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
-              <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
-              <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
+          ) : rides.map((ride) => {
+            // clé unique : si partagé -> shareId, sinon _id
+            const key = ride.isShared ? ride.shareId || ride._id : ride._id;
 
-              <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
-                {getSharedText(ride)}
-              </Text>
+            return (
+              <View key={key} style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}>
+                <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
+                <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
+                <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
 
-              {/* Accept / Refuse */}
-              {ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId && ride.statusPartage === 'pending' && (
-                <View style={{ flexDirection: 'row', marginTop: 5 }}>
-                  <TouchableOpacity
-                    style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, 'accepted')}
-                  >
-                    <Text style={styles.shareButtonText}>Accepter</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, 'declined')}
-                  >
-                    <Text style={styles.shareButtonText}>Refuser</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+                <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
+                  {getSharedText(ride)}
+                </Text>
 
-              <TouchableOpacity
-                style={styles.shareButton}
-                onPress={() => {
-                  setSelectedRide(ride);
-                  setShareModalVisible(true);
-                }}
-              >
-                <Text style={styles.shareButtonText}>Partager</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
+                {ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId && ride.statusPartage === 'pending' && (
+                  <View style={{ flexDirection: 'row', marginTop: 5 }}>
+                    <TouchableOpacity
+                      style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
+                      onPress={() => respondToShare(ride.shareId, 'accepted')}
+                    >
+                      <Text style={styles.shareButtonText}>Accepter</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
+                      onPress={() => respondToShare(ride.shareId, 'declined')}
+                    >
+                      <Text style={styles.shareButtonText}>Refuser</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={styles.shareButton}
+                  onPress={() => {
+                    setSelectedRide(ride);
+                    setShareModalVisible(true);
+                  }}
+                >
+                  <Text style={styles.shareButtonText}>Partager</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
         </ScrollView>
       )}
 
@@ -239,6 +257,7 @@ export default function AgendaScreen() {
           </View>
         </View>
       </Modal>
+
     </View>
   );
 }

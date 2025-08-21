@@ -67,7 +67,7 @@ exports.getRides = async (req, res) => {
     // -----------------------
     // 1️⃣ Courses propres
     // -----------------------
-    const ownQuery = { chauffeurId: userId };
+    const ownQuery = { chauffeurId: userId, sharedToOthers: { $ne: true } };
     if (queryDateStart && queryDateEnd) ownQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
     const ownRides = await Ride.find(ownQuery);
 
@@ -217,8 +217,10 @@ exports.shareRide = async (req, res) => {
     });
     await share.save();
 
+    // Marquer la course comme partagée à d'autres
     ride.isShared = true;
     ride.sharedBy = req.user.id;
+    ride.sharedToOthers = true; // <-- nouveau champ
     await ride.save();
 
     // Récupérer noms pour frontend
