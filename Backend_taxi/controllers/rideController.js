@@ -15,15 +15,34 @@ const findAuthorizedRide = async (rideId, userId) => {
 };
 
 
-// === Créer une course
+// === Créer une course sécurisée ===
 exports.createRide = async (req, res) => {
   try {
-    const chauffeurId = req.user.id;
-    const ride = new Ride({ ...req.body, chauffeurId });
+    const chauffeurId = req.user.id; // depuis token
+    const { date, ...rest } = req.body;
+
+    // Vérifier que la date est valide
+    if (!date) {
+      return res.status(400).json({ message: 'Date manquante' });
+    }
+
+    const rideDate = new Date(date);
+    if (isNaN(rideDate.valueOf())) {
+      return res.status(400).json({ message: 'Date invalide' });
+    }
+
+    // Créer la course avec la date convertie
+    const ride = new Ride({
+      ...rest,
+      date: rideDate,
+      chauffeurId
+    });
+
     await ride.save();
     res.status(201).json(ride);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error('Erreur création course :', err);
+    res.status(500).json({ error: err.message });
   }
 };
 
