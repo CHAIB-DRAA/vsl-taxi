@@ -23,8 +23,6 @@ mongoose.connect(process.env.MONGO_URI)
 
 // Routes
 app.use('/api/rides', rideRoutes);
-
-app.use('/api/rides', rideRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/contacts', contactRoutes); // <- nouveau
 

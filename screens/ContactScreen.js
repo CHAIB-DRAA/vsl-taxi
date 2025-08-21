@@ -12,7 +12,8 @@ import {
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://vsl-taxi.onrender.com/api/contacts';
+const CONTACTS_URL = 'https://vsl-taxi.onrender.com/api/contacts';
+const USERS_URL = 'https://vsl-taxi.onrender.com/api/user/search';
 
 export default function ContactsScreen() {
   const [users, setUsers] = useState([]);
@@ -30,7 +31,7 @@ export default function ContactsScreen() {
     try {
       setLoading(true);
       const token = await getToken();
-      const res = await axios.get(API_URL, {
+      const res = await axios.get(CONTACTS_URL, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setContacts(res.data);
@@ -47,8 +48,9 @@ export default function ContactsScreen() {
     try {
       setLoading(true);
       const token = await getToken();
-      const res = await axios.get(`${API_URL}/search${query ? `?search=${query}` : ''}`, {
-                headers: { Authorization: `Bearer ${token}` },
+      const url = `${USERS_URL}${query ? `?search=${query}` : ''}`;
+      const res = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       setUsers(res.data);
     } catch (err) {
@@ -64,7 +66,7 @@ export default function ContactsScreen() {
     try {
       const token = await getToken();
       await axios.post(
-        API_URL,
+        CONTACTS_URL,
         { contactId },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -80,7 +82,7 @@ export default function ContactsScreen() {
   const deleteContact = async (contactId) => {
     try {
       const token = await getToken();
-      await axios.delete(`${API_URL}/${contactId}`, {
+      await axios.delete(`${CONTACTS_URL}/${contactId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       Alert.alert('Succès', 'Contact supprimé !');
