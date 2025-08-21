@@ -1,6 +1,8 @@
 const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
 const User = require('../models/User'); // Assure que le modèle User existe
+const mongoose = require('mongoose');
+
 // -------------------
 // Utilitaire : récupérer une course autorisée
 // -------------------
