@@ -47,8 +47,8 @@ export default function ContactsScreen() {
     try {
       setLoading(true);
       const token = await getToken();
-      const res = await axios.get(`${API_URL}/users${query ? `?search=${query}` : ''}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await axios.get(`${API_URL}/search${query ? `?search=${query}` : ''}`, {
+                headers: { Authorization: `Bearer ${token}` },
       });
       setUsers(res.data);
     } catch (err) {

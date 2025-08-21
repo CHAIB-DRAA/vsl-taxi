@@ -85,3 +85,24 @@ exports.addContact = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+
+/ Nouvelle route : rechercher des utilisateurs
+router.get('/search', authMiddleware, async (req, res) => {
+  try {
+    const { search } = req.query;
+    const regex = search ? { $regex: search, $options: 'i' } : {};
+
+    const users = await User.find(
+      { $or: [{ fullName: regex }, { email: regex }] },
+      '_id fullName email'
+    );
+
+    // Optionnel : exclure l'utilisateur courant
+    const filteredUsers = users.filter(u => u._id.toString() !== req.user.id);
+
+    res.json(filteredUsers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
