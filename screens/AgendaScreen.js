@@ -13,8 +13,7 @@ moment.locale('fr');
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 const CONTACTS_API = 'https://vsl-taxi.onrender.com/api/contacts';
-const SHARE_API = 'https://vsl-taxi.onrender.com/api/rides/share';
-const RESPOND_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
+const SHARE_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
 
 export default function AgendaScreen() {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
@@ -31,17 +30,17 @@ export default function AgendaScreen() {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('token');
-      if (!token) return Alert.alert('Erreur', 'Token non trouvé.');
+      if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
 
       const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      console.log('📦 Courses reçues du serveur:', res.data);
-
       const ridesData = res.data || [];
-      // On filtre les partages refusés
       const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'declined');
+
+      console.log('📊 Courses récupérées:', visibleRides);
+
       setRides(visibleRides);
       markRidesOnCalendar(visibleRides);
     } catch (err) {
@@ -59,8 +58,8 @@ export default function AgendaScreen() {
       const res = await axios.get(CONTACTS_API, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('📤 Contacts récupérés:', res.data);
       setContacts(res.data || []);
+      console.log('📤 Contacts récupérés:', res.data);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de récupérer les contacts.');
@@ -73,19 +72,19 @@ export default function AgendaScreen() {
   }, [selectedDate]);
 
   // --- Partager une course ---
-  const handleShareRide = async (rideId, toUserId) => {
+  const handleShareRide = async (rideId, contact) => {
     try {
       const token = await AsyncStorage.getItem('token');
-      const res = await axios.post(SHARE_API, { rideId, toUserId }, {
+      const res = await axios.post(`${API_URL}/share`, { rideId, toUserId: contact.userId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      console.log('📤 Partage réponse API:', res.data);
+      console.log('📤 Résultat partage:', res.data);
 
       if (res.data.share) {
         Alert.alert('Succès', 'Course partagée !');
         setShareModalVisible(false);
-        fetchRides(); // recharge les courses pour voir le partage
+        fetchRides();
       } else {
         Alert.alert('Erreur', res.data.message);
       }
@@ -99,7 +98,7 @@ export default function AgendaScreen() {
   const respondToShare = async (shareId, action) => {
     try {
       const token = await AsyncStorage.getItem('token');
-      await axios.post(RESPOND_API, { shareId, action }, {
+      await axios.post(SHARE_API, { shareId, action }, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -110,6 +109,8 @@ export default function AgendaScreen() {
         }
         return r;
       }).filter(Boolean));
+
+      console.log(`🔄 Partage ${action}:`, shareId);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
@@ -198,6 +199,7 @@ export default function AgendaScreen() {
                 {getSharedText(ride)}
               </Text>
 
+              {/* Accept / Refuse */}
               {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && (
                 <View style={{ flexDirection: 'row', marginTop: 5 }}>
                   <TouchableOpacity
@@ -215,6 +217,7 @@ export default function AgendaScreen() {
                 </View>
               )}
 
+              {/* Bouton partager */}
               {!ride.sharedToName && !ride.isShared && (
                 <TouchableOpacity
                   style={styles.shareButton}
@@ -238,21 +241,29 @@ export default function AgendaScreen() {
             <Text style={styles.modalTitle}>Partager la course avec :</Text>
 
             <FlatList
-              data={contacts.filter(c => c.userId && c.userId !== selectedRide?.chauffeurId)}
-              keyExtractor={(item) => item._id}
+              data={contacts}
+              keyExtractor={(item) => item.userId}
               style={{ marginVertical: 10 }}
               ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.contactButton}
-                  onPress={() => handleShareRide(selectedRide._id, item.userId)}
+                  onPress={() => handleShareRide(selectedRide._id, item)}
                 >
                   <Text style={styles.contactText}>{item.fullName || item.email}</Text>
                 </TouchableOpacity>
               )}
+              ListEmptyComponent={
+                <Text style={{ textAlign: 'center', marginTop: 10, color: '#888' }}>
+                  Aucun contact disponible
+                </Text>
+              }
             />
 
-            <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#888', marginTop: 10 }]} onPress={() => setShareModalVisible(false)}>
+            <TouchableOpacity
+              style={[styles.shareButton, { backgroundColor: '#888', marginTop: 10 }]}
+              onPress={() => setShareModalVisible(false)}
+            >
               <Text style={styles.shareButtonText}>Annuler</Text>
             </TouchableOpacity>
           </View>
@@ -263,43 +274,19 @@ export default function AgendaScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF' },
-  title: { fontSize: 18, fontWeight: 'bold', margin: 10 },
-  ridesList: { paddingHorizontal: 10 },
-  rideCard: {
-    borderLeftWidth: 5,
-    padding: 12,
-    marginVertical: 5,
-    backgroundColor: '#F9F9F9',
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 2
-  },
+  container: { flex: 1, padding: 10, backgroundColor: '#F5F5F5' },
+  toggleButton: { padding: 10, backgroundColor: '#4CAF50', borderRadius: 8, marginBottom: 10 },
+  toggleButtonText: { color: '#fff', textAlign: 'center', fontWeight: 'bold' },
+  title: { fontSize: 18, fontWeight: 'bold', marginVertical: 10 },
+  ridesList: { flex: 1 },
+  rideCard: { padding: 10, borderLeftWidth: 5, borderRadius: 6, backgroundColor: '#fff', marginBottom: 10 },
   rideText: { fontSize: 14, marginBottom: 2 },
-  sharedText: { fontSize: 13, fontWeight: 'bold' },
-  shareButton: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 5,
-    marginTop: 8,
-    alignItems: 'center'
-  },
-  shareButtonText: { color: '#FFF', fontWeight: 'bold' },
-  toggleButton: { padding: 10, alignItems: 'center' },
-  toggleButtonText: { fontSize: 14, fontWeight: 'bold', color: '#2196F3' },
-  emptyText: { textAlign: 'center', marginTop: 20, color: '#888' },
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20
-  },
-  modalContent: {
-    backgroundColor: '#FFF', borderRadius: 10, padding: 20
-  },
+  sharedText: { fontSize: 12, fontWeight: 'bold', marginTop: 2 },
+  shareButton: { padding: 8, backgroundColor: '#2196F3', borderRadius: 6, marginTop: 5 },
+  shareButtonText: { color: '#fff', textAlign: 'center', fontWeight: 'bold' },
+  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#00000099' },
+  modalContent: { width: '90%', backgroundColor: '#fff', padding: 15, borderRadius: 8 },
   modalTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10 },
-  contactButton: {
-    padding: 12, backgroundColor: '#E3F2FD', borderRadius: 5
-  },
+  contactButton: { padding: 10, backgroundColor: '#E0E0E0', borderRadius: 6 },
   contactText: { fontSize: 14 }
 });
