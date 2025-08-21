@@ -13,7 +13,7 @@ moment.locale('fr');
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 const CONTACTS_API = 'https://vsl-taxi.onrender.com/api/contacts';
-const SHARE_RESPOND_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
+const SHARE_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
 
 export default function AgendaScreen() {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
@@ -22,7 +22,7 @@ export default function AgendaScreen() {
   const [contacts, setContacts] = useState([]);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
-  const [showCalendar, setShowCalendar] = useState(true);
+  const [markedDates, setMarkedDates] = useState({});
 
   // --- Fetch courses ---
   const fetchRides = async () => {
@@ -31,10 +31,19 @@ export default function AgendaScreen() {
       const token = await AsyncStorage.getItem('token');
       if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
 
-      const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
+      const res = await axios.get(`${API_URL}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setRides(res.data || []);
+
+      const ridesData = res.data || [];
+
+      // Filtrer par date sélectionnée
+      const filtered = ridesData.filter(ride => 
+        moment(ride.date).format('YYYY-MM-DD') === selectedDate
+      );
+
+      setRides(filtered);
+      markRidesOnCalendar(ridesData); // pour le calendrier complet
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
@@ -82,10 +91,9 @@ export default function AgendaScreen() {
   const respondToShare = async (shareId, action) => {
     try {
       const token = await AsyncStorage.getItem('token');
-      await axios.post(SHARE_RESPOND_API, { shareId, action }, {
+      await axios.post(SHARE_API, { shareId, action }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      Alert.alert('Succès', `Course ${action}`);
       fetchRides();
     } catch (err) {
       console.error(err);
@@ -93,10 +101,35 @@ export default function AgendaScreen() {
     }
   };
 
-  // --- Déterminer couleur ---
+  // --- Marquer les jours avec dots ---
+  const markRidesOnCalendar = (ridesList) => {
+    const marks = {};
+
+    ridesList.forEach(ride => {
+      const day = moment(ride.date).format('YYYY-MM-DD');
+      if (!marks[day]) marks[day] = { dots: [] };
+
+      if (!ride.isShared) {
+        marks[day].dots.push({ key: `own-${ride._id}`, color: '#4CAF50' });
+      } else if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) {
+        marks[day].dots.push({ key: `sharedToMe-${ride._id}`, color: '#FF9800' });
+      } else if (ride.isShared && ride.sharedToName) {
+        marks[day].dots.push({ key: `sharedByMe-${ride._id}`, color: '#2196F3' });
+      }
+    });
+
+    // jour sélectionné
+    if (!marks[selectedDate]) marks[selectedDate] = { dots: [] };
+    marks[selectedDate].selected = true;
+    marks[selectedDate].selectedColor = '#4CAF50';
+
+    setMarkedDates(marks);
+  };
+
+  // --- Couleur pour affichage ---
   const getRideColor = (ride) => {
-    if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) return '#FF9800'; // partagée vers toi
-    if (ride.isShared && ride.sharedToName) return '#2196F3'; // tu as partagé
+    if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) return '#FF9800';
+    if (ride.isShared && ride.sharedToName) return '#2196F3';
     if (ride.type === 'Aller') return '#4CAF50';
     if (ride.type === 'Retour') return '#607D8B';
     return '#888';
@@ -115,19 +148,17 @@ export default function AgendaScreen() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.toggleCalendarBtn} onPress={() => setShowCalendar(!showCalendar)}>
-        <Text style={styles.toggleCalendarText}>
-          {showCalendar ? 'Masquer le calendrier' : 'Afficher le calendrier'}
-        </Text>
-      </TouchableOpacity>
-
-      {showCalendar && (
-        <Calendar
-          onDayPress={(day) => setSelectedDate(day.dateString)}
-          markedDates={{ [selectedDate]: { selected: true, marked: true, selectedColor: '#4CAF50' } }}
-          theme={{ todayTextColor: '#FF9800', arrowColor: '#4CAF50', monthTextColor: '#000', textMonthFontWeight: 'bold' }}
-        />
-      )}
+      <Calendar
+        onDayPress={(day) => setSelectedDate(day.dateString)}
+        markedDates={markedDates}
+        markingType={'multi-dot'}
+        theme={{
+          todayTextColor: '#FF9800',
+          arrowColor: '#4CAF50',
+          monthTextColor: '#000',
+          textMonthFontWeight: 'bold'
+        }}
+      />
 
       <Text style={styles.title}>
         Courses du {moment(selectedDate).format('DD MMMM YYYY')}
@@ -139,51 +170,49 @@ export default function AgendaScreen() {
         <ScrollView style={styles.ridesList}>
           {rides.length === 0 ? (
             <Text style={styles.emptyText}>Aucune course prévue.</Text>
-          ) : (
-            rides.map((ride) => (
-              <View key={ride._id} style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}>
-                <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
-                <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
-                <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
+          ) : rides.map((ride) => (
+            <View key={ride._id} style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}>
+              <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
+              <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
+              <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
 
-                <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
-                  {getSharedText(ride)}
-                </Text>
+              <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
+                {getSharedText(ride)}
+              </Text>
 
-                {/* Boutons accepter / refuser si course partagée vers toi */}
-                {ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId && ride.statusPartage === 'pending' && (
-                  <View style={{ flexDirection: 'row', marginTop: 8 }}>
-                    <TouchableOpacity
-                      style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-                      onPress={() => respondToShare(ride.shareId, 'accepted')}
-                    >
-                      <Text style={styles.shareButtonText}>Accepter</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-                      onPress={() => respondToShare(ride.shareId, 'declined')}
-                    >
-                      <Text style={styles.shareButtonText}>Refuser</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+              {/* Accept / Refuse */}
+              {ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId && ride.statusPartage === 'pending' && (
+                <View style={{ flexDirection: 'row', marginTop: 5 }}>
+                  <TouchableOpacity
+                    style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
+                    onPress={() => respondToShare(ride.shareId, 'accepted')}
+                  >
+                    <Text style={styles.shareButtonText}>Accepter</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
+                    onPress={() => respondToShare(ride.shareId, 'declined')}
+                  >
+                    <Text style={styles.shareButtonText}>Refuser</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
-                <TouchableOpacity
-                  style={styles.shareButton}
-                  onPress={() => {
-                    setSelectedRide(ride);
-                    setShareModalVisible(true);
-                  }}
-                >
-                  <Text style={styles.shareButtonText}>Partager</Text>
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
+              <TouchableOpacity
+                style={styles.shareButton}
+                onPress={() => {
+                  setSelectedRide(ride);
+                  setShareModalVisible(true);
+                }}
+              >
+                <Text style={styles.shareButtonText}>Partager</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
         </ScrollView>
       )}
 
-      {/* --- Modal partage --- */}
+      {/* Modal partage */}
       <Modal visible={shareModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -216,17 +245,14 @@ export default function AgendaScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 15, backgroundColor: '#FFF' },
-  toggleCalendarBtn: { marginBottom: 10, alignSelf: 'center' },
-  toggleCalendarText: { color: '#4CAF50', fontWeight: 'bold' },
   title: { fontSize: 20, fontWeight: 'bold', marginVertical: 10, textAlign: 'center' },
   ridesList: { marginTop: 10 },
   rideCard: {
     backgroundColor: '#FFF', padding: 15, marginBottom: 12, borderRadius: 12,
-    borderLeftWidth: 6, shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 5, elevation: 3,
+    borderLeftWidth: 6, shadowColor: '#000', shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 }, shadowRadius: 5, elevation: 3,
   },
   rideText: { fontSize: 16, marginBottom: 4 },
-  statusText: { fontSize: 14, fontWeight: 'bold', marginTop: 4 },
   sharedText: { fontSize: 14, fontWeight: 'bold', marginTop: 4 },
   emptyText: { fontSize: 16, color: '#888', textAlign: 'center', marginTop: 20 },
   shareButton: { marginTop: 10, backgroundColor: '#FF9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
