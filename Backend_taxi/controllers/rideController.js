@@ -49,6 +49,7 @@ exports.createRide = async (req, res) => {
 // Renvoie :
 //   - tes courses (chauffeurId == toi)
 //   - + invitations "PENDING" que TU as reçues (pour afficher Accepter/Refuser)
+
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -67,7 +68,7 @@ exports.getRides = async (req, res) => {
       end = new Date(d.setHours(23, 59, 59, 999));
     }
 
-    // 1️⃣ Tes courses (propriétaire)
+    // 1️⃣ Courses propres
     const ownQuery = { chauffeurId: userId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
@@ -77,7 +78,7 @@ exports.getRides = async (req, res) => {
     const shares = await RideShare.find({ toUserId: userId }).lean();
     console.log('🔄 Shares reçus:', shares.length);
 
-    const shareIds = shares.map(s => s.rideId);
+    const shareIds = shares.map(s => mongoose.Types.ObjectId(s.rideId));
     console.log('🔑 RideIds partagés:', shareIds);
 
     let sharedRidesRaw = [];
@@ -91,10 +92,7 @@ exports.getRides = async (req, res) => {
     const sharedRides = await Promise.all(
       sharedRidesRaw.map(async (ride) => {
         const link = shares.find(s => String(s.rideId) === String(ride._id));
-        if (!link) {
-          console.log('⚠️ Aucun lien trouvé pour rideId:', ride._id);
-          return null;
-        }
+        if (!link) return null;
         const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
         return {
           ...ride,
