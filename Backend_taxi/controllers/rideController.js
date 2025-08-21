@@ -145,7 +145,7 @@ exports.shareRide = async (req, res) => {
 
     // 5️⃣ Créer l’invitation
     const share = await RideShare.create({
-      rideId: mongoose.Types.ObjectId(rideId),
+      rideId: new mongoose.Types.ObjectId(rideId),
       fromUserId: req.user.id,
       toUserId,
       statusPartage: 'pending'
