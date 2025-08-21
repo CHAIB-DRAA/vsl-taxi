@@ -111,7 +111,6 @@ exports.shareRide = async (req, res) => {
       return res.status(400).json({ message: 'rideId et toUserId sont requis', rideId, toUserId });
     }
 
-    // 2️⃣ Vérification de l’authentification
     if (!req.user || !req.user.id) {
       console.log('Utilisateur non authentifié');
       return res.status(401).json({ message: 'Non authentifié' });
@@ -119,20 +118,24 @@ exports.shareRide = async (req, res) => {
 
     console.log('Paramètres reçus:', { rideId, toUserId, userId: req.user.id });
 
+    // 2️⃣ Trouver la course
     const ride = await Ride.findById(rideId);
     if (!ride) {
       console.log('Course introuvable pour rideId:', rideId);
       return res.status(404).json({ message: 'Course introuvable', rideId });
     }
 
-    // 3️⃣ Vérification que l’utilisateur est bien propriétaire
+    // 3️⃣ Vérifier que l’utilisateur est bien le propriétaire
     if (String(ride.chauffeurId) !== String(req.user.id)) {
       console.log('Utilisateur non autorisé à partager cette course', { rideOwner: ride.chauffeurId, currentUser: req.user.id });
       return res.status(403).json({ message: 'Non autorisé' });
     }
 
-    // 4️⃣ Vérification des doublons
-    const exists = await RideShare.findOne({ rideId, toUserId });
+    // 4️⃣ Vérifier doublons avec conversion ObjectId
+    const exists = await RideShare.findOne({ 
+      rideId: mongoose.Types.ObjectId(rideId), 
+      toUserId 
+    });
     if (exists) {
       console.log('Course déjà partagée avec cet utilisateur', { rideId, toUserId });
       return res.status(400).json({ message: 'Course déjà partagée avec cet utilisateur' });
@@ -140,13 +143,13 @@ exports.shareRide = async (req, res) => {
 
     // 5️⃣ Créer l’invitation
     const share = await RideShare.create({
-      rideId,
+      rideId: mongoose.Types.ObjectId(rideId),
       fromUserId: req.user.id,
       toUserId,
       statusPartage: 'pending'
     });
 
-    // 6️⃣ Mise à jour de la course
+    // 6️⃣ Mettre à jour la course
     if (!ride.isShared) {
       ride.isShared = true;
       ride.sharedBy = [req.user.id];
@@ -159,6 +162,7 @@ exports.shareRide = async (req, res) => {
 
     console.log('Invitation créée avec succès:', share);
     return res.status(201).json({ message: 'Invitation envoyée et course mise à jour', share });
+
   } catch (err) {
     console.error('shareRide error:', err);
     return res.status(500).json({ message: 'Erreur serveur', error: err.message });
