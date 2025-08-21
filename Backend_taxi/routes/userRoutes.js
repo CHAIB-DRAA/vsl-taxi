@@ -1,7 +1,7 @@
 // routes/userRoutes.js
 const express = require('express');
 const router = express.Router();
-const { signupUser, loginUser, getUsers, addContact } = require('../controllers/userController');
+const { signupUser, loginUser, getUsers, addContact, searchUsers } = require('../controllers/userController');
 const authMiddleware = require('../middleware/auth'); // si tu as un middleware d’auth
 
 router.post('/signup', signupUser);
