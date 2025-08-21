@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, ActivityIndicator, StyleSheet, Alert, TouchableOpacity, Modal, FlatList } from 'react-native';
+import {
+  View, Text, ScrollView, ActivityIndicator, StyleSheet,
+  Alert, TouchableOpacity, Modal, FlatList
+} from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import axios from 'axios';
 import moment from 'moment';
 import 'moment/locale/fr';
-import { shareRide ,getContacts} from '../services/api'; // API pour partager une course
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 moment.locale('fr');
@@ -22,14 +23,14 @@ export default function AgendaScreen() {
   const [selectedRide, setSelectedRide] = useState(null);
   const [showCalendar, setShowCalendar] = useState(true);
 
-  // Charger les courses
-  const fetchRides = async (date) => {
+  // --- Fetch courses ---
+  const fetchRides = async () => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('token');
       if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
 
-      const res = await axios.get(`${API_URL}?date=${date}`, {
+      const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setRides(res.data || []);
@@ -41,11 +42,13 @@ export default function AgendaScreen() {
     }
   };
 
-  // Charger les contacts
+  // --- Fetch contacts ---
   const fetchContacts = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      const res = await axios.get(CONTACTS_API, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.get(CONTACTS_API, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       setContacts(res.data || []);
     } catch (err) {
       console.error(err);
@@ -54,12 +57,12 @@ export default function AgendaScreen() {
   };
 
   useEffect(() => {
-    fetchRides(selectedDate);
+    fetchRides();
     fetchContacts();
   }, [selectedDate]);
 
-  // Partager une course
-  const shareRide = async (rideId, contactId) => {
+  // --- Partager une course ---
+  const handleShareRide = async (rideId, contactId) => {
     try {
       const token = await AsyncStorage.getItem('token');
       await axios.post(`${API_URL}/share`, { rideId, toUserId: contactId }, {
@@ -67,36 +70,35 @@ export default function AgendaScreen() {
       });
       Alert.alert('Succès', 'Course partagée !');
       setShareModalVisible(false);
+      fetchRides();
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
 
-  // Déterminer couleur selon statut
-  const getStatusColor = (ride) => {
-    if (ride.isShared) return '#FF9800'; // orange pour partagé
-    if (ride.type === 'Aller') return '#4CAF50'; // vert
-    if (ride.type === 'Retour') return '#2196F3'; // bleu
+  // --- Déterminer couleur ---
+  const getRideColor = (ride) => {
+    if (ride.isShared && ride.sharedBy !== ride.chauffeurId) return '#FF9800'; // partagée vers toi
+    if (ride.isShared && ride.sharedBy === ride.chauffeurId) return '#2196F3'; // tu as partagé
+    if (ride.type === 'Aller') return '#4CAF50';
+    if (ride.type === 'Retour') return '#607D8B';
     return '#888';
   };
 
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.toggleCalendarBtn} onPress={() => setShowCalendar(!showCalendar)}>
-        <Text style={styles.toggleCalendarText}>{showCalendar ? 'Masquer le calendrier' : 'Afficher le calendrier'}</Text>
+        <Text style={styles.toggleCalendarText}>
+          {showCalendar ? 'Masquer le calendrier' : 'Afficher le calendrier'}
+        </Text>
       </TouchableOpacity>
 
       {showCalendar && (
         <Calendar
           onDayPress={(day) => setSelectedDate(day.dateString)}
           markedDates={{ [selectedDate]: { selected: true, marked: true, selectedColor: '#4CAF50' } }}
-          theme={{
-            todayTextColor: '#FF9800',
-            arrowColor: '#4CAF50',
-            monthTextColor: '#000',
-            textMonthFontWeight: 'bold'
-          }}
+          theme={{ todayTextColor: '#FF9800', arrowColor: '#4CAF50', monthTextColor: '#000', textMonthFontWeight: 'bold' }}
         />
       )}
 
@@ -112,13 +114,22 @@ export default function AgendaScreen() {
             <Text style={styles.emptyText}>Aucune course prévue.</Text>
           ) : (
             rides.map((ride) => (
-              <View key={ride._id} style={[styles.rideCard, { borderLeftColor: getStatusColor(ride) }]}>
+              <View key={ride._id} style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}>
                 <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
                 <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
                 <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
-                <Text style={[styles.statusText, { color: getStatusColor(ride) }]}>
-                  {ride.isShared ? 'Partagée' : ride.type}
-                </Text>
+
+                {ride.isShared && ride.sharedBy !== ride.chauffeurId ? (
+                  <Text style={[styles.sharedText, { color: '#FF9800' }]}>
+                    Partagée par : {ride.sharedByName} ({ride.statusPartage})
+                  </Text>
+                ) : ride.isShared && ride.sharedBy === ride.chauffeurId ? (
+                  <Text style={[styles.sharedText, { color: '#2196F3' }]}>
+                    Partagée à : {ride.sharedToName}
+                  </Text>
+                ) : (
+                  <Text style={[styles.statusText, { color: getRideColor(ride) }]}>{ride.type}</Text>
+                )}
 
                 <TouchableOpacity
                   style={styles.shareButton}
@@ -135,41 +146,33 @@ export default function AgendaScreen() {
         </ScrollView>
       )}
 
-      {/* Modal partage */}
-      {/* Modal partage */}
-<Modal visible={shareModalVisible} animationType="slide" transparent>
-  <View style={styles.modalOverlay}>
-    <View style={styles.modalContent}>
-      <Text style={styles.modalTitle}>Partager la course avec :</Text>
+      {/* --- Modal partage --- */}
+      <Modal visible={shareModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Partager la course avec :</Text>
 
-      <FlatList
-  data={contacts}
-  keyExtractor={(item) => item._id}
-  style={{ marginVertical: 10 }}
-  ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-  renderItem={({ item }) => (
-    <TouchableOpacity
-      style={styles.contactButton}
-      onPress={() => {
-        shareRide(selectedRide._id, item.contactId._id); // <-- utiliser contactId._id
-        setShareModalVisible(false);
-      }}
-    >
-      <Text style={styles.contactText}>
-        {item.contactId?.fullName || item.contactId?.email || 'Utilisateur'}
-      </Text>
-    </TouchableOpacity>
-  )}
-/>
+            <FlatList
+              data={contacts}
+              keyExtractor={(item) => item._id}
+              style={{ marginVertical: 10 }}
+              ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.contactButton}
+                  onPress={() => handleShareRide(selectedRide._id, item._id)}
+                >
+                  <Text style={styles.contactText}>{item.fullName || item.email}</Text>
+                </TouchableOpacity>
+              )}
+            />
 
-
-      <TouchableOpacity style={styles.modalClose} onPress={() => setShareModalVisible(false)}>
-        <Text style={styles.modalCloseText}>Annuler</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-</Modal>
-
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShareModalVisible(false)}>
+              <Text style={styles.modalCloseText}>Annuler</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -181,63 +184,23 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: 'bold', marginVertical: 10, textAlign: 'center' },
   ridesList: { marginTop: 10 },
   rideCard: {
-    backgroundColor: '#FFF',
-    padding: 15,
-    marginBottom: 12,
-    borderRadius: 12,
-    borderLeftWidth: 6,
-    borderLeftColor: '#4CAF50',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 5,
-    elevation: 3,
+    backgroundColor: '#FFF', padding: 15, marginBottom: 12, borderRadius: 12,
+    borderLeftWidth: 6, shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 5, elevation: 3,
   },
   rideText: { fontSize: 16, marginBottom: 4 },
   statusText: { fontSize: 14, fontWeight: 'bold', marginTop: 4 },
+  sharedText: { fontSize: 14, fontWeight: 'bold', marginTop: 4 },
   emptyText: { fontSize: 16, color: '#888', textAlign: 'center', marginTop: 20 },
-  shareButton: {
-    marginTop: 10,
-    backgroundColor: '#FF9800',
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
+  shareButton: { marginTop: 10, backgroundColor: '#FF9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   shareButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 
   // Modal style
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    width: '85%',
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 20,
-    maxHeight: '70%',
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 6,
-    elevation: 5,
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%', shadowColor: '#000', shadowOpacity: 0.15, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 5 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
-  contactButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-  },
+  contactButton: { backgroundColor: '#4CAF50', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 8 },
   contactText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  modalClose: {
-    marginTop: 15,
-    backgroundColor: '#FF5252',
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
+  modalClose: { marginTop: 15, backgroundColor: '#FF5252', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   modalCloseText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 });
