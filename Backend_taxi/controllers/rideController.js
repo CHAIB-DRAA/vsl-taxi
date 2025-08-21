@@ -28,6 +28,7 @@ exports.createRide = async (req, res) => {
 };
 
 // === Récupérer toutes les courses (propres + partagées)
+// === Récupérer toutes les courses (propres + partagées) ===
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -36,50 +37,52 @@ exports.getRides = async (req, res) => {
     const ownRides = await Ride.find({ chauffeurId: userId });
 
     // 2️⃣ Courses partagées vers moi
-    const sharedLinks = await RideShare.find({ toUserId: userId }); // Inclure 'pending' pour test
-    const sharedRideIds = sharedLinks.map(l => mongoose.Types.ObjectId(l.rideId));
+    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
+    const sharedRideIds = sharedLinks.map(l => l.rideId);
     const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
 
-    const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
-      const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const sharedByUser = await User.findById(link.fromUserId);
-      return {
-        ...ride.toObject(),
-        isShared: true,
-        sharedBy: link.fromUserId,
-        sharedByName: sharedByUser?.fullName || sharedByUser?.email || 'Utilisateur',
-        statusPartage: link.statusPartage
-      };
-    }));
+    const sharedRides = await Promise.all(
+      sharedRidesRaw.map(async (ride) => {
+        const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
+        if (!link) return null; // ignore si lien absent
+        const sharedByUser = await User.findById(link.fromUserId).catch(() => null);
+        return {
+          ...ride.toObject(),
+          isShared: true,
+          sharedBy: link.fromUserId,
+          sharedByName: sharedByUser?.fullName || sharedByUser?.email || 'Utilisateur',
+          statusPartage: link.statusPartage
+        };
+      })
+    ).then(arr => arr.filter(Boolean));
 
     // 3️⃣ Courses que j’ai partagées à d’autres
-    const sharedByMeLinks = await RideShare.find({ fromUserId: userId });
-    const sharedByMeIds = sharedByMeLinks.map(l => mongoose.Types.ObjectId(l.rideId));
+    const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
+    const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
     const sharedByMeRidesRaw = await Ride.find({ _id: { $in: sharedByMeIds } });
 
-    const sharedByMeRides = await Promise.all(sharedByMeRidesRaw.map(async (ride) => {
-      const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const toUser = await User.findById(link.toUserId);
-      return {
-        ...ride.toObject(),
-        isShared: true,
-        sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
-        statusPartage: link.statusPartage
-      };
-    }));
+    const sharedByMeRides = await Promise.all(
+      sharedByMeRidesRaw.map(async (ride) => {
+        const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
+        if (!link) return null;
+        const toUser = await User.findById(link.toUserId).catch(() => null);
+        return {
+          ...ride.toObject(),
+          isShared: true,
+          sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
+          statusPartage: link.statusPartage
+        };
+      })
+    ).then(arr => arr.filter(Boolean));
 
     // 4️⃣ Combiner toutes les courses et trier par date
     const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    console.log('ownRides:', ownRides.length);
-    console.log('sharedRides:', sharedRides.length);
-    console.log('sharedByMeRides:', sharedByMeRides.length);
-
     res.json(allRides);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
+    console.error('Erreur getRides:', err);
+    res.status(500).json({ message: 'Impossible de récupérer les courses', error: err.message });
   }
 };
 

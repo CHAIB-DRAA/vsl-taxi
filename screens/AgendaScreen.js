@@ -86,6 +86,17 @@ export default function AgendaScreen() {
     return '#888';
   };
 
+  // --- Texte pour statut partagé ---
+  const getSharedText = (ride) => {
+    if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) {
+      return `Partagée par : ${ride.sharedByName} (${ride.statusPartage})`;
+    }
+    if (ride.isShared && ride.sharedToName) {
+      return `Partagée à : ${ride.sharedToName} (${ride.statusPartage})`;
+    }
+    return ride.type;
+  };
+
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.toggleCalendarBtn} onPress={() => setShowCalendar(!showCalendar)}>
@@ -119,17 +130,9 @@ export default function AgendaScreen() {
                 <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
                 <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
 
-                {ride.isShared && ride.sharedByName ? (
-                  <Text style={[styles.sharedText, { color: '#FF9800' }]}>
-                    Partagée par : {ride.sharedByName} ({ride.statusPartage})
-                  </Text>
-                ) : ride.isShared && ride.sharedToName ? (
-                  <Text style={[styles.sharedText, { color: '#2196F3' }]}>
-                    Partagée à : {ride.sharedToName} ({ride.statusPartage})
-                  </Text>
-                ) : (
-                  <Text style={[styles.statusText, { color: getRideColor(ride) }]}>{ride.type}</Text>
-                )}
+                <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
+                  {getSharedText(ride)}
+                </Text>
 
                 <TouchableOpacity
                   style={styles.shareButton}
@@ -195,6 +198,7 @@ const styles = StyleSheet.create({
   shareButton: { marginTop: 10, backgroundColor: '#FF9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   shareButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 
+  // Modal style
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%', shadowColor: '#000', shadowOpacity: 0.15, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 5 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
