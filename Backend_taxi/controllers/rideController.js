@@ -97,35 +97,42 @@ exports.getRides = async (req, res) => {
 
 // === Partager une course ===
 exports.shareRide = async (req, res) => {
-  const { rideId, toUserId } = req.body;
   try {
+    const { rideId, fromUserId, toUserId, newChauffeurId } = req.body;
+
+    // 1. Vérifier que la course existe
     const ride = await Ride.findById(rideId);
-    if (!ride) return res.status(404).json({ message: 'Course introuvable' });
+    if (!ride) {
+      return res.status(404).json({ message: 'Course introuvable' });
+    }
 
-    if (ride.chauffeurId.toString() !== req.user.id)
-      return res.status(403).json({ message: 'Non autorisé' });
+    // 2. Vérifier si le partage existe déjà
+    let existingShare = await RideShare.findOne({ rideId, toUserId });
+    if (existingShare) {
+      return res.json({
+        message: 'Course déjà partagée',
+        share: existingShare,
+      });
+    }
 
-    const existing = await RideShare.findOne({ rideId, toUserId });
-    if (existing) return res.status(400).json({ message: 'Course déjà partagée' });
-
-    const share = new RideShare({
+    // 3. Créer un nouveau partage
+    const newShare = await RideShare.create({
       rideId,
-      fromUserId: req.user.id,
+      fromUserId,
       toUserId,
-      statusPartage: 'pending'
+      newChauffeurId: newChauffeurId || null,
+      sharedAt: new Date(),
     });
-    await share.save();
 
-    // Marquer la course comme partagée
-    ride.sharedToOthers = true;
-    await ride.save();
-
-    res.json({ message: 'Course partagée', share });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.json({
+      message: 'Course partagée avec succès',
+      share: newShare,
+    });
+  } catch (error) {
+    console.error('Erreur shareRide:', error);
+    res.status(500).json({ message: 'Erreur interne du serveur', error: error.message });
   }
 };
-
 // === Accepter ou refuser un partage ===
 exports.respondToShare = async (req, res) => {
   const { shareId, action } = req.body;

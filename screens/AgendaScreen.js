@@ -68,12 +68,14 @@ export default function AgendaScreen() {
     fetchContacts();
   }, [selectedDate]);
 
-  // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
     try {
       const token = await AsyncStorage.getItem('token');
+      const user = await supabase.auth.getUser(); // ou autre méthode pour récupérer l'ID connecté
+      const fromUserId = user.data.user.id;
+  
       const res = await axios.post(`${API_URL}/share`, 
-        { rideId, toUserId: contactId }, 
+        { rideId, fromUserId, toUserId: contactId }, 
         { headers: { Authorization: `Bearer ${token}` } }
       );
   
