@@ -135,7 +135,7 @@ exports.shareRide = async (req, res) => {
 
     // 4️⃣ Vérifier doublons avec conversion ObjectId
     const exists = await RideShare.findOne({ 
-      rideId: mongoose.Types.ObjectId(rideId), 
+      rideId: new mongoose.Types.ObjectId(rideId), 
       toUserId 
     });
     if (exists) {
