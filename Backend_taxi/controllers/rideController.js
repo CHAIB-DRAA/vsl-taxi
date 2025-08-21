@@ -67,33 +67,35 @@ exports.getRides = async (req, res) => {
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
 
-    // 2️⃣ Toutes les invitations (pending + accepted) reçues
+    // 2️⃣ Toutes les invitations reçues (pending + accepted)
     const shares = await RideShare.find({ toUserId: userId }).lean();
-    const shareIds = shares.map(s => s.rideId);
+    let sharedRides = [];
 
-    const sharedQuery = { _id: { $in: shareIds } };
-    if (start && end) sharedQuery.date = { $gte: start, $lte: end };
-    const sharedRidesRaw = await Ride.find(sharedQuery).lean();
+    if (shares.length > 0) {
+      const shareIds = shares.map(s => s.rideId);
+      const sharedQuery = { _id: { $in: shareIds } };
+      if (start && end) sharedQuery.date = { $gte: start, $lte: end };
+      const sharedRidesRaw = await Ride.find(sharedQuery).lean();
 
-    const sharedRides = await Promise.all(
-      sharedRidesRaw.map(async (ride) => {
+      // On ajoute les infos de partage
+      sharedRides = sharedRidesRaw.map(ride => {
         const link = shares.find(s => String(s.rideId) === String(ride._id));
-        const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
         return {
           ...ride,
           isShared: true,
           sharedBy: link.fromUserId,
-          sharedByName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
-          statusPartage: link.statusPartage, // 'pending' ou 'accepted'
+          sharedByName: link.fromUserName || link.fromUserId, // si tu stockes le nom directement
+          statusPartage: link.statusPartage,
           shareId: link._id
         };
-      })
-    );
+      });
+    }
 
-    // 3️⃣ Combine tout et trie
-    const all = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
+    // 3️⃣ Combine tout et trie par date
+    const allRides = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
 
-    res.json(all);
+    res.json(allRides);
+
   } catch (err) {
     console.error('getRides error:', err);
     res.status(500).json({ message: 'Erreur serveur', error: err.message });

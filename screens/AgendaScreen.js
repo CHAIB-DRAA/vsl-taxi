@@ -37,10 +37,8 @@ export default function AgendaScreen() {
       });
 
       const ridesData = res.data || [];
-      // On filtre directement les partages refusés
-      const visibleRides = ridesData.filter(r => r.statusPartage !== 'declined');
-      setRides(visibleRides);
-      markRidesOnCalendar(visibleRides);
+      setRides(ridesData);
+      markRidesOnCalendar(ridesData);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
@@ -70,26 +68,25 @@ export default function AgendaScreen() {
 
   // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
-  try {
-    const token = await AsyncStorage.getItem('token');
-    const res = await axios.post(`${API_URL}/share`, 
-      { rideId, toUserId: contactId }, 
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/share`,
+        { rideId, toUserId: contactId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
 
-    if (res.data.share) {
-      setRides(prev => prev.filter(r => r._id !== rideId));
-      Alert.alert('Succès', 'Course partagée !');
-      setShareModalVisible(false);
-    } else {
-      Alert.alert('Erreur', res.data.message);
+      if (res.data.share) {
+        Alert.alert('Succès', 'Course partagée !');
+        setShareModalVisible(false);
+        fetchRides(); // rafraîchit la liste
+      } else {
+        Alert.alert('Erreur', res.data.message);
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de partager la course.');
     }
-  } catch (err) {
-    console.error(err);
-    Alert.alert('Erreur', 'Impossible de partager la course.');
-  }
-};
-
+  };
 
   // --- Accepter / Refuser un partage ---
   const respondToShare = async (shareId, action) => {
@@ -98,15 +95,7 @@ export default function AgendaScreen() {
       await axios.post(SHARE_API, { shareId, action }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-
-      // Supprimer la course si elle est refusée, sinon mettre à jour le status
-      setRides(prev => prev.map(r => {
-        if (r.shareId === shareId) {
-          if (action === 'declined') return null;
-          return { ...r, statusPartage: action };
-        }
-        return r;
-      }).filter(Boolean));
+      fetchRides(); // rafraîchit la liste après action
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
@@ -121,13 +110,12 @@ export default function AgendaScreen() {
       if (!marks[day]) marks[day] = { dots: [] };
 
       if (!ride.isShared) marks[day].dots.push({ key: `${ride._id}-own`, color: '#4CAF50' });
-      else if (ride.isShared && ride.sharedBy && !ride.sharedToName)
-        marks[day].dots.push({ key: `${ride._id}-toMe`, color: '#FF9800' });
-      else if (ride.isShared && ride.sharedToName)
-        marks[day].dots.push({ key: `${ride._id}-byMe`, color: '#2196F3' });
+      else if (ride.isShared && ride.sharedBy && ride.statusPartage === 'pending')
+        marks[day].dots.push({ key: `${ride._id}-pending`, color: '#FF9800' });
+      else if (ride.isShared && ride.sharedBy && ride.statusPartage === 'accepted')
+        marks[day].dots.push({ key: `${ride._id}-accepted`, color: '#2196F3' });
     });
 
-    // jour sélectionné
     if (!marks[selectedDate]) marks[selectedDate] = { dots: [] };
     marks[selectedDate].selected = true;
     marks[selectedDate].selectedColor = '#4CAF50';
@@ -135,18 +123,18 @@ export default function AgendaScreen() {
   };
 
   const getRideColor = (ride) => {
-    if (ride.isShared && ride.sharedBy && !ride.sharedToName) return '#FF9800';
-    if (ride.isShared && ride.sharedToName) return '#2196F3';
+    if (ride.isShared && ride.statusPartage === 'pending') return '#FF9800';
+    if (ride.isShared && ride.statusPartage === 'accepted') return '#2196F3';
     if (ride.type === 'Aller') return '#4CAF50';
     if (ride.type === 'Retour') return '#607D8B';
     return '#888';
   };
 
   const getSharedText = (ride) => {
-    if (ride.isShared && ride.sharedBy && !ride.sharedToName)
+    if (ride.isShared && ride.statusPartage === 'pending')
       return `Partagée par : ${ride.sharedByName} (${ride.statusPartage})`;
-    if (ride.isShared && ride.sharedToName)
-      return `Partagée à : ${ride.sharedToName} (${ride.statusPartage})`;
+    if (ride.isShared && ride.statusPartage === 'accepted')
+      return `Partagée par : ${ride.sharedByName} (accepté)`;
     return ride.type;
   };
 
@@ -164,18 +152,10 @@ export default function AgendaScreen() {
           onDayPress={(day) => setSelectedDate(day.dateString)}
           markedDates={markedDates}
           markingType={'multi-dot'}
-          theme={{
-            todayTextColor: '#FF9800',
-            arrowColor: '#4CAF50',
-            monthTextColor: '#000',
-            textMonthFontWeight: 'bold'
-          }}
         />
       )}
 
-      <Text style={styles.title}>
-        Courses du {moment(selectedDate).format('DD MMMM YYYY')}
-      </Text>
+      <Text style={styles.title}>Courses du {moment(selectedDate).format('DD MMMM YYYY')}</Text>
 
       {loading ? (
         <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 20 }} />
@@ -185,7 +165,7 @@ export default function AgendaScreen() {
             <Text style={styles.emptyText}>Aucune course prévue.</Text>
           ) : rides.map((ride) => (
             <View
-              key={ride._id + (ride.isShared ? (ride.sharedToName ? '-byMe' : '-toMe') : '-own')}
+              key={ride._id + (ride.isShared ? `-${ride.statusPartage}` : '-own')}
               style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}
             >
               <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
@@ -197,7 +177,7 @@ export default function AgendaScreen() {
               </Text>
 
               {/* Accept / Refuse */}
-              {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && (
+              {ride.isShared && ride.statusPartage === 'pending' && (
                 <View style={{ flexDirection: 'row', marginTop: 5 }}>
                   <TouchableOpacity
                     style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
@@ -215,7 +195,7 @@ export default function AgendaScreen() {
               )}
 
               {/* Bouton partager */}
-              {!ride.sharedToName && !ride.isShared && (
+              {!ride.isShared && (
                 <TouchableOpacity
                   style={styles.shareButton}
                   onPress={() => {
@@ -262,6 +242,7 @@ export default function AgendaScreen() {
   );
 }
 
+// --- Styles restent les mêmes ---
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 15, backgroundColor: '#FFF' },
   toggleButton: { backgroundColor: '#607D8B', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
@@ -279,7 +260,7 @@ const styles = StyleSheet.create({
   shareButton: { marginTop: 10, backgroundColor: '#FF9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   shareButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%', shadowColor: '#000', shadowOpacity: 0.15, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 5 },
+  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%' },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
   contactButton: { backgroundColor: '#4CAF50', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 8 },
   contactText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
