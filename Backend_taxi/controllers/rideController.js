@@ -47,31 +47,38 @@ exports.createRide = async (req, res) => {
 };
 
 
-// === Récupérer toutes les courses (propres + partagées)
+// === Récupérer toutes les courses (propres + partagées) ===
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { date } = req.query; // date passée en query
+    const { date } = req.query;
 
     let queryDateStart = null;
     let queryDateEnd = null;
 
     if (date) {
       const parsed = new Date(date);
-      if (isNaN(parsed.valueOf())) {
-        return res.status(400).json({ message: 'Date invalide' });
-      }
+      if (isNaN(parsed.valueOf())) return res.status(400).json({ message: 'Date invalide' });
+
       queryDateStart = new Date(parsed.setHours(0, 0, 0, 0));
       queryDateEnd = new Date(parsed.setHours(23, 59, 59, 999));
     }
 
+    // -----------------------
     // 1️⃣ Courses propres
+    // -----------------------
     const ownQuery = { chauffeurId: userId };
     if (queryDateStart && queryDateEnd) ownQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
     const ownRides = await Ride.find(ownQuery);
 
-    // 2️⃣ Courses partagées vers moi
-    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
+    // -----------------------
+    // 2️⃣ Courses partagées vers moi (pending + accepted)
+    // -----------------------
+    const sharedLinks = await RideShare.find({
+      toUserId: userId,
+      statusPartage: { $in: ['pending', 'accepted'] }
+    });
+
     const sharedRideIds = sharedLinks.map(l => l.rideId);
     let sharedQuery = { _id: { $in: sharedRideIds } };
     if (queryDateStart && queryDateEnd) sharedQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
@@ -79,7 +86,7 @@ exports.getRides = async (req, res) => {
 
     const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
       const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const sharedByUser = await User.findById(link.fromUserId);
+      const sharedByUser = await User.findById(link.fromUserId).select('fullName email');
       return {
         ...ride.toObject(),
         isShared: true,
@@ -90,8 +97,14 @@ exports.getRides = async (req, res) => {
       };
     }));
 
-    // 3️⃣ Courses que j’ai partagées à d’autres
-    const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
+    // -----------------------
+    // 3️⃣ Courses que j’ai partagées à d’autres (pending + accepted)
+    // -----------------------
+    const sharedByMeLinks = await RideShare.find({
+      fromUserId: userId,
+      statusPartage: { $in: ['pending', 'accepted'] }
+    });
+
     const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
     let sharedByMeQuery = { _id: { $in: sharedByMeIds } };
     if (queryDateStart && queryDateEnd) sharedByMeQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
@@ -99,7 +112,7 @@ exports.getRides = async (req, res) => {
 
     const sharedByMeRides = await Promise.all(sharedByMeRidesRaw.map(async (ride) => {
       const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const toUser = await User.findById(link.toUserId);
+      const toUser = await User.findById(link.toUserId).select('fullName email');
       return {
         ...ride.toObject(),
         isShared: true,
@@ -108,11 +121,14 @@ exports.getRides = async (req, res) => {
       };
     }));
 
-    // Combiner et trier
+    // -----------------------
+    // 4️⃣ Combiner et trier
+    // -----------------------
     const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message });
