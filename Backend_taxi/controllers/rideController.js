@@ -104,7 +104,6 @@ exports.getRides = async (req, res) => {
 // --- POST /api/rides/share ---
 // Crée une invitation de partage (statut 'pending'). NE TRANSFÈRE PAS encore.
 // controllers/rideController.js
-const Ride = require('../models/Ride');
 
 exports.shareRide = async (req, res) => {
   const { rideId, toUserId } = req.body;
