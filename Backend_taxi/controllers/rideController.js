@@ -56,63 +56,54 @@ exports.createRide = async (req, res) => {
 // -----------------------------
 // Partager une course
 // -----------------------------
+
+
 exports.shareRide = async (req, res) => {
   try {
     const { rideId, toUserId } = req.body;
+    const fromUserId = req.user.id;
 
-    // 1️⃣ Vérification des paramètres
     if (!rideId || !toUserId) {
-      console.log('Paramètres manquants', { rideId, toUserId });
       return res.status(400).json({ message: 'rideId et toUserId sont requis' });
     }
 
-    if (!req.user || !req.user.id) {
-      console.log('Utilisateur non authentifié');
-      return res.status(401).json({ message: 'Non authentifié' });
+    if (fromUserId === toUserId) {
+      return res.status(400).json({ message: 'Impossible de partager la course à soi-même' });
     }
 
-    console.log('📥 Paramètres reçus:', { rideId, toUserId, userId: req.user.id });
-
-    // 2️⃣ Trouver la course
     const ride = await Ride.findById(rideId);
-    if (!ride) return res.status(404).json({ message: 'Course introuvable', rideId });
+    if (!ride) return res.status(404).json({ message: 'Course introuvable' });
 
-    // 3️⃣ Vérifier que l’utilisateur est le propriétaire
-    if (String(ride.chauffeurId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Non autorisé' });
+    if (String(ride.chauffeurId) !== String(fromUserId)) {
+      return res.status(403).json({ message: 'Non autorisé à partager cette course' });
     }
 
-    // 4️⃣ Vérifier doublon
-    const exists = await RideShare.findOne({ rideId, toUserId });
+    // Vérifier doublon
+    const exists = await RideShare.findOne({ rideId: ride._id, toUserId });
     if (exists) return res.status(400).json({ message: 'Course déjà partagée avec cet utilisateur' });
 
-    // 5️⃣ Créer l’invitation
+    // Créer l’invitation
     const share = await RideShare.create({
-      rideId,
-      fromUserId: req.user.id,
-      toUserId,  // ID du chauffeur destinataire
-      statusPartage: 'pending'
+      rideId: ride._id,
+      fromUserId,
+      toUserId,
+      statusPartage: 'pending',
     });
 
-    // 6️⃣ Mettre à jour la course
-    if (!ride.isShared) {
-      ride.isShared = true;
-      ride.sharedBy = [req.user.id];
-    } else {
-      if (!Array.isArray(ride.sharedBy)) ride.sharedBy = [];
-      if (!ride.sharedBy.includes(req.user.id)) ride.sharedBy.push(req.user.id);
-    }
-    ride.updatedAt = new Date();
+    // Mettre à jour la course pour marquer comme partagée
+    ride.isShared = true;
+    ride.sharedBy = ride.sharedBy || [];
+    if (!ride.sharedBy.includes(fromUserId)) ride.sharedBy.push(fromUserId);
     await ride.save();
 
-    console.log('✅ Invitation créée avec succès:', share);
-    return res.status(201).json({ message: 'Invitation envoyée et course mise à jour', share });
+    return res.status(201).json({ message: 'Invitation envoyée', share });
 
   } catch (err) {
     console.error('shareRide error:', err);
     return res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };
+
 
 // -----------------------------
 // Récupérer toutes les courses (propres + partagées)
@@ -130,40 +121,33 @@ exports.getRides = async (req, res) => {
       end   = new Date(d.setHours(23,59,59,999));
     }
 
-    console.log('📅 Paramètres reçus:', { userId, date });
-
     // 1️⃣ Courses propres
     const ownQuery = { chauffeurId: userId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
-    console.log('✅ Courses propres trouvées:', ownRides.length);
 
-    // 2️⃣ Shares reçus (pending + accepted)
+    // 2️⃣ Courses partagées reçues
     const shares = await RideShare.find({ toUserId: userId }).lean();
-    console.log('🔄 Shares reçus:', shares.length, shares);
+    const rideIds = shares.map(s => s.rideId);
 
-    const shareIds = shares.map(s => s.rideId);
-    console.log('🔑 RideIds partagés:', shareIds);
+    const sharedQuery = { _id: { $in: rideIds } };
+    if (start && end) sharedQuery.date = { $gte: start, $lte: end };
+    const sharedRidesRaw = await Ride.find(sharedQuery).lean();
 
-    const sharedRidesRaw = await Ride.find({ _id: { $in: shareIds } }).lean();
-    console.log('🚀 Courses partagées trouvées:', sharedRidesRaw.length);
-
-    // 3️⃣ Décorer pour front
-    const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
+    const sharedRides = sharedRidesRaw.map(ride => {
       const link = shares.find(s => String(s.rideId) === String(ride._id));
-      const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
       return {
         ...ride,
         isShared: true,
         sharedBy: link.fromUserId,
-        sharedByName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
+        sharedByName: link.fromUserId, // tu peux remplacer par nom si tu joins User
         statusPartage: link.statusPartage,
-        shareId: link._id
+        shareId: link._id,
       };
-    }));
+    });
 
+    // 3️⃣ Combiner et trier
     const all = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
-    console.log('📊 Total courses envoyées:', all.length);
 
     return res.json(all);
 
