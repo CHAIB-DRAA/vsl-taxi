@@ -13,7 +13,6 @@ moment.locale('fr');
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 const CONTACTS_API = 'https://vsl-taxi.onrender.com/api/contacts';
-const SHARE_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
 
 export default function AgendaScreen() {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
@@ -24,37 +23,23 @@ export default function AgendaScreen() {
   const [selectedRide, setSelectedRide] = useState(null);
   const [markedDates, setMarkedDates] = useState({});
   const [showCalendar, setShowCalendar] = useState(true);
-  const [currentUserId, setCurrentUserId] = useState(null);
-
-  // --- Config pour axios ---
-  const getConfig = async () => {
-    const token = await AsyncStorage.getItem('token');
-    return { headers: { Authorization: `Bearer ${token}` } };
-  };
-
-  // --- Fetch user ID ---
-  const fetchCurrentUser = async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) return;
-      const decoded = JSON.parse(atob(token.split('.')[1])); // si JWT classique
-      setCurrentUserId(decoded.id);
-    } catch (err) {
-      console.error('fetchCurrentUser error:', err);
-    }
-  };
 
   // --- Fetch courses ---
   const fetchRides = async () => {
     try {
       setLoading(true);
-      const config = await getConfig();
-      const res = await axios.get(`${API_URL}?date=${selectedDate}`, config);
-      const ridesData = res.data || [];
+      const token = await AsyncStorage.getItem('token');
+      if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
 
-      // Filtrer les partages refusés
+      const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const ridesData = res.data || [];
+      console.log('📊 Courses récupérées :', ridesData);
+
+      // on filtre uniquement les partages refusés
       const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'declined');
-      console.log('📦 Courses visibles:', visibleRides);
       setRides(visibleRides);
       markRidesOnCalendar(visibleRides);
     } catch (err) {
@@ -68,12 +53,12 @@ export default function AgendaScreen() {
   // --- Fetch contacts ---
   const fetchContacts = async () => {
     try {
-      const config = await getConfig();
-      const res = await axios.get(CONTACTS_API, config);
-      // Filtrer pour ne jamais inclure soi-même
-      const filtered = res.data.filter(c => c.userId !== currentUserId);
-      console.log('📤 Contacts chargés:', filtered);
-      setContacts(filtered);
+      const token = await AsyncStorage.getItem('token');
+      const res = await axios.get(CONTACTS_API, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('📤 Contacts trouvés :', res.data);
+      setContacts(res.data || []);
     } catch (err) {
       console.error('Erreur fetchContacts:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de récupérer les contacts.');
@@ -81,27 +66,26 @@ export default function AgendaScreen() {
   };
 
   useEffect(() => {
-    fetchCurrentUser().then(() => {
-      fetchRides();
-      fetchContacts();
-    });
+    fetchRides();
+    fetchContacts();
   }, [selectedDate]);
 
   // --- Partager une course ---
   const handleShareRide = async (rideId, toUserId) => {
     try {
-      if (toUserId === currentUserId) return Alert.alert('Erreur', 'Vous ne pouvez pas partager la course à vous-même.');
-
-      const config = await getConfig();
-      const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, config);
-
-      console.log('✅ Partage réponse API:', res.data);
+      console.log('🔄 Partage course:', { rideId, toUserId });
+      const token = await AsyncStorage.getItem('token');
+      const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
       if (res.data.share) {
+        console.log('✅ Course partagée :', res.data.share);
         Alert.alert('Succès', 'Course partagée !');
         setShareModalVisible(false);
-        fetchRides(); // recharge les courses
+        fetchRides(); // recharge pour voir la course partagée
       } else {
+        console.log('❌ Erreur partage:', res.data.message);
         Alert.alert('Erreur', res.data.message);
       }
     } catch (err) {
@@ -113,9 +97,13 @@ export default function AgendaScreen() {
   // --- Accepter / Refuser un partage ---
   const respondToShare = async (shareId, action) => {
     try {
-      const config = await getConfig();
-      await axios.post(SHARE_API, { shareId, action }, config);
+      const token = await AsyncStorage.getItem('token');
+      await axios.post(`${API_URL}/share/respond`, { shareId, action }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log(`📩 Share ${shareId} ${action}`);
 
+      // mise à jour locale
       setRides(prev => prev.map(r => {
         if (r.shareId === shareId) {
           if (action === 'declined') return null;
@@ -123,20 +111,19 @@ export default function AgendaScreen() {
         }
         return r;
       }).filter(Boolean));
-
-      fetchRides();
     } catch (err) {
       console.error('Erreur respondToShare:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
     }
   };
 
-  // --- Marquer le calendrier ---
+  // --- Marquer les jours avec dots ---
   const markRidesOnCalendar = (ridesList) => {
     const marks = {};
     ridesList.forEach(ride => {
       const day = moment(ride.date).format('YYYY-MM-DD');
       if (!marks[day]) marks[day] = { dots: [] };
+
       if (!ride.isShared) marks[day].dots.push({ key: `${ride._id}-own`, color: '#4CAF50' });
       else if (ride.isShared && ride.sharedBy && !ride.sharedToName)
         marks[day].dots.push({ key: `${ride._id}-toMe`, color: '#FF9800' });
@@ -189,7 +176,9 @@ export default function AgendaScreen() {
         />
       )}
 
-      <Text style={styles.title}>Courses du {moment(selectedDate).format('DD MMMM YYYY')}</Text>
+      <Text style={styles.title}>
+        Courses du {moment(selectedDate).format('DD MMMM YYYY')}
+      </Text>
 
       {loading ? (
         <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 20 }} />
@@ -250,19 +239,21 @@ export default function AgendaScreen() {
             <Text style={styles.modalTitle}>Partager la course avec :</Text>
 
             <FlatList
-              data={contacts}
-              keyExtractor={(item) => item.userId}
-              style={{ marginVertical: 10 }}
-              ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.contactButton}
-                  onPress={() => handleShareRide(selectedRide._id, item.userId)}
-                >
-                  <Text style={styles.contactText}>{item.fullName || item.email}</Text>
-                </TouchableOpacity>
-              )}
-            />
+  data={contacts}
+  keyExtractor={(item) => item._id} // id MongoDB du contact
+  renderItem={({ item }) => (
+    <TouchableOpacity
+      style={styles.contactItem}
+      onPress={() => {
+        // 🚨 utiliser item.userId et non item._id
+        handleShareRide(selectedRide._id, item.userId);
+      }}
+    >
+      <Text style={styles.contactText}>{item.fullName}</Text>
+    </TouchableOpacity>
+  )}
+/>
+
 
             <TouchableOpacity style={styles.modalClose} onPress={() => setShareModalVisible(false)}>
               <Text style={styles.modalCloseText}>Annuler</Text>

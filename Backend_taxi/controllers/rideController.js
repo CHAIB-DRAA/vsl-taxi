@@ -88,11 +88,12 @@ exports.shareRide = async (req, res) => {
 
     // 5️⃣ Créer l’invitation
     const share = await RideShare.create({
-      rideId,
+      rideId: new mongoose.Types.ObjectId(rideId),
       fromUserId: req.user.id,
-      toUserId,  // ID du chauffeur destinataire
+      toUserId, // ici toUserId = item.userId du front
       statusPartage: 'pending'
     });
+    
 
     // 6️⃣ Mettre à jour la course
     if (!ride.isShared) {
