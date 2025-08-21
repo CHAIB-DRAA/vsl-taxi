@@ -13,6 +13,7 @@ moment.locale('fr');
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 const CONTACTS_API = 'https://vsl-taxi.onrender.com/api/contacts';
+const SHARE_RESPOND_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
 
 export default function AgendaScreen() {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
@@ -77,6 +78,21 @@ export default function AgendaScreen() {
     }
   };
 
+  // --- Accepter / Refuser un partage ---
+  const respondToShare = async (shareId, action) => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      await axios.post(SHARE_RESPOND_API, { shareId, action }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      Alert.alert('Succès', `Course ${action}`);
+      fetchRides();
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de répondre au partage.');
+    }
+  };
+
   // --- Déterminer couleur ---
   const getRideColor = (ride) => {
     if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) return '#FF9800'; // partagée vers toi
@@ -133,6 +149,24 @@ export default function AgendaScreen() {
                 <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
                   {getSharedText(ride)}
                 </Text>
+
+                {/* Boutons accepter / refuser si course partagée vers toi */}
+                {ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId && ride.statusPartage === 'pending' && (
+                  <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                    <TouchableOpacity
+                      style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
+                      onPress={() => respondToShare(ride.shareId, 'accepted')}
+                    >
+                      <Text style={styles.shareButtonText}>Accepter</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
+                      onPress={() => respondToShare(ride.shareId, 'declined')}
+                    >
+                      <Text style={styles.shareButtonText}>Refuser</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 <TouchableOpacity
                   style={styles.shareButton}
@@ -197,8 +231,6 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 16, color: '#888', textAlign: 'center', marginTop: 20 },
   shareButton: { marginTop: 10, backgroundColor: '#FF9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   shareButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-
-  // Modal style
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%', shadowColor: '#000', shadowOpacity: 0.15, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 5 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },

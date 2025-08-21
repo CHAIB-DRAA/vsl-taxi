@@ -2,7 +2,6 @@ const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
 const User = require('../models/User'); // <--- Assure que le modèle User existe
 
-// Utilitaire : récupérer une course autorisée pour un utilisateur
 const findAuthorizedRide = async (rideId, userId) => {
   let ride = await Ride.findOne({ _id: rideId, chauffeurId: userId });
 
@@ -14,6 +13,7 @@ const findAuthorizedRide = async (rideId, userId) => {
 
   return ride;
 };
+
 
 // === Créer une course
 exports.createRide = async (req, res) => {
@@ -27,64 +27,71 @@ exports.createRide = async (req, res) => {
   }
 };
 
+
 // === Récupérer toutes les courses (propres + partagées)
-// === Récupérer toutes les courses (propres + partagées) ===
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
+    const { date } = req.query; // YYYY-MM-DD
+    const startOfDay = new Date(date + 'T00:00:00.000Z');
+    const endOfDay = new Date(date + 'T23:59:59.999Z');
 
-    // 1️⃣ Courses propres
-    const ownRides = await Ride.find({ chauffeurId: userId });
+    // Courses propres filtrées par date
+    const ownRides = await Ride.find({
+      chauffeurId: userId,
+      date: { $gte: startOfDay, $lte: endOfDay }
+    });
 
-    // 2️⃣ Courses partagées vers moi
+    // Courses partagées vers moi filtrées par date
     const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
     const sharedRideIds = sharedLinks.map(l => l.rideId);
-    const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
+    const sharedRidesRaw = await Ride.find({
+      _id: { $in: sharedRideIds },
+      date: { $gte: startOfDay, $lte: endOfDay }
+    });
 
-    const sharedRides = await Promise.all(
-      sharedRidesRaw.map(async (ride) => {
-        const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
-        if (!link) return null; // ignore si lien absent
-        const sharedByUser = await User.findById(link.fromUserId).catch(() => null);
-        return {
-          ...ride.toObject(),
-          isShared: true,
-          sharedBy: link.fromUserId,
-          sharedByName: sharedByUser?.fullName || sharedByUser?.email || 'Utilisateur',
-          statusPartage: link.statusPartage
-        };
-      })
-    ).then(arr => arr.filter(Boolean));
+    const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
+      const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
+      const sharedByUser = await User.findById(link.fromUserId);
+      return {
+        ...ride.toObject(),
+        isShared: true,
+        sharedBy: link.fromUserId,
+        sharedByName: sharedByUser?.fullName || sharedByUser?.email || 'Utilisateur',
+        statusPartage: link.statusPartage,
+        shareId: link._id
+      };
+    }));
 
-    // 3️⃣ Courses que j’ai partagées à d’autres
+    // Courses que j’ai partagées à d’autres filtrées par date
     const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
     const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
-    const sharedByMeRidesRaw = await Ride.find({ _id: { $in: sharedByMeIds } });
+    const sharedByMeRidesRaw = await Ride.find({
+      _id: { $in: sharedByMeIds },
+      date: { $gte: startOfDay, $lte: endOfDay }
+    });
 
-    const sharedByMeRides = await Promise.all(
-      sharedByMeRidesRaw.map(async (ride) => {
-        const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
-        if (!link) return null;
-        const toUser = await User.findById(link.toUserId).catch(() => null);
-        return {
-          ...ride.toObject(),
-          isShared: true,
-          sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
-          statusPartage: link.statusPartage
-        };
-      })
-    ).then(arr => arr.filter(Boolean));
+    const sharedByMeRides = await Promise.all(sharedByMeRidesRaw.map(async (ride) => {
+      const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
+      const toUser = await User.findById(link.toUserId);
+      return {
+        ...ride.toObject(),
+        isShared: true,
+        sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
+        statusPartage: link.statusPartage
+      };
+    }));
 
-    // 4️⃣ Combiner toutes les courses et trier par date
     const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
   } catch (err) {
-    console.error('Erreur getRides:', err);
-    res.status(500).json({ message: 'Impossible de récupérer les courses', error: err.message });
+    console.error(err);
+    res.status(500).json({ message: err.message });
   }
 };
+
 
 // === Mettre à jour une course
 exports.updateRide = async (req, res) => {
