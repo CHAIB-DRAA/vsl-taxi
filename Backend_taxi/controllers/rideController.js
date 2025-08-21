@@ -56,6 +56,68 @@ exports.createRide = async (req, res) => {
 // -----------------------------
 // Partager une course
 // -----------------------------
+exports.shareRide = async (req, res) => {
+  try {
+    const { rideId, toUserId } = req.body;
+
+    // 1️⃣ Vérification des paramètres
+    if (!rideId || !toUserId) {
+      console.log('Paramètres manquants', { rideId, toUserId });
+      return res.status(400).json({ message: 'rideId et toUserId sont requis' });
+    }
+
+    if (!req.user || !req.user.id) {
+      console.log('Utilisateur non authentifié');
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+
+    console.log('📥 Paramètres reçus:', { rideId, toUserId, userId: req.user.id });
+
+    // 2️⃣ Trouver la course
+    const ride = await Ride.findById(rideId);
+    if (!ride) return res.status(404).json({ message: 'Course introuvable', rideId });
+
+    // 3️⃣ Vérifier que l’utilisateur est le propriétaire
+    if (String(ride.chauffeurId) !== String(req.user.id)) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
+
+    // 4️⃣ Vérifier doublon
+    const exists = await RideShare.findOne({ rideId, toUserId });
+    if (exists) return res.status(400).json({ message: 'Course déjà partagée avec cet utilisateur' });
+
+    // 5️⃣ Créer l’invitation
+    const share = await RideShare.create({
+      rideId: new mongoose.Types.ObjectId(rideId),
+      fromUserId: req.user.id,
+      toUserId, // ici toUserId = item.userId du front
+      statusPartage: 'pending'
+    });
+    
+
+    // 6️⃣ Mettre à jour la course
+    if (!ride.isShared) {
+      ride.isShared = true;
+      ride.sharedBy = [req.user.id];
+    } else {
+      if (!Array.isArray(ride.sharedBy)) ride.sharedBy = [];
+      if (!ride.sharedBy.includes(req.user.id)) ride.sharedBy.push(req.user.id);
+    }
+    ride.updatedAt = new Date();
+    await ride.save();
+
+    console.log('✅ Invitation créée avec succès:', share);
+    return res.status(201).json({ message: 'Invitation envoyée et course mise à jour', share });
+
+  } catch (err) {
+    console.error('shareRide error:', err);
+    return res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
+// -----------------------------
+// Récupérer toutes les courses (propres + partagées)
+// -----------------------------
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -69,80 +131,46 @@ exports.getRides = async (req, res) => {
       end   = new Date(d.setHours(23,59,59,999));
     }
 
+    console.log('📅 Paramètres reçus:', { userId, date });
+
     // 1️⃣ Courses propres
     const ownQuery = { chauffeurId: userId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
+    console.log('✅ Courses propres trouvées:', ownRides.length);
 
-    // 2️⃣ Partages reçus
+    // 2️⃣ Shares reçus (pending + accepted)
     const shares = await RideShare.find({ toUserId: userId }).lean();
-    const sharedIds = shares.map(s => s.rideId);
+    console.log('🔄 Shares reçus:', shares.length, shares);
 
-    const sharedQuery = { _id: { $in: sharedIds } };
-    if (start && end) sharedQuery.date = { $gte: start, $lte: end };
-    const sharedRidesRaw = await Ride.find(sharedQuery).lean();
+    const shareIds = shares.map(s => s.rideId);
+    console.log('🔑 RideIds partagés:', shareIds);
 
-    const sharedRides = sharedRidesRaw.map(ride => {
+    const sharedRidesRaw = await Ride.find({ _id: { $in: shareIds } }).lean();
+    console.log('🚀 Courses partagées trouvées:', sharedRidesRaw.length);
+
+    // 3️⃣ Décorer pour front
+    const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
       const link = shares.find(s => String(s.rideId) === String(ride._id));
+      const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
       return {
         ...ride,
         isShared: true,
         sharedBy: link.fromUserId,
-        sharedByName: link.fromUserName || 'Utilisateur', // à définir lors du share
+        sharedByName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
         statusPartage: link.statusPartage,
         shareId: link._id
       };
-    });
+    }));
 
-    const allRides = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
-    console.log('📊 Total courses envoyées:', allRides.length);
+    const all = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
+    console.log('📊 Total courses envoyées:', all.length);
 
-    res.json(allRides);
+    return res.json(all);
+
   } catch (err) {
     console.error('getRides error:', err);
-    res.status(500).json({ message: 'Erreur serveur', error: err.message });
-  }
-};
-
-// Partager une course
-exports.shareRide = async (req, res) => {
-  try {
-    const { rideId, toUserId } = req.body;
-    if (!rideId || !toUserId) return res.status(400).json({ message: 'rideId et toUserId requis' });
-    if (!req.user || !req.user.id) return res.status(401).json({ message: 'Non authentifié' });
-
-    const ride = await Ride.findById(rideId);
-    if (!ride) return res.status(404).json({ message: 'Course introuvable' });
-    if (String(ride.chauffeurId) !== String(req.user.id)) return res.status(403).json({ message: 'Non autorisé' });
-    if (toUserId === req.user.id) return res.status(400).json({ message: 'Impossible de partager à soi-même' });
-
-    // Vérifier doublon
-    const exists = await RideShare.findOne({ rideId, toUserId });
-    if (exists) return res.status(400).json({ message: 'Course déjà partagée avec cet utilisateur' });
-
-    // Récupérer le nom du destinataire depuis User/Contact
-    const toUser = await User.findById(toUserId).select('fullName email').lean();
-    const share = await RideShare.create({
-      rideId,
-      fromUserId: req.user.id,
-      fromUserName: req.user.fullName || req.user.email,
-      toUserId,
-      toUserName: toUser?.fullName || toUser?.email || 'Utilisateur',
-      statusPartage: 'pending'
-    });
-
-    // Mettre à jour le ride
-    ride.isShared = true;
-    if (!Array.isArray(ride.sharedBy)) ride.sharedBy = [];
-    if (!ride.sharedBy.includes(req.user.id)) ride.sharedBy.push(req.user.id);
-    ride.updatedAt = new Date();
-    await ride.save();
-
-    console.log('Invitation créée:', share);
-    res.status(201).json({ message: 'Invitation envoyée', share });
-  } catch (err) {
-    console.error('shareRide error:', err);
-    res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    return res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };
 
