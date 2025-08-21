@@ -4,22 +4,19 @@ import {
   Alert, TouchableOpacity, Modal, FlatList
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
-import axios from 'axios';
 import moment from 'moment';
 import 'moment/locale/fr';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-moment.locale('fr');
+import { getRides, getContacts, shareRide, respondToShare } from '../services/api'; // ton fichier API
 
-const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
-const CONTACTS_API = 'https://vsl-taxi.onrender.com/api/contacts';
-const SHARE_API = 'https://vsl-taxi.onrender.com/api/rides/respond';
+moment.locale('fr');
 
 export default function AgendaScreen() {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
   const [rides, setRides] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
   const [markedDates, setMarkedDates] = useState({});
@@ -29,16 +26,9 @@ export default function AgendaScreen() {
   const fetchRides = async () => {
     try {
       setLoading(true);
-      const token = await AsyncStorage.getItem('token');
-      if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
-
-      const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      const ridesData = res.data || [];
-      setRides(ridesData);
-      markRidesOnCalendar(ridesData);
+      const data = await getRides(selectedDate);
+      setRides(data.filter(r => r.statusPartage !== 'declined'));
+      markRidesOnCalendar(data);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
@@ -50,11 +40,8 @@ export default function AgendaScreen() {
   // --- Fetch contacts ---
   const fetchContacts = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      const res = await axios.get(CONTACTS_API, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setContacts(res.data || []);
+      const data = await getContacts();
+      setContacts(data);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de récupérer les contacts.');
@@ -69,19 +56,10 @@ export default function AgendaScreen() {
   // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      const res = await axios.post(`${API_URL}/share`,
-        { rideId, toUserId: contactId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      if (res.data.share) {
-        Alert.alert('Succès', 'Course partagée !');
-        setShareModalVisible(false);
-        fetchRides(); // rafraîchit la liste
-      } else {
-        Alert.alert('Erreur', res.data.message);
-      }
+      await shareRide(rideId, contactId);
+      Alert.alert('Succès', 'Invitation envoyée !');
+      setShareModalVisible(false);
+      fetchRides(); // rafraîchir la liste pour voir le partage
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de partager la course.');
@@ -89,13 +67,10 @@ export default function AgendaScreen() {
   };
 
   // --- Accepter / Refuser un partage ---
-  const respondToShare = async (shareId, action) => {
+  const handleRespondToShare = async (shareId, action) => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      await axios.post(SHARE_API, { shareId, action }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      fetchRides(); // rafraîchit la liste après action
+      await respondToShare(shareId, action);
+      fetchRides(); // rafraîchir la liste
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
@@ -110,10 +85,10 @@ export default function AgendaScreen() {
       if (!marks[day]) marks[day] = { dots: [] };
 
       if (!ride.isShared) marks[day].dots.push({ key: `${ride._id}-own`, color: '#4CAF50' });
-      else if (ride.isShared && ride.sharedBy && ride.statusPartage === 'pending')
-        marks[day].dots.push({ key: `${ride._id}-pending`, color: '#FF9800' });
-      else if (ride.isShared && ride.sharedBy && ride.statusPartage === 'accepted')
-        marks[day].dots.push({ key: `${ride._id}-accepted`, color: '#2196F3' });
+      else if (ride.isShared && ride.sharedBy && !ride.sharedToName)
+        marks[day].dots.push({ key: `${ride._id}-toMe`, color: '#FF9800' });
+      else if (ride.isShared && ride.sharedToName)
+        marks[day].dots.push({ key: `${ride._id}-byMe`, color: '#2196F3' });
     });
 
     if (!marks[selectedDate]) marks[selectedDate] = { dots: [] };
@@ -123,18 +98,18 @@ export default function AgendaScreen() {
   };
 
   const getRideColor = (ride) => {
-    if (ride.isShared && ride.statusPartage === 'pending') return '#FF9800';
-    if (ride.isShared && ride.statusPartage === 'accepted') return '#2196F3';
+    if (ride.isShared && ride.sharedBy && !ride.sharedToName) return '#FF9800';
+    if (ride.isShared && ride.sharedToName) return '#2196F3';
     if (ride.type === 'Aller') return '#4CAF50';
     if (ride.type === 'Retour') return '#607D8B';
     return '#888';
   };
 
   const getSharedText = (ride) => {
-    if (ride.isShared && ride.statusPartage === 'pending')
+    if (ride.isShared && ride.sharedBy && !ride.sharedToName)
       return `Partagée par : ${ride.sharedByName} (${ride.statusPartage})`;
-    if (ride.isShared && ride.statusPartage === 'accepted')
-      return `Partagée par : ${ride.sharedByName} (accepté)`;
+    if (ride.isShared && ride.sharedToName)
+      return `Partagée à : ${ride.sharedToName} (${ride.statusPartage})`;
     return ride.type;
   };
 
@@ -152,10 +127,18 @@ export default function AgendaScreen() {
           onDayPress={(day) => setSelectedDate(day.dateString)}
           markedDates={markedDates}
           markingType={'multi-dot'}
+          theme={{
+            todayTextColor: '#FF9800',
+            arrowColor: '#4CAF50',
+            monthTextColor: '#000',
+            textMonthFontWeight: 'bold'
+          }}
         />
       )}
 
-      <Text style={styles.title}>Courses du {moment(selectedDate).format('DD MMMM YYYY')}</Text>
+      <Text style={styles.title}>
+        Courses du {moment(selectedDate).format('DD MMMM YYYY')}
+      </Text>
 
       {loading ? (
         <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 20 }} />
@@ -165,7 +148,7 @@ export default function AgendaScreen() {
             <Text style={styles.emptyText}>Aucune course prévue.</Text>
           ) : rides.map((ride) => (
             <View
-              key={ride._id + (ride.isShared ? `-${ride.statusPartage}` : '-own')}
+              key={ride._id + (ride.isShared ? (ride.sharedToName ? '-byMe' : '-toMe') : '-own')}
               style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}
             >
               <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
@@ -177,17 +160,17 @@ export default function AgendaScreen() {
               </Text>
 
               {/* Accept / Refuse */}
-              {ride.isShared && ride.statusPartage === 'pending' && (
+              {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && (
                 <View style={{ flexDirection: 'row', marginTop: 5 }}>
                   <TouchableOpacity
                     style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, 'accepted')}
+                    onPress={() => handleRespondToShare(ride.shareId, 'accepted')}
                   >
                     <Text style={styles.shareButtonText}>Accepter</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, 'declined')}
+                    onPress={() => handleRespondToShare(ride.shareId, 'declined')}
                   >
                     <Text style={styles.shareButtonText}>Refuser</Text>
                   </TouchableOpacity>
@@ -195,7 +178,7 @@ export default function AgendaScreen() {
               )}
 
               {/* Bouton partager */}
-              {!ride.isShared && (
+              {!ride.sharedToName && !ride.isShared && (
                 <TouchableOpacity
                   style={styles.shareButton}
                   onPress={() => {
@@ -242,7 +225,6 @@ export default function AgendaScreen() {
   );
 }
 
-// --- Styles restent les mêmes ---
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 15, backgroundColor: '#FFF' },
   toggleButton: { backgroundColor: '#607D8B', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
@@ -260,7 +242,7 @@ const styles = StyleSheet.create({
   shareButton: { marginTop: 10, backgroundColor: '#FF9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   shareButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%' },
+  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%', shadowColor: '#000', shadowOpacity: 0.15, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 5 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
   contactButton: { backgroundColor: '#4CAF50', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 8 },
   contactText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },

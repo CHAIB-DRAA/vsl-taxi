@@ -41,45 +41,40 @@ export const createRide = async (ride) => {
     throw err;
   }
 };
-
-// Récupérer toutes les courses (propres + partagées)
-export const getRides = async () => {
+// --- Récupérer toutes les courses (propres + partagées) ---
+export const getRides = async (date) => {
   try {
     const config = await getConfig();
-    const res = await axios.get(API_URL, config);
-    return res.data;
+    const url = date ? `${API_URL}?date=${date}` : API_URL;
+    const res = await axios.get(url, config);
+    return res.data || [];
   } catch (err) {
     console.error('Erreur API getRides:', err.response?.data || err.message);
     throw err;
   }
 };
 
-// Mettre à jour une course
+// --- Mettre à jour une course ---
 export const updateRide = async (id, data) => {
   const config = await getConfig();
   const res = await axios.patch(`${API_URL}/${id}`, data, config);
   return res.data;
 };
 
-// Supprimer une course
+// --- Supprimer une course ---
 export const deleteRide = async (id) => {
   const config = await getConfig();
   const res = await axios.delete(`${API_URL}/${id}`, config);
   return res.data;
 };
 
-// ---------------------------
-// Statut course
-// ---------------------------
-
-// Démarrer une course
+// --- Démarrer / Terminer une course ---
 export const startRideById = async (id) => {
   const config = await getConfig();
   const res = await axios.post(`${API_URL}/${id}/start`, {}, config);
   return res.data;
 };
 
-// Terminer une course
 export const finishRideById = async (id, distance) => {
   if (!distance || isNaN(distance)) throw new Error('Distance invalide');
   const config = await getConfig();
@@ -87,25 +82,19 @@ export const finishRideById = async (id, distance) => {
   return res.data;
 };
 
-// ---------------------------
-// Partage de course
-// ---------------------------
-
-// Partager une course
+// --- Partage de course ---
 export const shareRide = async (rideId, toUserId) => {
   const config = await getConfig();
   const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, config);
   return res.data;
 };
 
-// Répondre à un partage
 export const respondToShare = async (shareId, action) => {
   if (!['accepted', 'declined'].includes(action)) throw new Error('Action invalide');
   const config = await getConfig();
   const res = await axios.post(`${API_URL}/share/respond`, { shareId, action }, config);
   return res.data;
 };
-
 
 
 

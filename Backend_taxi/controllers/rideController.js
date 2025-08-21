@@ -62,40 +62,34 @@ exports.getRides = async (req, res) => {
       end   = new Date(d.setHours(23,59,59,999));
     }
 
-    // 1️⃣ Tes courses (propriétaire)
+    // 1️⃣ Courses propres
     const ownQuery = { chauffeurId: userId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
 
-    // 2️⃣ Toutes les invitations reçues (pending + accepted)
+    // 2️⃣ Courses partagées vers moi (pending ou accepted)
     const shares = await RideShare.find({ toUserId: userId }).lean();
-    let sharedRides = [];
+    const sharedIds = shares.map(s => s.rideId);
+    const sharedQuery = { _id: { $in: sharedIds } };
+    if (start && end) sharedQuery.date = { $gte: start, $lte: end };
+    const sharedRidesRaw = await Ride.find(sharedQuery).lean();
 
-    if (shares.length > 0) {
-      const shareIds = shares.map(s => s.rideId);
-      const sharedQuery = { _id: { $in: shareIds } };
-      if (start && end) sharedQuery.date = { $gte: start, $lte: end };
-      const sharedRidesRaw = await Ride.find(sharedQuery).lean();
+    // 3️⃣ Décoration pour le front
+    const sharedRides = sharedRidesRaw.map(ride => {
+      const link = shares.find(s => String(s.rideId) === String(ride._id));
+      return {
+        ...ride,
+        isShared: true,
+        sharedBy: link.fromUserId,
+        sharedByName: link.fromUserId, // ou récupérer le nom depuis User.findById si besoin
+        statusPartage: link.statusPartage,
+        shareId: link._id
+      };
+    });
 
-      // On ajoute les infos de partage
-      sharedRides = sharedRidesRaw.map(ride => {
-        const link = shares.find(s => String(s.rideId) === String(ride._id));
-        return {
-          ...ride,
-          isShared: true,
-          sharedBy: link.fromUserId,
-          sharedByName: link.fromUserName || link.fromUserId, // si tu stockes le nom directement
-          statusPartage: link.statusPartage,
-          shareId: link._id
-        };
-      });
-    }
-
-    // 3️⃣ Combine tout et trie par date
     const allRides = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
-
   } catch (err) {
     console.error('getRides error:', err);
     res.status(500).json({ message: 'Erreur serveur', error: err.message });
