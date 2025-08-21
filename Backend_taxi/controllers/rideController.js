@@ -103,40 +103,30 @@ exports.getRides = async (req, res) => {
 
 // --- POST /api/rides/share ---
 // Crée une invitation de partage (statut 'pending'). NE TRANSFÈRE PAS encore.
+// controllers/rideController.js
+const Ride = require('../models/Ride');
+
 exports.shareRide = async (req, res) => {
+  const { rideId, toUserId } = req.body;
+
+  if (!rideId || !toUserId) return res.status(400).json({ message: "rideId et toUserId sont obligatoires" });
+
   try {
-    const { rideId, toUserId } = req.body;
-
-    if (!rideId || !toUserId) {
-      return res.status(400).json({ message: 'rideId et toUserId sont requis' });
-    }
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ message: 'Non authentifié' });
-    }
-
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: 'Course introuvable' });
 
-    // Seul le propriétaire peut inviter
-    if (String(ride.chauffeurId) !== String(req.user.id)) {
+    if (ride.chauffeurId.toString() !== req.user.id)
       return res.status(403).json({ message: 'Non autorisé' });
-    }
 
-    // Empêcher doublons d’invitation vers le même destinataire
-    const exists = await RideShare.findOne({ rideId, toUserId });
-    if (exists) return res.status(400).json({ message: 'Course déjà partagée avec cet utilisateur' });
+    // Transférer directement la course au nouveau chauffeur
+    ride.chauffeurId = toUserId;
+    ride.isShared = true; // pour marquer visuellement que c'est un transfert
+    await ride.save();
 
-    const share = await RideShare.create({
-      rideId,
-      fromUserId: req.user.id,
-      toUserId,
-      statusPartage: 'pending'
-    });
-
-    return res.status(201).json({ message: 'Invitation envoyée', share });
+    res.json({ message: 'Course transférée avec succès', ride });
   } catch (err) {
-    console.error('shareRide error:', err);
-    res.status(500).json({ message: 'Erreur serveur' });
+    console.error(err);
+    res.status(500).json({ message: err.message });
   }
 };
 

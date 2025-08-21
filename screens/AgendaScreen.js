@@ -77,18 +77,20 @@ export default function AgendaScreen() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
   
-      if (res.data.share) {
-        setRides(prev => prev.filter(r => r._id !== rideId));
-        Alert.alert('Succès', 'Course partagée !');
+      if (res.data.ride) {
+        // Mettre à jour la liste localement
+        setRides(prev => prev.map(r => r._id === rideId ? res.data.ride : r));
+        Alert.alert('Succès', 'Course transférée au nouveau chauffeur !');
         setShareModalVisible(false);
       } else {
-        Alert.alert('Erreur', res.data.message);
+        Alert.alert('Erreur', res.data.message || 'Impossible de transférer la course');
       }
     } catch (err) {
       console.error(err);
-      Alert.alert('Erreur', 'Impossible de partager la course.');
+      Alert.alert('Erreur', 'Impossible de transférer la course.');
     }
   };
+  
   
 
   // --- Accepter / Refuser un partage ---
