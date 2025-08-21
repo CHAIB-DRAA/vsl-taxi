@@ -70,28 +70,26 @@ export default function AgendaScreen() {
 
   // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      const res = await axios.post(`${API_URL}/share`, 
-        { rideId, toUserId: contactId }, 
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-  
-      if (res.data.ride) {
-        // Mettre à jour la liste localement
-        setRides(prev => prev.map(r => r._id === rideId ? res.data.ride : r));
-        Alert.alert('Succès', 'Course transférée au nouveau chauffeur !');
-        setShareModalVisible(false);
-      } else {
-        Alert.alert('Erreur', res.data.message || 'Impossible de transférer la course');
-      }
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Erreur', 'Impossible de transférer la course.');
+  try {
+    const token = await AsyncStorage.getItem('token');
+    const res = await axios.post(`${API_URL}/share`, 
+      { rideId, toUserId: contactId }, 
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (res.data.share) {
+      setRides(prev => prev.filter(r => r._id !== rideId));
+      Alert.alert('Succès', 'Course partagée !');
+      setShareModalVisible(false);
+    } else {
+      Alert.alert('Erreur', res.data.message);
     }
-  };
-  
-  
+  } catch (err) {
+    console.error(err);
+    Alert.alert('Erreur', 'Impossible de partager la course.');
+  }
+};
+
 
   // --- Accepter / Refuser un partage ---
   const respondToShare = async (shareId, action) => {
