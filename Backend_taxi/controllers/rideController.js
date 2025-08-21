@@ -51,6 +51,7 @@ exports.createRide = async (req, res) => {
 //   - + invitations "PENDING" que TU as reçues (pour afficher Accepter/Refuser)
 
 
+
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id; // string
@@ -69,7 +70,8 @@ exports.getRides = async (req, res) => {
       end = new Date(d.setHours(23, 59, 59, 999));
     }
 
-    const userObjectId = mongoose.Types.ObjectId(userId);
+    // Conversion string -> ObjectId pour Mongoose 7+
+    const userObjectId = new mongoose.Types.ObjectId(userId);
 
     // 1️⃣ Courses propres
     const ownQuery = { chauffeurId: userObjectId };
@@ -81,7 +83,7 @@ exports.getRides = async (req, res) => {
     const shares = await RideShare.find({ toUserId: userObjectId }).lean();
     console.log('🔄 Shares reçus:', shares.length);
 
-    const shareIds = shares.map(s => mongoose.Types.ObjectId(s.rideId));
+    const shareIds = shares.map(s => new mongoose.Types.ObjectId(s.rideId));
     console.log('🔑 RideIds partagés:', shareIds);
 
     let sharedRidesRaw = [];
