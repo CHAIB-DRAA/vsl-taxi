@@ -23,7 +23,7 @@ export default function AgendaScreen() {
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
   const [markedDates, setMarkedDates] = useState({});
-  const [calendarVisible, setCalendarVisible] = useState(true); // pour masquer/afficher le calendrier
+  const [showCalendar, setShowCalendar] = useState(true);
 
   // --- Fetch courses ---
   const fetchRides = async () => {
@@ -32,19 +32,15 @@ export default function AgendaScreen() {
       const token = await AsyncStorage.getItem('token');
       if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
 
-      const res = await axios.get(`${API_URL}`, {
+      const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
       const ridesData = res.data || [];
-
-      // Filtrer par date sélectionnée
-      const filtered = ridesData.filter(ride => 
-        moment(ride.date).format('YYYY-MM-DD') === selectedDate
-      );
-
-      setRides(filtered);
-      markRidesOnCalendar(ridesData); // pour le calendrier complet
+      // On filtre directement les partages refusés
+      const visibleRides = ridesData.filter(r => r.statusPartage !== 'declined');
+      setRides(visibleRides);
+      markRidesOnCalendar(visibleRides);
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
@@ -72,17 +68,17 @@ export default function AgendaScreen() {
     fetchContacts();
   }, [selectedDate]);
 
-  
+  // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
     try {
       const token = await AsyncStorage.getItem('token');
       await axios.post(`${API_URL}/share`, { rideId, toUserId: contactId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-  
-      // Retirer la course partagée de la liste actuelle
+
+      // Supprimer la course partagée de la liste propre
       setRides(prev => prev.filter(r => r._id !== rideId));
-  
+
       Alert.alert('Succès', 'Course partagée !');
       setShareModalVisible(false);
     } catch (err) {
@@ -90,7 +86,6 @@ export default function AgendaScreen() {
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
-  
 
   // --- Accepter / Refuser un partage ---
   const respondToShare = async (shareId, action) => {
@@ -99,7 +94,15 @@ export default function AgendaScreen() {
       await axios.post(SHARE_API, { shareId, action }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      fetchRides();
+
+      // Supprimer la course si elle est refusée, sinon mettre à jour le status
+      setRides(prev => prev.map(r => {
+        if (r.shareId === shareId) {
+          if (action === 'declined') return null;
+          return { ...r, statusPartage: action };
+        }
+        return r;
+      }).filter(Boolean));
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
@@ -109,30 +112,26 @@ export default function AgendaScreen() {
   // --- Marquer les jours avec dots ---
   const markRidesOnCalendar = (ridesList) => {
     const marks = {};
-
     ridesList.forEach(ride => {
       const day = moment(ride.date).format('YYYY-MM-DD');
       if (!marks[day]) marks[day] = { dots: [] };
 
-      if (!ride.isShared) {
-        marks[day].dots.push({ key: `own-${ride._id}`, color: '#4CAF50' });
-      } else if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) {
-        marks[day].dots.push({ key: `sharedToMe-${ride._id}`, color: '#FF9800' });
-      } else if (ride.isShared && ride.sharedToName) {
-        marks[day].dots.push({ key: `sharedByMe-${ride._id}`, color: '#2196F3' });
-      }
+      if (!ride.isShared) marks[day].dots.push({ key: `${ride._id}-own`, color: '#4CAF50' });
+      else if (ride.isShared && ride.sharedBy && !ride.sharedToName)
+        marks[day].dots.push({ key: `${ride._id}-toMe`, color: '#FF9800' });
+      else if (ride.isShared && ride.sharedToName)
+        marks[day].dots.push({ key: `${ride._id}-byMe`, color: '#2196F3' });
     });
 
     // jour sélectionné
     if (!marks[selectedDate]) marks[selectedDate] = { dots: [] };
     marks[selectedDate].selected = true;
     marks[selectedDate].selectedColor = '#4CAF50';
-
     setMarkedDates(marks);
   };
 
   const getRideColor = (ride) => {
-    if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) return '#FF9800';
+    if (ride.isShared && ride.sharedBy && !ride.sharedToName) return '#FF9800';
     if (ride.isShared && ride.sharedToName) return '#2196F3';
     if (ride.type === 'Aller') return '#4CAF50';
     if (ride.type === 'Retour') return '#607D8B';
@@ -140,28 +139,23 @@ export default function AgendaScreen() {
   };
 
   const getSharedText = (ride) => {
-    if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) {
+    if (ride.isShared && ride.sharedBy && !ride.sharedToName)
       return `Partagée par : ${ride.sharedByName} (${ride.statusPartage})`;
-    }
-    if (ride.isShared && ride.sharedToName) {
+    if (ride.isShared && ride.sharedToName)
       return `Partagée à : ${ride.sharedToName} (${ride.statusPartage})`;
-    }
     return ride.type;
   };
 
   return (
     <View style={styles.container}>
-
       <TouchableOpacity
-        style={[styles.shareButton, { backgroundColor: '#607D8B', marginBottom: 10 }]}
-        onPress={() => setCalendarVisible(!calendarVisible)}
+        style={styles.toggleButton}
+        onPress={() => setShowCalendar(prev => !prev)}
       >
-        <Text style={styles.shareButtonText}>
-          {calendarVisible ? 'Masquer le calendrier' : 'Afficher le calendrier'}
-        </Text>
+        <Text style={styles.toggleButtonText}>{showCalendar ? 'Masquer le calendrier' : 'Afficher le calendrier'}</Text>
       </TouchableOpacity>
 
-      {calendarVisible && (
+      {showCalendar && (
         <Calendar
           onDayPress={(day) => setSelectedDate(day.dateString)}
           markedDates={markedDates}
@@ -185,37 +179,39 @@ export default function AgendaScreen() {
         <ScrollView style={styles.ridesList}>
           {rides.length === 0 ? (
             <Text style={styles.emptyText}>Aucune course prévue.</Text>
-          ) : rides.map((ride) => {
-            // clé unique : si partagé -> shareId, sinon _id
-            const key = ride.isShared ? ride.shareId || ride._id : ride._id;
+          ) : rides.map((ride) => (
+            <View
+              key={ride._id + (ride.isShared ? (ride.sharedToName ? '-byMe' : '-toMe') : '-own')}
+              style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}
+            >
+              <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
+              <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
+              <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
 
-            return (
-              <View key={key} style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}>
-                <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
-                <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
-                <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
+              <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
+                {getSharedText(ride)}
+              </Text>
 
-                <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
-                  {getSharedText(ride)}
-                </Text>
+              {/* Accept / Refuse */}
+              {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && (
+                <View style={{ flexDirection: 'row', marginTop: 5 }}>
+                  <TouchableOpacity
+                    style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
+                    onPress={() => respondToShare(ride.shareId, 'accepted')}
+                  >
+                    <Text style={styles.shareButtonText}>Accepter</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
+                    onPress={() => respondToShare(ride.shareId, 'declined')}
+                  >
+                    <Text style={styles.shareButtonText}>Refuser</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
-                {ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId && ride.statusPartage === 'pending' && (
-                  <View style={{ flexDirection: 'row', marginTop: 5 }}>
-                    <TouchableOpacity
-                      style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-                      onPress={() => respondToShare(ride.shareId, 'accepted')}
-                    >
-                      <Text style={styles.shareButtonText}>Accepter</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-                      onPress={() => respondToShare(ride.shareId, 'declined')}
-                    >
-                      <Text style={styles.shareButtonText}>Refuser</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
+              {/* Bouton partager */}
+              {!ride.sharedToName && !ride.isShared && (
                 <TouchableOpacity
                   style={styles.shareButton}
                   onPress={() => {
@@ -225,9 +221,9 @@ export default function AgendaScreen() {
                 >
                   <Text style={styles.shareButtonText}>Partager</Text>
                 </TouchableOpacity>
-              </View>
-            );
-          })}
+              )}
+            </View>
+          ))}
         </ScrollView>
       )}
 
@@ -258,13 +254,14 @@ export default function AgendaScreen() {
           </View>
         </View>
       </Modal>
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 15, backgroundColor: '#FFF' },
+  toggleButton: { backgroundColor: '#607D8B', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
+  toggleButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   title: { fontSize: 20, fontWeight: 'bold', marginVertical: 10, textAlign: 'center' },
   ridesList: { marginTop: 10 },
   rideCard: {

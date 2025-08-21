@@ -1,7 +1,10 @@
 const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
-const User = require('../models/User'); // <--- Assure que le modèle User existe
+const User = require('../models/User'); // Assure que le modèle User existe
 
+// -------------------
+// Utilitaire : récupérer une course autorisée
+// -------------------
 const findAuthorizedRide = async (rideId, userId) => {
   let ride = await Ride.findOne({ _id: rideId, chauffeurId: userId });
 
@@ -14,24 +17,18 @@ const findAuthorizedRide = async (rideId, userId) => {
   return ride;
 };
 
-
-// === Créer une course sécurisée ===
+// -------------------
+// Créer une course
+// -------------------
 exports.createRide = async (req, res) => {
   try {
-    const chauffeurId = req.user.id; // depuis token
+    const chauffeurId = req.user.id;
     const { date, ...rest } = req.body;
 
-    // Vérifier que la date est valide
-    if (!date) {
-      return res.status(400).json({ message: 'Date manquante' });
-    }
-
+    if (!date) return res.status(400).json({ message: 'Date manquante' });
     const rideDate = new Date(date);
-    if (isNaN(rideDate.valueOf())) {
-      return res.status(400).json({ message: 'Date invalide' });
-    }
+    if (isNaN(rideDate.valueOf())) return res.status(400).json({ message: 'Date invalide' });
 
-    // Créer la course avec la date convertie
     const ride = new Ride({
       ...rest,
       date: rideDate,
@@ -46,7 +43,9 @@ exports.createRide = async (req, res) => {
   }
 };
 
-
+// -------------------
+// Récupérer toutes les courses (propres + partagées)
+// -------------------
 // === Récupérer toutes les courses (propres + partagées) ===
 exports.getRides = async (req, res) => {
   try {
@@ -63,7 +62,7 @@ exports.getRides = async (req, res) => {
       queryDateEnd = new Date(parsed.setHours(23, 59, 59, 999));
     }
 
-    // 1️⃣ Courses propres (exclure celles partagées à d'autres)
+    // 1️⃣ Courses propres (non partagées à d'autres ou partagées mais pending)
     const ownQuery = { 
       chauffeurId: userId, 
       $or: [{ sharedToOthers: { $exists: false } }, { sharedToOthers: false }] 
@@ -71,12 +70,10 @@ exports.getRides = async (req, res) => {
     if (queryDateStart && queryDateEnd) ownQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
     const ownRides = await Ride.find(ownQuery);
 
-    // 2️⃣ Courses partagées vers moi
-    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
+    // 2️⃣ Courses partagées vers moi (acceptées ou pending)
+    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: { $in: ['pending', 'accepted'] } });
     const sharedRideIds = sharedLinks.map(l => l.rideId);
-    let sharedQuery = { _id: { $in: sharedRideIds } };
-    if (queryDateStart && queryDateEnd) sharedQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
-    const sharedRidesRaw = await Ride.find(sharedQuery);
+    const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds }, ...(queryDateStart && queryDateEnd ? { date: { $gte: queryDateStart, $lte: queryDateEnd } } : {}) });
 
     const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
       const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
@@ -91,65 +88,66 @@ exports.getRides = async (req, res) => {
       };
     }));
 
-    // 3️⃣ Courses que j’ai partagées à d’autres (pour info seulement)
-    const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
-    const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
-    let sharedByMeQuery = { _id: { $in: sharedByMeIds } };
-    if (queryDateStart && queryDateEnd) sharedByMeQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
-    const sharedByMeRidesRaw = await Ride.find(sharedByMeQuery);
-
-    const sharedByMeRides = await Promise.all(sharedByMeRidesRaw.map(async (ride) => {
-      const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const toUser = await User.findById(link.toUserId);
-      return {
-        ...ride.toObject(),
-        isShared: true,
-        sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
-        statusPartage: link.statusPartage
-      };
-    }));
-
-    // 🔹 Combiner toutes les courses
-    const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
-    allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-    res.json(allRides);
-
+    res.json([...ownRides, ...sharedRides].sort((a, b) => new Date(a.date) - new Date(b.date)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
 
-
-
-// === Mettre à jour une course
-exports.updateRide = async (req, res) => {
+// === Partager une course ===
+exports.shareRide = async (req, res) => {
+  const { rideId, toUserId } = req.body;
   try {
-    const ride = await Ride.findOneAndUpdate(
-      { _id: req.params.id, chauffeurId: req.user.id },
-      req.body,
-      { new: true }
-    );
-    if (!ride) return res.status(404).json({ message: "Course introuvable" });
-    res.json(ride);
+    const ride = await Ride.findById(rideId);
+    if (!ride) return res.status(404).json({ message: 'Course introuvable' });
+    if (ride.chauffeurId.toString() !== req.user.id) return res.status(403).json({ message: 'Non autorisé' });
+
+    const existing = await RideShare.findOne({ rideId, toUserId });
+    if (existing) return res.json({ message: 'Course déjà partagée' });
+
+    const share = new RideShare({
+      rideId,
+      fromUserId: req.user.id,
+      toUserId,
+      statusPartage: 'pending'
+    });
+    await share.save();
+
+    // Marquer la course comme partagée → disparaît de la liste propre
+    ride.sharedToOthers = true;
+    await ride.save();
+
+    res.json({ message: 'Course partagée', share });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// === Supprimer une course
-exports.deleteRide = async (req, res) => {
+// === Accepter ou refuser un partage ===
+exports.respondToShare = async (req, res) => {
+  const { shareId, action } = req.body;
+  if (!['accepted', 'declined'].includes(action)) return res.status(400).json({ message: 'Action invalide' });
+
   try {
-    const ride = await Ride.findOneAndDelete({ _id: req.params.id, chauffeurId: req.user.id });
-    if (!ride) return res.status(404).json({ message: "Course introuvable" });
-    res.json({ message: "Course supprimée" });
+    const share = await RideShare.findById(shareId);
+    if (!share) return res.status(404).json({ message: 'Partage introuvable' });
+    if (share.toUserId.toString() !== req.user.id) return res.status(403).json({ message: 'Non autorisé' });
+
+    share.statusPartage = action;
+    await share.save();
+
+    // Si refusé → supprimer de la liste frontend
+    // Si accepté → restera visible comme partagé
+    res.json({ message: `Course ${action}`, share });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// === Démarrer une course
+// -------------------
+// Démarrer et terminer une course
+// -------------------
 exports.startRide = async (req, res) => {
   try {
     const ride = await findAuthorizedRide(req.params.id, req.user.id);
@@ -164,7 +162,6 @@ exports.startRide = async (req, res) => {
   }
 };
 
-// === Terminer une course
 exports.endRide = async (req, res) => {
   try {
     const { distance } = req.body;
@@ -183,69 +180,28 @@ exports.endRide = async (req, res) => {
   }
 };
 
-exports.shareRide = async (req, res) => {
-  const { rideId, toUserId } = req.body;
-
+// -------------------
+// Mettre à jour / Supprimer
+// -------------------
+exports.updateRide = async (req, res) => {
   try {
-    const ride = await Ride.findById(rideId);
-    if (!ride) return res.status(404).json({ message: 'Course introuvable' });
-    if (ride.chauffeurId.toString() !== req.user.id) return res.status(403).json({ message: 'Non autorisé' });
-
-    const existing = await RideShare.findOne({ rideId, toUserId });
-    if (existing) return res.json({ message: 'Course déjà partagée' });
-
-    const share = new RideShare({
-      rideId,
-      fromUserId: req.user.id,
-      toUserId,
-      statusPartage: 'pending'
-    });
-    await share.save();
-
-    // Marquer la course comme partagée vers d'autres
-    ride.sharedToOthers = true;
-    await ride.save();
-
-    const toUser = await User.findById(toUserId).select('fullName email');
-
-    res.json({ 
-      message: 'Course partagée', 
-      share: {
-        ...share.toObject(),
-        toUserName: toUser?.fullName || toUser?.email || 'Utilisateur'
-      } 
-    });
-
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      req.body,
+      { new: true }
+    );
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+    res.json(ride);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// === Accepter ou refuser un partage
-exports.respondToShare = async (req, res) => {
-  const { shareId, action } = req.body;
-  if (!['accepted', 'declined'].includes(action)) return res.status(400).json({ message: 'Action invalide' });
-
+exports.deleteRide = async (req, res) => {
   try {
-    const share = await RideShare.findById(shareId);
-    if (!share) return res.status(404).json({ message: 'Partage introuvable' });
-    if (share.toUserId.toString() !== req.user.id) return res.status(403).json({ message: 'Non autorisé' });
-
-    share.statusPartage = action;
-    await share.save();
-
-    // Récupérer noms pour frontend
-    const fromUser = await User.findById(share.fromUserId).select('fullName email');
-    const toUser = await User.findById(share.toUserId).select('fullName email');
-
-    res.json({
-      message: `Course ${action}`,
-      share: {
-        ...share.toObject(),
-        fromUserName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
-        toUserName: toUser?.fullName || toUser?.email || 'Utilisateur'
-      }
-    });
+    const ride = await Ride.findOneAndDelete({ _id: req.params.id, chauffeurId: req.user.id });
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+    res.json({ message: "Course supprimée" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
