@@ -59,26 +59,20 @@ exports.getRides = async (req, res) => {
     if (date) {
       const parsed = new Date(date);
       if (isNaN(parsed.valueOf())) return res.status(400).json({ message: 'Date invalide' });
-
       queryDateStart = new Date(parsed.setHours(0, 0, 0, 0));
       queryDateEnd = new Date(parsed.setHours(23, 59, 59, 999));
     }
 
-    // -----------------------
-    // 1️⃣ Courses propres
-    // -----------------------
-    const ownQuery = { chauffeurId: userId, sharedToOthers: { $ne: true } };
+    // 1️⃣ Courses propres (exclure celles partagées à d'autres)
+    const ownQuery = { 
+      chauffeurId: userId, 
+      $or: [{ sharedToOthers: { $exists: false } }, { sharedToOthers: false }] 
+    };
     if (queryDateStart && queryDateEnd) ownQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
     const ownRides = await Ride.find(ownQuery);
 
-    // -----------------------
-    // 2️⃣ Courses partagées vers moi (pending + accepted)
-    // -----------------------
-    const sharedLinks = await RideShare.find({
-      toUserId: userId,
-      statusPartage: { $in: ['pending', 'accepted'] }
-    });
-
+    // 2️⃣ Courses partagées vers moi
+    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
     const sharedRideIds = sharedLinks.map(l => l.rideId);
     let sharedQuery = { _id: { $in: sharedRideIds } };
     if (queryDateStart && queryDateEnd) sharedQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
@@ -86,7 +80,7 @@ exports.getRides = async (req, res) => {
 
     const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
       const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const sharedByUser = await User.findById(link.fromUserId).select('fullName email');
+      const sharedByUser = await User.findById(link.fromUserId);
       return {
         ...ride.toObject(),
         isShared: true,
@@ -97,14 +91,8 @@ exports.getRides = async (req, res) => {
       };
     }));
 
-    // -----------------------
-    // 3️⃣ Courses que j’ai partagées à d’autres (pending + accepted)
-    // -----------------------
-    const sharedByMeLinks = await RideShare.find({
-      fromUserId: userId,
-      statusPartage: { $in: ['pending', 'accepted'] }
-    });
-
+    // 3️⃣ Courses que j’ai partagées à d’autres (pour info seulement)
+    const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
     const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
     let sharedByMeQuery = { _id: { $in: sharedByMeIds } };
     if (queryDateStart && queryDateEnd) sharedByMeQuery.date = { $gte: queryDateStart, $lte: queryDateEnd };
@@ -112,7 +100,7 @@ exports.getRides = async (req, res) => {
 
     const sharedByMeRides = await Promise.all(sharedByMeRidesRaw.map(async (ride) => {
       const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
-      const toUser = await User.findById(link.toUserId).select('fullName email');
+      const toUser = await User.findById(link.toUserId);
       return {
         ...ride.toObject(),
         isShared: true,
@@ -121,9 +109,7 @@ exports.getRides = async (req, res) => {
       };
     }));
 
-    // -----------------------
-    // 4️⃣ Combiner et trier
-    // -----------------------
+    // 🔹 Combiner toutes les courses
     const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -197,7 +183,6 @@ exports.endRide = async (req, res) => {
   }
 };
 
-// === Partager une course
 exports.shareRide = async (req, res) => {
   const { rideId, toUserId } = req.body;
 
@@ -217,13 +202,10 @@ exports.shareRide = async (req, res) => {
     });
     await share.save();
 
-    // Marquer la course comme partagée à d'autres
-    ride.isShared = true;
-    ride.sharedBy = req.user.id;
-    ride.sharedToOthers = true; // <-- nouveau champ
+    // Marquer la course comme partagée vers d'autres
+    ride.sharedToOthers = true;
     await ride.save();
 
-    // Récupérer noms pour frontend
     const toUser = await User.findById(toUserId).select('fullName email');
 
     res.json({ 
@@ -233,6 +215,7 @@ exports.shareRide = async (req, res) => {
         toUserName: toUser?.fullName || toUser?.email || 'Utilisateur'
       } 
     });
+
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

@@ -72,6 +72,7 @@ export default function AgendaScreen() {
     fetchContacts();
   }, [selectedDate]);
 
+  
   const handleShareRide = async (rideId, contactId) => {
     try {
       const token = await AsyncStorage.getItem('token');
@@ -79,7 +80,7 @@ export default function AgendaScreen() {
         headers: { Authorization: `Bearer ${token}` }
       });
   
-      // Supprimer localement la course partagée
+      // Retirer la course partagée de la liste actuelle
       setRides(prev => prev.filter(r => r._id !== rideId));
   
       Alert.alert('Succès', 'Course partagée !');
