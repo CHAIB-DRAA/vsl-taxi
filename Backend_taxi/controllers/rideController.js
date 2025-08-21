@@ -62,45 +62,44 @@ exports.getRides = async (req, res) => {
       end   = new Date(d.setHours(23,59,59,999));
     }
 
-    // 1) Tes courses (propriétaire)
+    // 1️⃣ Tes courses (propriétaire)
     const ownQuery = { chauffeurId: userId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
 
-    // 2) Invitations PENDING reçues (tu peux accepter/refuser)
-    const pendingShares = await RideShare.find({ toUserId: userId, statusPartage: 'pending' }).lean();
-    const pendingIds = pendingShares.map(s => s.rideId);
-    const pendQuery = { _id: { $in: pendingIds } };
-    if (start && end) pendQuery.date = { $gte: start, $lte: end };
-    const pendingRidesRaw = await Ride.find(pendQuery).lean();
+    // 2️⃣ Toutes les invitations (pending + accepted) reçues
+    const shares = await RideShare.find({ toUserId: userId }).lean();
+    const shareIds = shares.map(s => s.rideId);
 
-    // Décore pour le front (afin d'afficher boutons accepter/refuser)
-    const pendingRides = await Promise.all(
-      pendingRidesRaw.map(async (ride) => {
-        const link = pendingShares.find(s => String(s.rideId) === String(ride._id));
+    const sharedQuery = { _id: { $in: shareIds } };
+    if (start && end) sharedQuery.date = { $gte: start, $lte: end };
+    const sharedRidesRaw = await Ride.find(sharedQuery).lean();
+
+    const sharedRides = await Promise.all(
+      sharedRidesRaw.map(async (ride) => {
+        const link = shares.find(s => String(s.rideId) === String(ride._id));
         const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
         return {
           ...ride,
           isShared: true,
-          // "invitation vers moi"
           sharedBy: link.fromUserId,
           sharedByName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
-          statusPartage: link.statusPartage, // 'pending'
+          statusPartage: link.statusPartage, // 'pending' ou 'accepted'
           shareId: link._id
         };
       })
     );
 
-    // ⚠️ On ne renvoie PAS les partages "accepted" vers toi : après acceptation
-    // la course est déjà à toi (dans ownRides), donc pas de doublon.
+    // 3️⃣ Combine tout et trie
+    const all = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
 
-    const all = [...ownRides, ...pendingRides].sort((a,b) => new Date(a.date) - new Date(b.date));
     res.json(all);
   } catch (err) {
     console.error('getRides error:', err);
-    res.status(500).json({ message: 'Erreur serveur' });
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };
+
 
 
 exports.shareRide = async (req, res) => {
