@@ -1,5 +1,6 @@
 const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
+const User = require('../models/User'); // <--- il manquait ça
 
 // Utilitaire : récupérer une course autorisée pour un utilisateur
 const findAuthorizedRide = async (rideId, userId) => {
@@ -32,53 +33,50 @@ exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 1️⃣ Récupérer toutes les courses de l'utilisateur
+    // Courses propres
     const ownRides = await Ride.find({ chauffeurId: userId });
 
-    // 2️⃣ Récupérer tous les partages vers cet utilisateur
+    // Partages vers moi
     const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
-
-    // 3️⃣ Construire tableau d'IDs des courses partagées
     const sharedRideIds = sharedLinks.map(l => l.rideId);
-
-    // 4️⃣ Récupérer les courses partagées
     const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
 
-    // 5️⃣ Récupérer tous les utilisateurs concernés (sharedBy et sharedTo)
-    const userIds = [
-      ...new Set([
-        ...sharedRidesRaw.map(r => r.chauffeurId.toString()), // qui a partagé
-        ...sharedLinks.map(l => l.toUserId.toString())        // à qui
-      ])
-    ];
-
-    const users = await User.find({ _id: { $in: userIds } });
-    const usersMap = {};
-    users.forEach(u => { usersMap[u._id] = u.fullName || u.email; });
-
-    // 6️⃣ Ajouter info nom et flag isShared
-    const sharedRides = sharedRidesRaw.map(ride => {
+    // Ajouter informations sur partage
+    const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
       const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
+      const sharedByUser = await User.findById(link.fromUserId); // récupérer nom de l’expéditeur
+
       return {
         ...ride.toObject(),
         isShared: true,
         statusPartage: link?.statusPartage || 'pending',
-        sharedByName: usersMap[link.fromUserId] || 'Utilisateur',
-        sharedToName: usersMap[link.toUserId] || 'Utilisateur',
-        shareId: link._id
+        sharedBy: link.fromUserId,
+        sharedByName: sharedByUser?.fullName || sharedByUser?.email || 'Utilisateur'
       };
-    });
+    }));
 
-    // 7️⃣ Ajouter aux courses propres (proprio)
-    const allRides = [...ownRides, ...sharedRides];
+    // Courses que j’ai partagées à d’autres
+    const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
+    const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
+    const sharedByMeRidesRaw = await Ride.find({ _id: { $in: sharedByMeIds } });
 
-    // 8️⃣ Tri par date
+    const sharedByMeRides = await Promise.all(sharedByMeRidesRaw.map(async (ride) => {
+      const link = sharedByMeLinks.find(l => l.rideId.toString() === ride._id.toString());
+      const toUser = await User.findById(link.toUserId);
+      return {
+        ...ride.toObject(),
+        isShared: true,
+        statusPartage: link.statusPartage,
+        sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur'
+      };
+    }));
+
+    const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
+
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
-
   } catch (err) {
-    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
