@@ -157,8 +157,9 @@ exports.shareRide = async (req, res) => {
       ride.sharedBy = [req.user.id];
     } else {
       if (!Array.isArray(ride.sharedBy)) ride.sharedBy = [];
-      if (!ride.sharedBy.includes(req.user.id)) ride.sharedBy.push(req.user.id);
-    }
+      if (!ride.sharedBy.includes(req.user.id)) {
+        ride.sharedBy.push(req.user.id);
+      }    }
     ride.updatedAt = new Date();
     await ride.save();
 

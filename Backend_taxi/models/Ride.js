@@ -18,8 +18,11 @@ const rideSchema = new mongoose.Schema({
   
   // Champs pour le partage
   isShared: { type: Boolean, default: false },         // true si la course est partagée
-  sharedBy: { type: String, default: null }           // UUID de l'utilisateur qui a partagé
-}, {
+  sharedBy: {
+    type: [String], // tableau de strings
+    default: []
+  }
+  }, {
   timestamps: true // createdAt et updatedAt automatiques
 });
 
