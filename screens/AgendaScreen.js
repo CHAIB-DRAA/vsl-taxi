@@ -23,7 +23,7 @@ export default function AgendaScreen() {
   const [selectedRide, setSelectedRide] = useState(null);
   const [showCalendar, setShowCalendar] = useState(true);
 
-  // --- Charger courses ---
+  // --- Fetch courses ---
   const fetchRides = async () => {
     try {
       setLoading(true);
@@ -42,7 +42,7 @@ export default function AgendaScreen() {
     }
   };
 
-  // --- Charger contacts ---
+  // --- Fetch contacts ---
   const fetchContacts = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
@@ -61,7 +61,7 @@ export default function AgendaScreen() {
     fetchContacts();
   }, [selectedDate]);
 
-  // --- Partager course ---
+  // --- Partager une course ---
   const handleShareRide = async (rideId, contactId) => {
     try {
       const token = await AsyncStorage.getItem('token');
@@ -70,17 +70,17 @@ export default function AgendaScreen() {
       });
       Alert.alert('Succès', 'Course partagée !');
       setShareModalVisible(false);
-      fetchRides(); // rafraîchir les courses
+      fetchRides();
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
 
-  // --- Couleur selon type de course ---
+  // --- Déterminer couleur ---
   const getRideColor = (ride) => {
-    if (ride.isShared && ride.sharedBy !== ride.chauffeurId) return '#FF9800'; // Partagée vers moi
-    if (ride.isShared && ride.sharedBy === ride.chauffeurId) return '#2196F3'; // Je l’ai partagée
+    if (ride.isShared && ride.sharedBy && ride.sharedBy !== ride.chauffeurId) return '#FF9800'; // partagée vers toi
+    if (ride.isShared && ride.sharedToName) return '#2196F3'; // tu as partagé
     if (ride.type === 'Aller') return '#4CAF50';
     if (ride.type === 'Retour') return '#607D8B';
     return '#888';
@@ -119,13 +119,13 @@ export default function AgendaScreen() {
                 <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
                 <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
 
-                {ride.isShared && ride.sharedBy !== ride.chauffeurId ? (
+                {ride.isShared && ride.sharedByName ? (
                   <Text style={[styles.sharedText, { color: '#FF9800' }]}>
                     Partagée par : {ride.sharedByName} ({ride.statusPartage})
                   </Text>
-                ) : ride.isShared && ride.sharedBy === ride.chauffeurId ? (
+                ) : ride.isShared && ride.sharedToName ? (
                   <Text style={[styles.sharedText, { color: '#2196F3' }]}>
-                    Partagée à : {ride.sharedToName}
+                    Partagée à : {ride.sharedToName} ({ride.statusPartage})
                   </Text>
                 ) : (
                   <Text style={[styles.statusText, { color: getRideColor(ride) }]}>{ride.type}</Text>
@@ -195,7 +195,6 @@ const styles = StyleSheet.create({
   shareButton: { marginTop: 10, backgroundColor: '#FF9800', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   shareButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 
-  // Modal style
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%', shadowColor: '#000', shadowOpacity: 0.15, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 5 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },

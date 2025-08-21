@@ -36,8 +36,8 @@ exports.getRides = async (req, res) => {
     const ownRides = await Ride.find({ chauffeurId: userId });
 
     // 2️⃣ Courses partagées vers moi
-    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
-    const sharedRideIds = sharedLinks.map(l => l.rideId);
+    const sharedLinks = await RideShare.find({ toUserId: userId }); // Inclure 'pending' pour test
+    const sharedRideIds = sharedLinks.map(l => mongoose.Types.ObjectId(l.rideId));
     const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
 
     const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
@@ -53,8 +53,8 @@ exports.getRides = async (req, res) => {
     }));
 
     // 3️⃣ Courses que j’ai partagées à d’autres
-    const sharedByMeLinks = await RideShare.find({ fromUserId: userId, statusPartage: 'accepted' });
-    const sharedByMeIds = sharedByMeLinks.map(l => l.rideId);
+    const sharedByMeLinks = await RideShare.find({ fromUserId: userId });
+    const sharedByMeIds = sharedByMeLinks.map(l => mongoose.Types.ObjectId(l.rideId));
     const sharedByMeRidesRaw = await Ride.find({ _id: { $in: sharedByMeIds } });
 
     const sharedByMeRides = await Promise.all(sharedByMeRidesRaw.map(async (ride) => {
@@ -63,7 +63,6 @@ exports.getRides = async (req, res) => {
       return {
         ...ride.toObject(),
         isShared: true,
-        sharedTo: link.toUserId,
         sharedToName: toUser?.fullName || toUser?.email || 'Utilisateur',
         statusPartage: link.statusPartage
       };
@@ -72,6 +71,10 @@ exports.getRides = async (req, res) => {
     // 4️⃣ Combiner toutes les courses et trier par date
     const allRides = [...ownRides, ...sharedRides, ...sharedByMeRides];
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    console.log('ownRides:', ownRides.length);
+    console.log('sharedRides:', sharedRides.length);
+    console.log('sharedByMeRides:', sharedByMeRides.length);
 
     res.json(allRides);
   } catch (err) {
