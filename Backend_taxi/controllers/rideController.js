@@ -50,9 +50,10 @@ exports.createRide = async (req, res) => {
 //   - tes courses (chauffeurId == toi)
 //   - + invitations "PENDING" que TU as reçues (pour afficher Accepter/Refuser)
 
+
 exports.getRides = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.id; // string
     const { date } = req.query;
 
     console.log('📅 Paramètres reçus:', { userId, date });
@@ -68,14 +69,16 @@ exports.getRides = async (req, res) => {
       end = new Date(d.setHours(23, 59, 59, 999));
     }
 
+    const userObjectId = mongoose.Types.ObjectId(userId);
+
     // 1️⃣ Courses propres
-    const ownQuery = { chauffeurId: userId };
+    const ownQuery = { chauffeurId: userObjectId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
     console.log('✅ Courses propres trouvées:', ownRides.length);
 
     // 2️⃣ Partages reçus (pending + accepted)
-    const shares = await RideShare.find({ toUserId: userId }).lean();
+    const shares = await RideShare.find({ toUserId: userObjectId }).lean();
     console.log('🔄 Shares reçus:', shares.length);
 
     const shareIds = shares.map(s => mongoose.Types.ObjectId(s.rideId));
@@ -89,6 +92,7 @@ exports.getRides = async (req, res) => {
     }
     console.log('🚀 Courses partagées trouvées:', sharedRidesRaw.length);
 
+    // 3️⃣ Décorer les partages pour le front
     const sharedRides = await Promise.all(
       sharedRidesRaw.map(async (ride) => {
         const link = shares.find(s => String(s.rideId) === String(ride._id));
@@ -107,7 +111,7 @@ exports.getRides = async (req, res) => {
 
     console.log('📦 SharedRides décorés:', sharedRides.length);
 
-    // 3️⃣ Combine tout et trie
+    // 4️⃣ Combiner toutes les courses et trier
     const allRides = [...ownRides, ...sharedRides].sort(
       (a, b) => new Date(a.date) - new Date(b.date)
     );
