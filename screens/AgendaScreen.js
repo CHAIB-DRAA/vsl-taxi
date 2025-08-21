@@ -136,28 +136,40 @@ export default function AgendaScreen() {
       )}
 
       {/* Modal partage */}
-      <Modal visible={shareModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Partager la course avec :</Text>
-            <FlatList
-              data={contacts}
-              keyExtractor={(item) => item._id}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.contactItem}
-                  onPress={() => shareRide(selectedRide._id, item._id)}
-                >
-                  <Text style={styles.contactText}>{item.name}</Text>
-                </TouchableOpacity>
-              )}
-            />
-            <TouchableOpacity style={styles.modalClose} onPress={() => setShareModalVisible(false)}>
-              <Text style={{ color: '#FFF' }}>Annuler</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* Modal partage */}
+<Modal visible={shareModalVisible} animationType="slide" transparent>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContent}>
+      <Text style={styles.modalTitle}>Partager la course avec :</Text>
+
+      <FlatList
+  data={contacts}
+  keyExtractor={(item) => item._id}
+  style={{ marginVertical: 10 }}
+  ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+  renderItem={({ item }) => (
+    <TouchableOpacity
+      style={styles.contactButton}
+      onPress={() => {
+        shareRide(selectedRide._id, item.contactId._id); // <-- utiliser contactId._id
+        setShareModalVisible(false);
+      }}
+    >
+      <Text style={styles.contactText}>
+        {item.contactId?.fullName || item.contactId?.email || 'Utilisateur'}
+      </Text>
+    </TouchableOpacity>
+  )}
+/>
+
+
+      <TouchableOpacity style={styles.modalClose} onPress={() => setShareModalVisible(false)}>
+        <Text style={styles.modalCloseText}>Annuler</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
+
     </View>
   );
 }
@@ -166,18 +178,66 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 15, backgroundColor: '#FFF' },
   toggleCalendarBtn: { marginBottom: 10, alignSelf: 'center' },
   toggleCalendarText: { color: '#4CAF50', fontWeight: 'bold' },
-  title: { fontSize: 18, fontWeight: 'bold', marginVertical: 10 },
+  title: { fontSize: 20, fontWeight: 'bold', marginVertical: 10, textAlign: 'center' },
   ridesList: { marginTop: 10 },
-  rideCard: { backgroundColor: '#F5F5F5', padding: 15, marginBottom: 10, borderRadius: 12, borderLeftWidth: 6, shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4 },
-  rideText: { fontSize: 16, marginBottom: 5 },
-  statusText: { fontSize: 14, fontWeight: 'bold', marginBottom: 8 },
+  rideCard: {
+    backgroundColor: '#FFF',
+    padding: 15,
+    marginBottom: 12,
+    borderRadius: 12,
+    borderLeftWidth: 6,
+    borderLeftColor: '#4CAF50',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  rideText: { fontSize: 16, marginBottom: 4 },
+  statusText: { fontSize: 14, fontWeight: 'bold', marginTop: 4 },
   emptyText: { fontSize: 16, color: '#888', textAlign: 'center', marginTop: 20 },
-  shareButton: { marginTop: 10, backgroundColor: '#4CAF50', paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  shareButtonText: { color: '#FFF', fontWeight: 'bold' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 12, padding: 20, maxHeight: '70%' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
-  contactItem: { paddingVertical: 10, borderBottomColor: '#EEE', borderBottomWidth: 1 },
-  contactText: { fontSize: 16 },
-  modalClose: { marginTop: 15, backgroundColor: '#FF5252', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }
+  shareButton: {
+    marginTop: 10,
+    backgroundColor: '#FF9800',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  shareButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+
+  // Modal style
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '85%',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 20,
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
+  contactButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+  },
+  contactText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  modalClose: {
+    marginTop: 15,
+    backgroundColor: '#FF5252',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalCloseText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 });

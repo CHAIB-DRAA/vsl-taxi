@@ -31,28 +31,37 @@ exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // 1️⃣ Courses propres
     const ownRides = await Ride.find({ chauffeurId: userId });
-    const sharedLinks = await RideShare.find({ toUserId: userId, statusPartage: 'accepted' });
+
+    // 2️⃣ Courses partagées (accepted + pending)
+    const sharedLinks = await RideShare.find({ toUserId: userId })
+                                       .populate('fromUserId', 'fullName'); // récupère le nom de l’utilisateur qui partage
+
     const sharedRideIds = sharedLinks.map(l => l.rideId);
     const sharedRidesRaw = await Ride.find({ _id: { $in: sharedRideIds } });
 
     const sharedRides = sharedRidesRaw.map(ride => {
       const link = sharedLinks.find(l => l.rideId.toString() === ride._id.toString());
-      return { 
+      return {
         ...ride.toObject(),
         isShared: true,
-        statusPartage: link?.statusPartage || 'pending'
+        statusPartage: link?.statusPartage || 'pending',
+        sharedByName: link?.fromUserId?.fullName || 'Utilisateur'
       };
     });
 
+    // 3️⃣ Fusionner et trier
     const allRides = [...ownRides, ...sharedRides];
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
   } catch (err) {
+    console.error('❌ getRides error:', err);
     res.status(500).json({ message: err.message });
   }
 };
+
 
 // === Mettre à jour une course
 exports.updateRide = async (req, res) => {
