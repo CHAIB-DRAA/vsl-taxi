@@ -11,7 +11,7 @@ router.delete('/:id', authMiddleware , rideController.deleteRide);
 
 // Partage & réponse
 router.post('/share', authMiddleware , rideController.shareRide);
-router.post('/respond', authMiddleware , rideController.respondToShare);
+router.post('/respond', authMiddleware , rideController.respondRideShare);
 
 // Démarrer / terminer (si tu les utilises)
 router.post('/:id/start', authMiddleware , rideController.startRide);
