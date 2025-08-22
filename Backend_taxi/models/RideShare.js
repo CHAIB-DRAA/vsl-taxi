@@ -16,7 +16,7 @@ const rideShareSchema = new mongoose.Schema({
   }, // Destinataire
   statusPartage: { 
     type: String, 
-    enum: ['pending', 'accepted', 'declined'], 
+    enum: ['pending', 'accepted', 'refused'], // <-- Ajouter refused ici
     default: 'pending' 
   } // Statut du partage
 }, {

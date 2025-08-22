@@ -39,18 +39,10 @@ export default function AgendaScreen() {
       const ridesData = res.data || [];
       const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'refused');
 
-      console.log('📊 Courses récupérées:', visibleRides.map(r => ({
-        _id: r._id,
-        patientName: r.patientName,
-        isShared: r.isShared,
-        sharedByName: r.sharedByName,
-        statusPartage: r.statusPartage
-      })));
-
       setRides(visibleRides);
       markRidesOnCalendar(visibleRides);
     } catch (err) {
-      console.error('Erreur fetchRides:', err.response?.data || err.message);
+      console.error('Erreur fetchRides:', err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
     } finally {
       setLoading(false);
@@ -65,9 +57,8 @@ export default function AgendaScreen() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setContacts(res.data || []);
-      console.log('📤 Contacts récupérés:', res.data);
     } catch (err) {
-      console.error('Erreur fetchContacts:', err.response?.data || err.message);
+      console.error('Erreur fetchContacts:', err);
       Alert.alert('Erreur', 'Impossible de récupérer les contacts.');
     }
   };
@@ -83,16 +74,18 @@ export default function AgendaScreen() {
       const toUserId = contact.contactId;
       if (!toUserId) return Alert.alert('Erreur', 'ID du chauffeur manquant.');
 
-      console.log('🔹 Tentative partage:', { rideId, toUserId });
       const token = await AsyncStorage.getItem('token');
       const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      console.log('📤 Résultat partage:', res.data);
-      Alert.alert('Succès', `Course partagée avec ${contact.fullName || contact.email} !`);
-      setShareModalVisible(false);
-      fetchRides();
+      if (res.data.rideShare) {
+        Alert.alert('Succès', `Course partagée avec ${contact.fullName || contact.email} !`);
+        setShareModalVisible(false);
+        fetchRides();
+      } else {
+        Alert.alert('Erreur', res.data.message);
+      }
     } catch (err) {
       console.error('Erreur handleShareRide:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de partager la course.');
@@ -103,11 +96,10 @@ export default function AgendaScreen() {
   const respondToShare = async (rideShareId, accept) => {
     try {
       const token = await AsyncStorage.getItem('token');
-      if (!token) throw new Error('Token manquant');
-
-      const res = await axios.post(SHARE_API, { rideShareId, accept }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await axios.post(SHARE_API,
+        { rideShareId, accept },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
 
       console.log('Réponse Share:', res.data);
 
@@ -115,12 +107,11 @@ export default function AgendaScreen() {
         prev.map(r => {
           if (r.shareId === rideShareId) {
             if (!accept) return { ...r, statusPartage: 'refused', isShared: false };
-            return { ...r, statusPartage: 'accepted', isShared: true };
+            return { ...r, statusPartage: 'accepted', isShared: true, chauffeurId: res.data.ride.chauffeurId };
           }
           return r;
         }).filter(r => r.statusPartage !== 'refused')
       );
-
     } catch (err) {
       console.error('Erreur respondToShare:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de répondre au partage.');
@@ -149,7 +140,6 @@ export default function AgendaScreen() {
     marks[selectedDate].selected = true;
     marks[selectedDate].selectedColor = '#4CAF50';
     setMarkedDates(marks);
-    console.log('📅 Calendrier marqué:', marks);
   };
 
   const getRideColor = (ride) => {
