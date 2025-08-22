@@ -111,30 +111,38 @@ export default function AgendaScreen() {
   };
   
   
-  // --- Accepter / Refuser un partage ---
-  const respondToShare = async (shareId, action) => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      await axios.post(SHARE_API, { shareId, action }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+ // --- Accepter / Refuser un partage ---
+const respondToShare = async (rideShareId, accept) => {
+  try {
+    const token = await AsyncStorage.getItem('token');
+    if (!token) throw new Error('Token manquant');
 
-      setRides(prev => prev.map(r => {
-        if (r.shareId === shareId) {
-          if (action === 'declined') {
-            // Retire complètement la course partagée OU met à jour son isShared
-            return { ...r, statusPartage: 'declined', isShared: false };
+    const res = await axios.post(SHARE_API, 
+      { rideShareId, accept }, 
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    console.log('Réponse Share:', res.data);
+
+    setRides(prev =>
+      prev.map(r => {
+        if (r.shareId === rideShareId) {
+          if (!accept) {
+            // Refusé : on désactive le partage
+            return { ...r, statusPartage: 'refused', isShared: false };
           }
+          // Accepté : on marque accepté et shared
           return { ...r, statusPartage: 'accepted', isShared: true };
         }
         return r;
-      }).filter(Boolean));
-      
-    } catch (err) {
-      console.error('Erreur respondToShare:', err.response?.data || err.message);
-      Alert.alert('Erreur', 'Impossible de répondre au partage.');
-    }
-  };
+      }).filter(r => r.statusPartage !== 'refused') // Retire les refusés
+    );
+
+  } catch (err) {
+    console.error('Erreur respondToShare:', err.response?.data || err.message);
+    Alert.alert('Erreur', 'Impossible de répondre au partage.');
+  }
+};
 
   // --- Marquer uniquement les jours avec courses ---
   const markRidesOnCalendar = (ridesList) => {
@@ -226,21 +234,22 @@ export default function AgendaScreen() {
 
               {/* Accept / Refuse */}
               {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && (
-                <View style={{ flexDirection: 'row', marginTop: 5 }}>
-                  <TouchableOpacity
-                    style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, 'accepted')}
-                  >
-                    <Text style={styles.shareButtonText}>Accepter</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, 'declined')}
-                  >
-                    <Text style={styles.shareButtonText}>Refuser</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+  <View style={{ flexDirection: 'row', marginTop: 5 }}>
+    <TouchableOpacity
+      style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
+      onPress={() => respondToShare(ride.shareId, true)} // true = accepté
+    >
+      <Text style={styles.shareButtonText}>Accepter</Text>
+    </TouchableOpacity>
+    <TouchableOpacity
+      style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
+      onPress={() => respondToShare(ride.shareId, false)} // false = refusé
+    >
+      <Text style={styles.shareButtonText}>Refuser</Text>
+    </TouchableOpacity>
+  </View>
+)}
+
 
               {/* Bouton partager */}
               {!ride.sharedToName && !ride.isShared && (

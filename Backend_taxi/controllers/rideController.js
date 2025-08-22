@@ -178,10 +178,16 @@ exports.getRides = async (req, res) => {
 // --- POST /api/rides/respond ---
 // { shareId, action: 'accepted' | 'declined' }
 // Si 'accepted' => TRANSFERT DE PROPRIÉTÉ : ride.chauffeurId = toUserId
+// --- POST /api/rides/respond ---
+// { rideShareId, accept: true|false }
 exports.respondRideShare = async (req, res) => {
   try {
     const { rideShareId, accept } = req.body;
     console.log("=== Réponse à un partage de course ===", { rideShareId, accept });
+
+    if (typeof accept !== 'boolean') {
+      return res.status(400).json({ message: "Valeur 'accept' invalide" });
+    }
 
     const rideShare = await RideShare.findById(rideShareId);
     if (!rideShare) return res.status(404).json({ message: "Partage introuvable" });
@@ -190,30 +196,45 @@ exports.respondRideShare = async (req, res) => {
     if (!ride) return res.status(404).json({ message: "Course introuvable" });
 
     if (accept) {
-      rideShare.statusPartage = "accepted";
-      // Si besoin : transfert chauffeur
+      // ACCEPTED : transfert du chauffeur au destinataire
       ride.chauffeurId = rideShare.toUserId;
       ride.isShared = true;
-      await ride.save();
-      console.log("Invitation acceptée");
+
+      rideShare.statusPartage = "accepted";
+      rideShare.acceptedAt = new Date();
+
+      // Annuler toutes les autres invitations pendantes pour cette course
+      await RideShare.updateMany(
+        { rideId: ride._id, _id: { $ne: rideShare._id }, statusPartage: 'pending' },
+        { $set: { statusPartage: 'cancelled' } }
+      );
+
+      console.log("Invitation acceptée, chauffeur transféré et autres partages annulés");
+
     } else {
+      // REFUSED : on marque refusé
       rideShare.statusPartage = "refused";
-      // Vérifier s'il reste un partage actif avant de forcer isShared = false
+
+      // Vérifier s'il reste d'autres partages actifs
       const stillShared = await RideShare.countDocuments({
         rideId: ride._id,
         statusPartage: { $in: ['pending', 'accepted'] }
       });
+
       if (!stillShared) {
-        ride.isShared = false;
-        await ride.save();
+        ride.isShared = false; // réactive le bouton partager
       }
-      console.log("Invitation refusée");
+
+      console.log("Invitation refusée, isShared =", ride.isShared);
     }
 
+    await ride.save();
     await rideShare.save();
-    res.json({ message: "Réponse enregistrée", rideShare });
+
+    res.json({ message: "Réponse enregistrée", rideShare, ride });
+
   } catch (err) {
-    console.error("Erreur réponse partage course:", err);
+    console.error("Erreur respondRideShare:", err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
