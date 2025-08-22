@@ -31,16 +31,27 @@ export default function AgendaScreen() {
       setLoading(true);
       const token = await AsyncStorage.getItem('token');
       if (!token) return Alert.alert('Erreur', 'Token non trouvé, reconnectez-vous.');
-
-      const res = await axios.get(`${API_URL}?date=${selectedDate}`, {
+  
+      const res = await axios.get(`${API_URL}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-
+  
       const ridesData = res.data || [];
-      const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'refused');
-
+  
+      // Filtrer d'abord sur la date sélectionnée
+      const dateRides = ridesData.filter(r =>
+        new Date(r.date).toDateString() === new Date(selectedDate).toDateString()
+      );
+  
+      // Garder propres + partagées acceptées + partagées pending
+      const visibleRides = dateRides.filter(r => {
+        if (!r.isShared) return true; // ma course
+        if (r.isShared && (r.statusPartage === 'accepted' || r.statusPartage === 'pending')) return true;
+        return false; // refusées
+      });
+  
       setRides(visibleRides);
-      markRidesOnCalendar(visibleRides);
+      markRidesOnCalendar(ridesData); // ici on peut marquer toutes les dates avec courses
     } catch (err) {
       console.error('Erreur fetchRides:', err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
@@ -48,6 +59,7 @@ export default function AgendaScreen() {
       setLoading(false);
     }
   };
+  
 
   // --- Fetch contacts ---
   const fetchContacts = async () => {
@@ -121,27 +133,39 @@ export default function AgendaScreen() {
   // --- Marquer uniquement les jours avec courses ---
   const markRidesOnCalendar = (ridesList) => {
     const marks = {};
-    const uniqueDates = [...new Set(ridesList.map(r => moment(r.date).format('YYYY-MM-DD')))];
-
-    uniqueDates.forEach(day => {
-      const dayRides = ridesList.filter(r => moment(r.date).format('YYYY-MM-DD') === day);
-      marks[day] = { dots: [] };
-
-      dayRides.forEach(ride => {
-        if (!ride.isShared) marks[day].dots.push({ key: `${ride._id}-own`, color: '#4CAF50' });
-        else if (ride.isShared && ride.sharedBy && !ride.sharedToName)
-          marks[day].dots.push({ key: `${ride._id}-toMe`, color: '#FF9800' });
-        else if (ride.isShared && ride.sharedToName)
-          marks[day].dots.push({ key: `${ride._id}-byMe`, color: '#2196F3' });
-      });
+  
+    // Filtrer les courses valides : propres ou partagées acceptées
+    const visibleRides = ridesList.filter(ride =>
+      !ride.isShared || ride.statusPartage === 'accepted'
+    );
+  
+    visibleRides.forEach(ride => {
+      const day = moment(ride.date).format('YYYY-MM-DD');
+      if (!marks[day]) marks[day] = { dots: [] };
+  
+      let dot = null;
+      if (!ride.isShared) {
+        dot = { key: `${ride._id}-own`, color: '#4CAF50' };
+      } else if (ride.isShared && ride.statusPartage === 'accepted') {
+        dot = { key: `${ride._id}-toMe`, color: '#FF9800' };
+      }
+  
+      if (dot && !marks[day].dots.some(d => d.key === dot.key)) {
+        marks[day].dots.push(dot);
+      }
     });
-
+  
+    // Sélection du jour courant
     if (!marks[selectedDate]) marks[selectedDate] = { dots: [] };
     marks[selectedDate].selected = true;
     marks[selectedDate].selectedColor = '#4CAF50';
+  
+    console.log('📅 Calendrier marqué (filtered):', JSON.stringify(marks, null, 2));
     setMarkedDates(marks);
   };
-
+  
+  
+  
   const getRideColor = (ride) => {
     if (ride.isShared && ride.sharedBy && !ride.sharedToName) return '#FF9800';
     if (ride.isShared && ride.sharedToName) return '#2196F3';

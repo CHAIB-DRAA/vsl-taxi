@@ -32,11 +32,19 @@ const TodayRidesScreen = () => {
     try {
       setLoading(true);
       const data = await getRides();
+  
       const today = new Date();
-      const todayRides = data
-        .filter(ride => new Date(ride.date).toDateString() === today.toDateString())
-        .sort((a, b) => (!a.startTime ? -1 : 0));
-      setRides(todayRides);
+      // Courses visibles aujourd'hui
+      const visibleRides = data.filter(ride => {
+        const rideDate = new Date(ride.date);
+        const isToday = rideDate.toDateString() === today.toDateString();
+        // Affiche soit : propre, soit partagé accepté
+        const isOwn = !ride.isShared;
+        const isSharedAccepted = ride.isShared && ride.statusPartage === 'accepted';
+        return isToday && (isOwn || isSharedAccepted);
+      }).sort((a, b) => (!a.startTime ? -1 : 0));
+  
+      setRides(visibleRides);
     } catch (error) {
       console.error(error);
       Alert.alert('Erreur', 'Impossible de récupérer les courses.');
@@ -44,6 +52,8 @@ const TodayRidesScreen = () => {
       setLoading(false);
     }
   };
+  
+  
 
   useEffect(() => { fetchRides(); }, []);
 

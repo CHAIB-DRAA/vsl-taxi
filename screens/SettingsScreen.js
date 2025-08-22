@@ -17,17 +17,32 @@ export default function SettingsScreen() {
     getToken();
   }, []);
 
-  const handleSignOut = async () => {
-    await AsyncStorage.removeItem('token');
-    Alert.alert('Déconnexion', 'Vous avez été déconnecté.');
-    setToken(null);
+  const logout = async (navigation) => {
+    try {
+      // Supprimer le token
+      await AsyncStorage.removeItem('token');
+  
+      // Optionnel : vider d'autres données si besoin
+      await AsyncStorage.removeItem('user'); // si tu stockes les infos utilisateur
+  
+      // Rediriger vers l'écran de login
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+  
+      console.log('✅ Utilisateur déconnecté avec succès');
+    } catch (err) {
+      console.error('Erreur lors de la déconnexion:', err);
+      Alert.alert('Erreur', 'Impossible de se déconnecter pour le moment.');
+    }
   };
 
   const options = [
     { label: 'Paramètres', icon: 'settings-outline', onPress: () => Alert.alert('Paramètres') },
     { label: 'Mon compte', icon: 'person-outline', onPress: () => Alert.alert('Mon compte') },
     { label: 'Mes contacts', icon: 'people-outline', onPress: () => setShowContacts(true) },
-    { label: 'Déconnexion', icon: 'log-out-outline', onPress: handleSignOut },
+    { label: 'Déconnexion', icon: 'log-out-outline', onPress:() => logout(navigation) },
   ];
 
   const renderItem = ({ item }) => (

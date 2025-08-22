@@ -1,16 +1,30 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { 
-  View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, Button, ScrollView, TextInput, Switch, Platform, Animated 
+  View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, Switch, Platform, Animated 
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { getRides, updateRideStatus } from '../services/api';
+import { getRides } from '../services/api';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
+
+// Fonction pour mettre à jour le statut d'une course
+const updateRideStatus = async (rideId, newStatus) => {
+  const token = await AsyncStorage.getItem('token');
+  if (!token) throw new Error('Token manquant');
+
+  const res = await axios.patch(`${API_URL}/${rideId}`, { status: newStatus }, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.data;
+};
 
 const HistoryScreen = () => {
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
-
   const [searchPatient, setSearchPatient] = useState('');
   const [selectedDate, setSelectedDate] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -35,28 +49,41 @@ const HistoryScreen = () => {
 
   const openModal = (ride) => {
     setSelectedRide(ride);
+    const isFacture = ride.status === 'Facturé' ? 1 : 0;
+
     Animated.timing(backgroundAnim, {
-      toValue: ride.status === 'Facturé' ? 1 : 0,
+      toValue: isFacture,
       duration: 300,
       useNativeDriver: false,
     }).start();
+
     setModalVisible(true);
   };
 
   const toggleStatus = async () => {
     if (!selectedRide) return;
+  
     try {
       const newStatus = selectedRide.status === 'Facturé' ? 'Non facturé' : 'Facturé';
-      const updated = await updateRideStatus(selectedRide._id, newStatus);
-      setSelectedRide(updated);
-      setRides(prev => prev.map(r => r._id === updated._id ? updated : r));
+  
+      // Appel API pour mettre à jour le statut
+      const updatedRide = await updateRideStatus(selectedRide._id, newStatus);
+  
+      // Mettre à jour le ride sélectionné
+      setSelectedRide({ ...updatedRide });
+  
+      // Mettre à jour la liste globale
+      setRides(prev => prev.map(r => r._id === updatedRide._id ? { ...updatedRide } : r));
+  
+      // Animation badge
       Animated.timing(backgroundAnim, {
         toValue: newStatus === 'Facturé' ? 1 : 0,
         duration: 300,
         useNativeDriver: false,
       }).start();
+  
     } catch (err) {
-      console.error(err);
+      console.error('Erreur toggleStatus:', err);
       Alert.alert('Erreur', 'Impossible de mettre à jour le statut.');
     }
   };
@@ -90,11 +117,6 @@ const HistoryScreen = () => {
   const modalBackgroundColor = backgroundAnim.interpolate({
     inputRange: [0,1],
     outputRange: ['#FFEBEE','#E0F7FA']
-  });
-
-  const badgeColorAnim = backgroundAnim.interpolate({
-    inputRange: [0,1],
-    outputRange: ['#F44336','#00ACC1']
   });
 
   return (
@@ -149,70 +171,44 @@ const HistoryScreen = () => {
         onRequestClose={()=>setModalVisible(false)}
       >
         <View style={styles.modalBackground}>
-          <Animated.View style={[styles.modalContainer,{backgroundColor:modalBackgroundColor}]}>
-            <ScrollView>
-              {selectedRide && (
-                <>
-                  <Text style={styles.modalTitle}>{selectedRide.patientName}</Text>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Date :</Text>
-                    <Text style={styles.modalValue}>{new Date(selectedRide.date).toLocaleDateString('fr-FR')}</Text>
-                  </View>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Départ :</Text>
-                    <Text style={styles.modalValue}>{selectedRide.startLocation}</Text>
-                  </View>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Arrivée :</Text>
-                    <Text style={styles.modalValue}>{selectedRide.endLocation}</Text>
-                  </View>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Type :</Text>
-                    <Text style={styles.modalValue}>{selectedRide.type||'Non défini'}</Text>
-                  </View>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Début :</Text>
-                    <Text style={styles.modalValue}>
-                      {selectedRide.startTime 
-                        ? `${new Date(selectedRide.startTime).toLocaleDateString('fr-FR')} à ${new Date(selectedRide.startTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
-                        : 'Non démarrée'}
-                    </Text>
-                  </View>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Fin :</Text>
-                    <Text style={styles.modalValue}>
-                      {selectedRide.endTime 
-                        ? `${new Date(selectedRide.endTime).toLocaleDateString('fr-FR')} à ${new Date(selectedRide.endTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
-                        : 'Non terminée'}
-                    </Text>
-                  </View>
-                  <View style={styles.modalRow}>
-                    <Text style={styles.modalLabel}>Distance :</Text>
-                    <Text style={styles.modalValue}>{selectedRide.distance||'Non renseignée'} km</Text>
-                  </View>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>{selectedRide?.patientName}</Text>
+            <View style={{flexDirection:'row', alignItems:'center', marginBottom:15}}>
+              <Text style={{marginRight:10, fontWeight:'600', fontSize:16}}>Statut :</Text>
+              <Switch
+                value={selectedRide?.status === 'Facturé'}
+                onValueChange={toggleStatus}
+                trackColor={{ false:'#FFCDD2', true:'#B2EBF2' }}
+                thumbColor={selectedRide?.status === 'Facturé' ? '#00ACC1' : '#F44336'}
+                ios_backgroundColor="#FFFFD2"
+                style={{ transform:[{scale:1.3}] }}
+              />
+              <Animated.View
+                style={[styles.badge, {
+                  backgroundColor: selectedRide ? backgroundAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['#F44336', '#00ACC1']
+                  }) : '#F44336',
+                  marginLeft:12
+                }]}
+              >
+                <Text style={[styles.badgeText, { fontSize:14 }]}>
+                  {selectedRide?.status}
+                </Text>
+              </Animated.View>
+            </View>
 
-                  <View style={{flexDirection:'row',alignItems:'center',marginTop:15}}>
-                    <Text style={{marginRight:10,fontWeight:'600',fontSize:16}}>Statut :</Text>
-                    <Switch
-                      value={selectedRide.status==='Facturé'}
-                      onValueChange={toggleStatus}
-                      trackColor={{false:'#FFCDD2', true:'#B2EBF2'}}
-                      thumbColor={selectedRide.status==='Facturé'?'#00ACC1':'#F44336'}
-                      ios_backgroundColor="#FFFFD2"
-                      style={{transform:[{scale:1.3}]}}
-                    />
-                    <Animated.View style={[styles.badge,{backgroundColor:badgeColorAnim,marginLeft:12}]}>
-                      <Text style={[styles.badgeText,{fontSize:14}]}>{selectedRide.status}</Text>
-                    </Animated.View>
-                  </View>
+            <Text style={styles.modalValue}>Départ : {selectedRide?.startLocation}</Text>
+            <Text style={styles.modalValue}>Arrivée : {selectedRide?.endLocation}</Text>
+            <Text style={styles.modalValue}>Date : {selectedRide ? new Date(selectedRide.date).toLocaleDateString('fr-FR') : '-'}</Text>
 
-                  <View style={{marginTop:20}}>
-                    <Button title="Fermer" onPress={()=>setModalVisible(false)} color="#1976D2"/>
-                  </View>
-                </>
-              )}
-            </ScrollView>
-          </Animated.View>
+            <TouchableOpacity
+              style={[styles.button, {backgroundColor:'#1976D2', marginTop:12}]}
+              onPress={()=>setModalVisible(false)}
+            >
+              <Text style={styles.buttonText}>Fermer</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </Modal>
     </View>
@@ -257,9 +253,7 @@ const styles = StyleSheet.create({
   modalBackground:{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:16},
   modalContainer:{borderRadius:14,padding:20,maxHeight:'80%',backgroundColor:'#fff'},
   modalTitle:{fontSize:20,fontWeight:'bold',marginBottom:12,color:'#1976D2'},
-  modalRow:{flexDirection:'row',justifyContent:'space-between',marginVertical:6},
-  modalLabel:{fontWeight:'600',color:'#555',fontSize:15},
-  modalValue:{fontSize:15,color:'#333'},
+  modalValue:{fontSize:15,color:'#333',marginBottom:4},
   floatingButton:{
     position:'absolute',
     bottom:24,
@@ -273,6 +267,8 @@ const styles = StyleSheet.create({
     alignItems:'center',
   },
   floatingButtonText:{color:'#fff',fontWeight:'bold',marginLeft:8,fontSize:16},
+  button:{padding:12,borderRadius:10,alignItems:'center'},
+  buttonText:{color:'#fff',fontWeight:'bold',fontSize:16},
 });
 
 export default HistoryScreen;

@@ -95,6 +95,14 @@ export const respondToShare = async (shareId, action) => {
   const res = await axios.post(`${API_URL}/share/respond`, { shareId, action }, config);
   return res.data;
 };
+  
+
+// Mettre à jour le statut d’une course
+export const updateRideStatus = async (id, status) => {
+  const config = await getConfig();
+  const res = await axios.patch(`${API_URL}/${id}`, { status }, config);
+  return res.data;
+};
 
 
 
@@ -112,4 +120,4 @@ export const getContacts = async () => {
     console.error('Erreur getContacts:', err.response?.data || err.message);
     return [];
   }
-};
+};  

@@ -12,6 +12,7 @@ router.delete('/:id', authMiddleware , rideController.deleteRide);
 // Partage & réponse
 router.post('/share', authMiddleware , rideController.shareRide);
 router.post('/respond', authMiddleware , rideController.respondRideShare);
+router.put('/:id/facturation', authMiddleware, rideController.updateRideFacturation);
 
 // Démarrer / terminer (si tu les utilises)
 router.post('/:id/start', authMiddleware , rideController.startRide);

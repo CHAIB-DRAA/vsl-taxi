@@ -16,6 +16,8 @@ const rideSchema = new mongoose.Schema({
   type: { type: String, enum: ['Aller', 'Retour'], default: 'Aller' },
   status: { type: String, enum: ['Non démarrée', 'En cours', 'Terminée'], default: 'Non démarrée' },
   
+
+  statuFacturation: { type: String, enum: ['Non facturé', 'Facturé'], default: 'Non facturé' },
   // Champs pour le partage
   isShared: { type: Boolean, default: false },         // true si la course est partagée
   sharedBy: {

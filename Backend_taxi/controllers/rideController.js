@@ -255,6 +255,32 @@ exports.endRide = async (req, res) => {
   }
 };
 
+// Mettre à jour le statut de facturation
+exports.updateRideFacturation = async (req, res) => {
+  try {
+    const { statuFacturation } = req.body;
+    const rideId = req.params.id;
+
+    if (!['Non facturé', 'Facturé'].includes(statuFacturation)) {
+      return res.status(400).json({ message: 'Statut de facturation invalide' });
+    }
+
+    const ride = await Ride.findOneAndUpdate(
+      { _id: rideId, chauffeurId: req.user.id },
+      { statuFacturation },
+      { new: true }
+    );
+
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+
+    res.json(ride);
+  } catch (err) {
+    console.error('Erreur updateRideFacturation:', err);
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
+  }
+};
+
+
 // -------------------
 // Mettre à jour / Supprimer
 // -------------------
