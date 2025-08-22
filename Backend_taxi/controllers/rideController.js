@@ -113,9 +113,7 @@ exports.shareRide = async (req, res) => {
 };
 
 
-// -----------------------------
-// Récupérer toutes les courses (propres + partagées)
-// -----------------------------
+// --- GET /api/rides?date=YYYY-MM-DD ---
 exports.getRides = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -129,25 +127,22 @@ exports.getRides = async (req, res) => {
       end   = new Date(d.setHours(23,59,59,999));
     }
 
-    console.log('📅 Paramètres reçus:', { userId, date });
+    console.log('📅 Paramètres reçus getRides:', { userId, date });
 
-    // 1️⃣ Courses propres
+    // Courses propres
     const ownQuery = { chauffeurId: userId };
     if (start && end) ownQuery.date = { $gte: start, $lte: end };
     const ownRides = await Ride.find(ownQuery).lean();
     console.log('✅ Courses propres trouvées:', ownRides.length);
 
-    // 2️⃣ Shares reçus (pending + accepted)
+    // Shares reçus
     const shares = await RideShare.find({ toUserId: userId }).lean();
-    console.log('🔄 Shares reçus:', shares.length, shares);
+    console.log('🔄 Shares reçus:', shares.length);
 
     const shareIds = shares.map(s => s.rideId);
-    console.log('🔑 RideIds partagés:', shareIds);
-
     const sharedRidesRaw = await Ride.find({ _id: { $in: shareIds } }).lean();
-    console.log('🚀 Courses partagées trouvées:', sharedRidesRaw.length);
 
-    // 3️⃣ Décorer pour front
+    // Décorer pour front
     const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
       const link = shares.find(s => String(s.rideId) === String(ride._id));
       const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
@@ -156,7 +151,7 @@ exports.getRides = async (req, res) => {
         isShared: true,
         sharedBy: link.fromUserId,
         sharedByName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
-        statusPartage: link.statusPartage,  // <-- bien lire le champ corrigé
+        statusPartage: link.statusPartage,
         shareId: link._id
       };
     }));
@@ -164,84 +159,74 @@ exports.getRides = async (req, res) => {
     const all = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
     console.log('📊 Total courses envoyées:', all.length);
 
-    return res.json(all);
-
+    res.json(all);
   } catch (err) {
     console.error('getRides error:', err);
-    return res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    res.status(500).json({ message: 'Erreur serveur', error: err.message });
   }
 };
 
-
-
-
 // --- POST /api/rides/respond ---
-// { shareId, action: 'accepted' | 'declined' }
-// Si 'accepted' => TRANSFERT DE PROPRIÉTÉ : ride.chauffeurId = toUserId
-// --- POST /api/rides/respond ---
-// { rideShareId, accept: true|false }
+// body: { rideShareId, accept: true|false }
 exports.respondRideShare = async (req, res) => {
   try {
     const { rideShareId, accept } = req.body;
-    console.log("=== Réponse à un partage de course ===", { rideShareId, accept });
-
-    if (typeof accept !== 'boolean') {
-      return res.status(400).json({ message: "Valeur 'accept' invalide" });
+    if (!rideShareId || typeof accept !== 'boolean') {
+      return res.status(400).json({ message: 'Paramètres invalides' });
     }
 
+    console.log("=== Réponse à un partage de course ===", { rideShareId, accept });
+
     const rideShare = await RideShare.findById(rideShareId);
-    if (!rideShare) return res.status(404).json({ message: "Partage introuvable" });
+    if (!rideShare) {
+      console.log("RideShare introuvable");
+      return res.status(404).json({ message: "Partage introuvable" });
+    }
 
     const ride = await Ride.findById(rideShare.rideId);
-    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+    if (!ride) {
+      console.log("Course introuvable");
+      return res.status(404).json({ message: "Course introuvable" });
+    }
+
+    // Vérifier que l'utilisateur courant est bien le destinataire
+    if (String(rideShare.toUserId) !== String(req.user.id)) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
 
     if (accept) {
-      // ACCEPTED : transfert du chauffeur au destinataire
-      ride.chauffeurId = rideShare.toUserId;
-      ride.isShared = true;
-
       rideShare.statusPartage = "accepted";
-      rideShare.acceptedAt = new Date();
-
-      // Annuler toutes les autres invitations pendantes pour cette course
-      await RideShare.updateMany(
-        { rideId: ride._id, _id: { $ne: rideShare._id }, statusPartage: 'pending' },
-        { $set: { statusPartage: 'cancelled' } }
-      );
-
-      console.log("Invitation acceptée, chauffeur transféré et autres partages annulés");
-
+      ride.chauffeurId = rideShare.toUserId; // transfert chauffeur
+      ride.isShared = true;
+      await ride.save();
+      console.log("Invitation acceptée");
     } else {
-      // REFUSED : on marque refusé
       rideShare.statusPartage = "refused";
 
-      // Vérifier s'il reste d'autres partages actifs
+      // Vérifier s'il reste un partage actif
       const stillShared = await RideShare.countDocuments({
         rideId: ride._id,
         statusPartage: { $in: ['pending', 'accepted'] }
       });
 
       if (!stillShared) {
-        ride.isShared = false; // réactive le bouton partager
+        ride.isShared = false;
+        await ride.save();
+        console.log("Aucun partage actif restant => isShared = false");
       }
 
-      console.log("Invitation refusée, isShared =", ride.isShared);
+      console.log("Invitation refusée");
     }
 
-    await ride.save();
     await rideShare.save();
+    console.log("RideShare mis à jour:", rideShare);
 
     res.json({ message: "Réponse enregistrée", rideShare, ride });
-
   } catch (err) {
     console.error("Erreur respondRideShare:", err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
-
-
-
-
 
 
 // -------------------

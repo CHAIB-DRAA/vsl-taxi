@@ -37,8 +37,7 @@ export default function AgendaScreen() {
       });
 
       const ridesData = res.data || [];
-      // Filtrer les courses déclinées
-      const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'declined');
+      const visibleRides = ridesData.filter(r => !r.statusPartage || r.statusPartage !== 'refused');
 
       console.log('📊 Courses récupérées:', visibleRides.map(r => ({
         _id: r._id,
@@ -51,7 +50,7 @@ export default function AgendaScreen() {
       setRides(visibleRides);
       markRidesOnCalendar(visibleRides);
     } catch (err) {
-      console.error('Erreur fetchRides:', err);
+      console.error('Erreur fetchRides:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
     } finally {
       setLoading(false);
@@ -68,7 +67,7 @@ export default function AgendaScreen() {
       setContacts(res.data || []);
       console.log('📤 Contacts récupérés:', res.data);
     } catch (err) {
-      console.error('Erreur fetchContacts:', err);
+      console.error('Erreur fetchContacts:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de récupérer les contacts.');
     }
   };
@@ -81,68 +80,52 @@ export default function AgendaScreen() {
   // --- Partager une course ---
   const handleShareRide = async (rideId, contact) => {
     try {
-      // ✅ Récupérer l'ID du chauffeur réel depuis contactId
       const toUserId = contact.contactId;
-  
-      if (!toUserId) {
-        return Alert.alert('Erreur', 'Impossible de partager : ID du chauffeur manquant.');
-      }
-  
+      if (!toUserId) return Alert.alert('Erreur', 'ID du chauffeur manquant.');
+
       console.log('🔹 Tentative partage:', { rideId, toUserId });
-  
       const token = await AsyncStorage.getItem('token');
       const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-  
+
       console.log('📤 Résultat partage:', res.data);
-  
-      if (res.data.share) {
-        Alert.alert('Succès', `Course partagée avec ${contact.fullName || contact.email} !`);
-        setShareModalVisible(false);
-        fetchRides(); // recharge pour voir la course partagée
-      } else {
-        Alert.alert('Erreur', res.data.message);
-      }
+      Alert.alert('Succès', `Course partagée avec ${contact.fullName || contact.email} !`);
+      setShareModalVisible(false);
+      fetchRides();
     } catch (err) {
       console.error('Erreur handleShareRide:', err.response?.data || err.message);
       Alert.alert('Erreur', 'Impossible de partager la course.');
     }
   };
-  
-  
- // --- Accepter / Refuser un partage ---
-const respondToShare = async (rideShareId, accept) => {
-  try {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) throw new Error('Token manquant');
 
-    const res = await axios.post(SHARE_API, 
-      { rideShareId, accept }, 
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+  // --- Accepter / Refuser un partage ---
+  const respondToShare = async (rideShareId, accept) => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) throw new Error('Token manquant');
 
-    console.log('Réponse Share:', res.data);
+      const res = await axios.post(SHARE_API, { rideShareId, accept }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-    setRides(prev =>
-      prev.map(r => {
-        if (r.shareId === rideShareId) {
-          if (!accept) {
-            // Refusé : on désactive le partage
-            return { ...r, statusPartage: 'refused', isShared: false };
+      console.log('Réponse Share:', res.data);
+
+      setRides(prev =>
+        prev.map(r => {
+          if (r.shareId === rideShareId) {
+            if (!accept) return { ...r, statusPartage: 'refused', isShared: false };
+            return { ...r, statusPartage: 'accepted', isShared: true };
           }
-          // Accepté : on marque accepté et shared
-          return { ...r, statusPartage: 'accepted', isShared: true };
-        }
-        return r;
-      }).filter(r => r.statusPartage !== 'refused') // Retire les refusés
-    );
+          return r;
+        }).filter(r => r.statusPartage !== 'refused')
+      );
 
-  } catch (err) {
-    console.error('Erreur respondToShare:', err.response?.data || err.message);
-    Alert.alert('Erreur', 'Impossible de répondre au partage.');
-  }
-};
+    } catch (err) {
+      console.error('Erreur respondToShare:', err.response?.data || err.message);
+      Alert.alert('Erreur', 'Impossible de répondre au partage.');
+    }
+  };
 
   // --- Marquer uniquement les jours avec courses ---
   const markRidesOnCalendar = (ridesList) => {
@@ -166,7 +149,6 @@ const respondToShare = async (rideShareId, accept) => {
     marks[selectedDate].selected = true;
     marks[selectedDate].selectedColor = '#4CAF50';
     setMarkedDates(marks);
-
     console.log('📅 Calendrier marqué:', marks);
   };
 
@@ -234,22 +216,21 @@ const respondToShare = async (rideShareId, accept) => {
 
               {/* Accept / Refuse */}
               {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && (
-  <View style={{ flexDirection: 'row', marginTop: 5 }}>
-    <TouchableOpacity
-      style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-      onPress={() => respondToShare(ride.shareId, true)} // true = accepté
-    >
-      <Text style={styles.shareButtonText}>Accepter</Text>
-    </TouchableOpacity>
-    <TouchableOpacity
-      style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-      onPress={() => respondToShare(ride.shareId, false)} // false = refusé
-    >
-      <Text style={styles.shareButtonText}>Refuser</Text>
-    </TouchableOpacity>
-  </View>
-)}
-
+                <View style={{ flexDirection: 'row', marginTop: 5 }}>
+                  <TouchableOpacity
+                    style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
+                    onPress={() => respondToShare(ride.shareId, true)}
+                  >
+                    <Text style={styles.shareButtonText}>Accepter</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
+                    onPress={() => respondToShare(ride.shareId, false)}
+                  >
+                    <Text style={styles.shareButtonText}>Refuser</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Bouton partager */}
               {!ride.sharedToName && !ride.isShared && (
