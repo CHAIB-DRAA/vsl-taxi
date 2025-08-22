@@ -1,6 +1,8 @@
 const Ride = require('../models/Ride');
 const RideShare = require('../models/RideShare');
 const User = require('../models/User'); // Assure que le modèle User existe
+const Contact = require('../models/contact');
+
 const mongoose = require('mongoose');
 
 // -------------------
@@ -56,64 +58,60 @@ exports.createRide = async (req, res) => {
 // -----------------------------
 // Partager une course
 // -----------------------------
+
+
+
 exports.shareRide = async (req, res) => {
   try {
     const { rideId, toUserId } = req.body;
+    console.log("=== Partage de course ===");
+    console.log("rideId:", rideId);
+    console.log("toUserId:", toUserId);
 
-    // 1️⃣ Vérification des paramètres
-    if (!rideId || !toUserId) {
-      console.log('Paramètres manquants', { rideId, toUserId });
-      return res.status(400).json({ message: 'rideId et toUserId sont requis' });
-    }
-
-    if (!req.user || !req.user.id) {
-      console.log('Utilisateur non authentifié');
-      return res.status(401).json({ message: 'Non authentifié' });
-    }
-
-    console.log('📥 Paramètres reçus:', { rideId, toUserId, userId: req.user.id });
-
-    // 2️⃣ Trouver la course
+    // Récupérer la course
     const ride = await Ride.findById(rideId);
-    if (!ride) return res.status(404).json({ message: 'Course introuvable', rideId });
-
-    // 3️⃣ Vérifier que l’utilisateur est le propriétaire
-    if (String(ride.chauffeurId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Non autorisé' });
+    if (!ride) {
+      console.log("Course introuvable");
+      return res.status(404).json({ message: "Course introuvable" });
     }
 
-    // 4️⃣ Vérifier doublon
-    const exists = await RideShare.findOne({ rideId, toUserId });
-    if (exists) return res.status(400).json({ message: 'Course déjà partagée avec cet utilisateur' });
+    const fromUserId = ride.chauffeurId; // ID du chauffeur propriétaire
+    console.log("fromUserId (chauffeur propriétaire):", fromUserId);
 
-    // 5️⃣ Créer l’invitation
-    const share = await RideShare.create({
-      rideId: new mongoose.Types.ObjectId(rideId),
-      fromUserId: req.user.id,
-      toUserId, // ici toUserId = item.userId du front
-      statusPartage: 'pending'
+    if (fromUserId.toString() === toUserId.toString()) {
+      console.log("Tentative de partage avec soi-même");
+      return res.status(400).json({ message: "Impossible de partager à soi-même" });
+    }
+
+    // Vérifier que le destinataire est bien un contact du chauffeur
+    const contact = await Contact.findOne({ userId: fromUserId, contactId: toUserId });
+    console.log("Contact trouvé:", contact);
+    if (!contact) {
+      return res.status(400).json({ message: "Le destinataire n'est pas un contact du chauffeur" });
+    }
+
+    // Créer une entrée RideShare
+    const rideShare = new RideShare({
+      rideId,
+      fromUserId,
+      toUserId,
+      status: "pending"
     });
-    
+    await rideShare.save();
+    console.log("RideShare créé:", rideShare);
 
-    // 6️⃣ Mettre à jour la course
-    if (!ride.isShared) {
-      ride.isShared = true;
-      ride.sharedBy = [req.user.id];
-    } else {
-      if (!Array.isArray(ride.sharedBy)) ride.sharedBy = [];
-      if (!ride.sharedBy.includes(req.user.id)) ride.sharedBy.push(req.user.id);
-    }
-    ride.updatedAt = new Date();
+    // Marquer la course comme partagée
+    ride.isShared = true;
     await ride.save();
+    console.log("Course mise à jour: isShared = true");
 
-    console.log('✅ Invitation créée avec succès:', share);
-    return res.status(201).json({ message: 'Invitation envoyée et course mise à jour', share });
-
+    res.json({ message: "Course partagée avec succès", rideShare });
   } catch (err) {
-    console.error('shareRide error:', err);
-    return res.status(500).json({ message: 'Erreur serveur', error: err.message });
+    console.error("Erreur partage course:", err);
+    res.status(500).json({ message: "Erreur serveur" });
   }
 };
+
 
 // -----------------------------
 // Récupérer toutes les courses (propres + partagées)
@@ -158,7 +156,7 @@ exports.getRides = async (req, res) => {
         isShared: true,
         sharedBy: link.fromUserId,
         sharedByName: fromUser?.fullName || fromUser?.email || 'Utilisateur',
-        statusPartage: link.statusPartage,
+        statusPartage: link.statusPartage,  // <-- bien lire le champ corrigé
         shareId: link._id
       };
     }));
@@ -180,73 +178,48 @@ exports.getRides = async (req, res) => {
 // --- POST /api/rides/respond ---
 // { shareId, action: 'accepted' | 'declined' }
 // Si 'accepted' => TRANSFERT DE PROPRIÉTÉ : ride.chauffeurId = toUserId
-exports.respondToShare = async (req, res) => {
+exports.respondRideShare = async (req, res) => {
   try {
-    const { shareId, action } = req.body;
-    if (!['accepted', 'declined'].includes(action)) {
-      return res.status(400).json({ message: 'Action invalide' });
-    }
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ message: 'Non authentifié' });
-    }
+    const { rideShareId, accept } = req.body;
+    console.log("=== Réponse à un partage de course ===", { rideShareId, accept });
 
-    const share = await RideShare.findById(shareId);
-    if (!share) return res.status(404).json({ message: 'Invitation introuvable' });
+    const rideShare = await RideShare.findById(rideShareId);
+    if (!rideShare) return res.status(404).json({ message: "Partage introuvable" });
 
-    if (String(share.toUserId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Non autorisé' });
-    }
+    const ride = await Ride.findById(rideShare.rideId);
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
 
-    if (share.statusPartage !== 'pending') {
-      return res.status(400).json({ message: `Invitation déjà ${share.statusPartage}` });
-    }
-
-    const ride = await Ride.findById(share.rideId);
-    if (!ride) return res.status(404).json({ message: 'Course introuvable' });
-
-    // === CAS DECLINED ===
-    if (action === 'declined') {
-      share.statusPartage = 'declined';
-      await share.save();
-
-      // Si plus aucune invitation active => isShared false
+    if (accept) {
+      rideShare.statusPartage = "accepted";
+      // Si besoin : transfert chauffeur
+      ride.chauffeurId = rideShare.toUserId;
+      ride.isShared = true;
+      await ride.save();
+      console.log("Invitation acceptée");
+    } else {
+      rideShare.statusPartage = "refused";
+      // Vérifier s'il reste un partage actif avant de forcer isShared = false
       const stillShared = await RideShare.countDocuments({
         rideId: ride._id,
         statusPartage: { $in: ['pending', 'accepted'] }
       });
-
       if (!stillShared) {
         ride.isShared = false;
         await ride.save();
       }
-
-      return res.json({ message: 'Invitation refusée', share, ride });
+      console.log("Invitation refusée");
     }
 
-    // === CAS ACCEPTED ===
-    if (String(ride.chauffeurId) !== String(share.fromUserId)) {
-      return res.status(409).json({ message: 'La course a changé de propriétaire entre-temps' });
-    }
-
-    ride.chauffeurId = share.toUserId;
-    ride.isShared = true; // toujours partagé vers le nouveau chauffeur
-    await ride.save();
-
-    share.statusPartage = 'accepted';
-    share.acceptedAt = new Date();
-    await share.save();
-
-    await RideShare.updateMany(
-      { rideId: ride._id, _id: { $ne: share._id }, statusPartage: 'pending' },
-      { $set: { statusPartage: 'cancelled' } }
-    );
-
-    return res.json({ message: 'Course transférée', share, ride });
+    await rideShare.save();
+    res.json({ message: "Réponse enregistrée", rideShare });
   } catch (err) {
-    console.error('respondToShare error:', err);
-    res.status(500).json({ message: 'Erreur serveur' });
+    console.error("Erreur réponse partage course:", err);
+    res.status(500).json({ message: "Erreur serveur" });
   }
 };
+
+
+
 
 
 
