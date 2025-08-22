@@ -203,19 +203,10 @@ exports.respondRideShare = async (req, res) => {
     } else {
       rideShare.statusPartage = "refused";
 
-      // Vérifier s'il reste un partage actif
-      const stillShared = await RideShare.countDocuments({
-        rideId: ride._id,
-        statusPartage: { $in: ['pending', 'accepted'] }
-      });
-
-      if (!stillShared) {
-        ride.isShared = false;
-        await ride.save();
-        console.log("Aucun partage actif restant => isShared = false");
-      }
-
-      console.log("Invitation refusée");
+      // Forcer isShared = false dès qu’un partage est refusé
+      ride.isShared = false;
+      await ride.save();
+      console.log("Invitation refusée => isShared = false");
     }
 
     await rideShare.save();
