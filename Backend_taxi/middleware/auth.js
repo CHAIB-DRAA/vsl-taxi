@@ -8,6 +8,8 @@ const authMiddleware = (req, res, next) => {
     if (!authHeader) return res.status(401).json({ error: 'Token manquant' });
 
     const token = authHeader.split(' ')[1];
+    console.log('Mon token :', token);
+
     if (!token) return res.status(401).json({ error: 'Token invalide' });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
