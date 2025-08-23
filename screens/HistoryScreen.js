@@ -9,22 +9,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 
-// Fonction pour mettre à jour le statut d'une course
-const updateRideStatus = async (rideId, newStatus) => {
-  const token = await AsyncStorage.getItem('token');
-  if (!token) throw new Error('Token manquant');
-
-  const res = await axios.patch(`${API_URL}/${rideId}`, { status: newStatus }, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  return res.data;
-};
-
 const HistoryScreen = () => {
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
+
   const [searchPatient, setSearchPatient] = useState('');
   const [selectedDate, setSelectedDate] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -49,42 +39,36 @@ const HistoryScreen = () => {
 
   const openModal = (ride) => {
     setSelectedRide(ride);
-    const isFacture = ride.status === 'Facturé' ? 1 : 0;
-
     Animated.timing(backgroundAnim, {
-      toValue: isFacture,
+      toValue: ride.status === 'Facturé' ? 1 : 0,
       duration: 300,
       useNativeDriver: false,
     }).start();
-
     setModalVisible(true);
   };
 
-  const toggleStatus = async () => {
+  // -----------------------------
+  // Toggle statut Facturation
+  // -----------------------------
+  const toggleFacturation = async () => {
     if (!selectedRide) return;
-  
+
     try {
-      const newStatus = selectedRide.status === 'Facturé' ? 'Non facturé' : 'Facturé';
-  
-      // Appel API pour mettre à jour le statut
-      const updatedRide = await updateRideStatus(selectedRide._id, newStatus);
-  
-      // Mettre à jour le ride sélectionné
-      setSelectedRide({ ...updatedRide });
-  
-      // Mettre à jour la liste globale
-      setRides(prev => prev.map(r => r._id === updatedRide._id ? { ...updatedRide } : r));
-  
-      // Animation badge
-      Animated.timing(backgroundAnim, {
-        toValue: newStatus === 'Facturé' ? 1 : 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-  
+      const newStatus = selectedRide.statuFacturation === 'Facturé' ? 'Non facturé' : 'Facturé';
+      const token = await AsyncStorage.getItem('token');
+
+      const res = await axios.put(
+        `${API_URL}/${selectedRide._id}/facturation`,
+        { statuFacturation: newStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const updatedRide = res.data;
+      setSelectedRide(updatedRide);
+      setRides(prev => prev.map(r => r._id === updatedRide._id ? updatedRide : r));
     } catch (err) {
-      console.error('Erreur toggleStatus:', err);
-      Alert.alert('Erreur', 'Impossible de mettre à jour le statut.');
+      console.error('Erreur toggleFacturation:', err);
+      Alert.alert('Erreur', 'Impossible de modifier la facturation.');
     }
   };
 
@@ -97,14 +81,15 @@ const HistoryScreen = () => {
     });
 
   const renderItem = ({ item }) => {
-    const backgroundColor = item.status === 'Facturé' ? '#E0F7FA' : '#FFEBEE';
-    const badgeColor = item.status === 'Facturé' ? '#00ACC1' : '#F44336';
+    const backgroundColor = item.statuFacturation === 'Facturé' ? '#E0F7FA' : '#FFEBEE';
+    const badgeColor = item.statuFacturation === 'Facturé' ? '#00ACC1' : '#F44336';
+
     return (
       <TouchableOpacity style={[styles.card, { backgroundColor }]} onPress={() => openModal(item)}>
         <View style={styles.cardHeader}>
           <Text style={styles.title}>{item.patientName}</Text>
           <View style={[styles.badge, { backgroundColor }]}>
-            <Text style={[styles.badgeText, { color: badgeColor }]}>{item.status || 'Non défini'}</Text>
+            <Text style={[styles.badgeText, { color: badgeColor }]}>{item.statuFacturation || 'Non facturé'}</Text>
           </View>
         </View>
         <Text style={styles.modalValue}>Date : {new Date(item.date).toLocaleDateString('fr-FR')}</Text>
@@ -117,6 +102,11 @@ const HistoryScreen = () => {
   const modalBackgroundColor = backgroundAnim.interpolate({
     inputRange: [0,1],
     outputRange: ['#FFEBEE','#E0F7FA']
+  });
+
+  const badgeColorAnim = backgroundAnim.interpolate({
+    inputRange: [0,1],
+    outputRange: ['#F44336','#00ACC1']
   });
 
   return (
@@ -161,114 +151,289 @@ const HistoryScreen = () => {
       )}
 
       <TouchableOpacity style={styles.floatingButton} onPress={fetchRides}>
-        <Text style={styles.floatingButtonText}>⟳ Actualiser</Text>
+        <Text style={styles.floatingButtonText}>Actualiser</Text>
       </TouchableOpacity>
 
+      {/* Modal */}
       <Modal
-        visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={()=>setModalVisible(false)}
-      >
-        <View style={styles.modalBackground}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>{selectedRide?.patientName}</Text>
-            <View style={{flexDirection:'row', alignItems:'center', marginBottom:15}}>
-              <Text style={{marginRight:10, fontWeight:'600', fontSize:16}}>Statut :</Text>
-              <Switch
-                value={selectedRide?.status === 'Facturé'}
-                onValueChange={toggleStatus}
-                trackColor={{ false:'#FFCDD2', true:'#B2EBF2' }}
-                thumbColor={selectedRide?.status === 'Facturé' ? '#00ACC1' : '#F44336'}
-                ios_backgroundColor="#FFFFD2"
-                style={{ transform:[{scale:1.3}] }}
-              />
-              <Animated.View
-                style={[styles.badge, {
-                  backgroundColor: selectedRide ? backgroundAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['#F44336', '#00ACC1']
-                  }) : '#F44336',
-                  marginLeft:12
-                }]}
-              >
-                <Text style={[styles.badgeText, { fontSize:14 }]}>
-                  {selectedRide?.status}
-                </Text>
-              </Animated.View>
-            </View>
+  visible={modalVisible}
+  transparent
+  animationType="slide"
+  onRequestClose={() => setModalVisible(false)}
+>
+  <View style={{ flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding:20 }}>
+    <View style={{
+      width:'100%',
+      backgroundColor:'#fff',
+      borderRadius:20,
+      padding:20,
+      shadowColor:'#000',
+      shadowOffset:{ width:0, height:4 },
+      shadowOpacity:0.2,
+      shadowRadius:6,
+      elevation:5
+    }}>
+      
+      {/* Titre */}
+      <Text style={{ fontSize:20, fontWeight:'700', marginBottom:12, textAlign:'center', color:'#333' }}>
+        Détails de la course
+      </Text>
 
-            <Text style={styles.modalValue}>Départ : {selectedRide?.startLocation}</Text>
-            <Text style={styles.modalValue}>Arrivée : {selectedRide?.endLocation}</Text>
-            <Text style={styles.modalValue}>Date : {selectedRide ? new Date(selectedRide.date).toLocaleDateString('fr-FR') : '-'}</Text>
+      {/* Informations */}
+      <Text style={styles.modalTitle}>{selectedRide?.patientName}</Text>
 
-            <TouchableOpacity
-              style={[styles.button, {backgroundColor:'#1976D2', marginTop:12}]}
-              onPress={()=>setModalVisible(false)}
-            >
-              <Text style={styles.buttonText}>Fermer</Text>
-            </TouchableOpacity>
-          </View>
+  <View style={styles.infoRow}>
+    <Text style={styles.infoLabel}>Départ :</Text>
+    <Text style={styles.infoValue}>{selectedRide?.startLocation ?? ''}</Text>
+  </View>
+
+  <View style={styles.infoRow}>
+    <Text style={styles.infoLabel}>Arrivée :</Text>
+    <Text style={styles.infoValue}>{selectedRide?.endLocation ?? ''}</Text>
+  </View>
+
+  <View style={styles.infoRow}>
+    <Text style={styles.infoLabel}>Date :</Text>
+    <Text style={styles.infoValue}>
+      {selectedRide ? new Date(selectedRide.date).toLocaleDateString('fr-FR') : ''}
+    </Text>
+  </View>
+
+
+
+  <View style={styles.infoRow}>
+  <Text style={styles.infoLabel}>Heure départ :</Text>
+  <Text style={styles.infoValue}>
+    {selectedRide?.startTime 
+      ? new Date(selectedRide.startTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false }) 
+      : '-'}
+  </Text>
+</View>
+
+<View style={styles.infoRow}>
+  <Text style={styles.infoLabel}>Heure arrivée :</Text>
+  <Text style={styles.infoValue}>
+    {selectedRide?.endTime 
+      ? new Date(selectedRide.endTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false }) 
+      : '-'}
+  </Text>
+</View>
+
+
+  <View style={styles.infoRow}>
+    <Text style={styles.infoLabel}>Distance :</Text>
+    <Text style={styles.infoValue}>{selectedRide?.distance ? `${selectedRide.distance} km` : '-'}</Text>
+  </View>
+
+      {/* Toggle Facturation */}
+      <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginTop:20, paddingVertical:10, borderTopWidth:1, borderColor:'#eee' }}>
+        <Text style={{ fontWeight:'600', fontSize:16, color:'#444' }}>Facturation :</Text>
+        <View style={{ flexDirection:'row', alignItems:'center' }}>
+          <Switch
+            value={selectedRide?.statuFacturation === 'Facturé'}
+            onValueChange={toggleFacturation}
+            trackColor={{ false:'#FFCDD2', true:'#B2EBF2' }}
+            thumbColor={selectedRide?.statuFacturation === 'Facturé' ? '#00ACC1' : '#F44336'}
+            ios_backgroundColor="#FFFFD2"
+            style={{ transform:[{scale:1.2}] }}
+          />
+          <Text style={{ marginLeft: 10, fontWeight:'600', fontSize:14, color:'#333' }}>
+            {selectedRide?.statuFacturation}
+          </Text>
         </View>
-      </Modal>
+      </View>
+
+      {/* Bouton fermer */}
+      <TouchableOpacity
+        onPress={() => setModalVisible(false)}
+        style={{
+          backgroundColor:'#00ACC1',
+          paddingVertical:12,
+          borderRadius:12,
+          marginTop:20,
+          alignItems:'center'
+        }}
+      >
+        <Text style={{ color:'#fff', fontSize:16, fontWeight:'600' }}>Fermer</Text>
+      </TouchableOpacity>
+
+    </View>
+  </View>
+</Modal>
+
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container:{padding:12},
-  center:{flex:1,justifyContent:'center',alignItems:'center'},
-  input:{
-    borderWidth:1,
-    borderColor:'#bbb',
-    padding:12,
-    borderRadius:10,
-    marginHorizontal:12,
-    marginVertical:6,
-    backgroundColor:'#fff',
-    fontSize:16,
+  container: { 
+    padding: 14 
   },
-  dateButton:{
-    backgroundColor:'#1976D2',
-    padding:12,
-    borderRadius:10,
-    marginHorizontal:12,
-    marginVertical:6,
+  center: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
   },
-  dateButtonText:{color:'#fff',fontWeight:'bold',fontSize:16,textAlign:'center'},
-  card:{
-    padding:18,
-    marginVertical:6,
-    borderRadius:12,
-    elevation:3,
-    shadowColor:'#000',
-    shadowOffset:{width:0,height:1},
-    shadowOpacity:0.2,
-    shadowRadius:2,
+  input: {
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    padding: 14,
+    borderRadius: 14,
+    marginHorizontal: 14,
+    marginVertical: 8,
+    backgroundColor: '#fff',
+    fontSize: 16,
+    elevation: 2
   },
-  cardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8},
-  title:{fontWeight:'bold',fontSize:18},
-  badge:{borderRadius:14,paddingHorizontal:12,paddingVertical:5,elevation:2},
-  badgeText:{color:'#fff',fontWeight:'bold',fontSize:13},
-  modalBackground:{flex:1,backgroundColor:'rgba(0,0,0,0.6)',justifyContent:'center',padding:16},
-  modalContainer:{borderRadius:14,padding:20,maxHeight:'80%',backgroundColor:'#fff'},
-  modalTitle:{fontSize:20,fontWeight:'bold',marginBottom:12,color:'#1976D2'},
-  modalValue:{fontSize:15,color:'#333',marginBottom:4},
-  floatingButton:{
-    position:'absolute',
-    bottom:24,
-    right:24,
-    backgroundColor:'#FF9800',
-    paddingVertical:16,
-    paddingHorizontal:22,
-    borderRadius:50,
-    elevation:6,
-    flexDirection:'row',
-    alignItems:'center',
+  dateButton: {
+    backgroundColor: '#00796B',
+    padding: 14,
+    borderRadius: 14,
+    marginHorizontal: 14,
+    marginVertical: 6,
+    elevation: 3
   },
-  floatingButtonText:{color:'#fff',fontWeight:'bold',marginLeft:8,fontSize:16},
-  button:{padding:12,borderRadius:10,alignItems:'center'},
-  buttonText:{color:'#fff',fontWeight:'bold',fontSize:16},
-});
+  dateButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+    textAlign: 'center'
+  },
+  card: {
+    padding: 20,
+    marginVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10
+  },
+  title: {
+    fontWeight: '700',
+    fontSize: 17,
+    color: '#333'
+  },
+  badge: {
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: '#F1F1F1'
+  },
+  badgeText: {
+    fontWeight: '700',
+    fontSize: 13
+  },
+  modalContainer: {
+    borderRadius: 20,
+    padding: 24,
+    maxHeight: '85%',
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 8
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 16,
+    color: '#00796B',
+    textAlign: 'center'
+  },
+  modalValue: {
+    fontSize: 15,
+    color: '#444',
+    marginVertical: 4
+  },
+  floatingButton: {
+    position: 'absolute',
+    bottom: 28,
+    right: 28,
+    backgroundColor: '#FF7043',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 50,
+    elevation: 7,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  floatingButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16
+  },
+  button: {
+    padding: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: '#00796B',
+    marginTop: 20
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16
+  },
+
+  modalValue: {
+      fontSize:15,
+      color:'#333',
+      marginBottom:8
+  },
+    modalContent: {
+      backgroundColor: '#fff',
+      padding: 20,
+      borderRadius: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    modalTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      marginBottom: 20,
+      color: '#111',
+      textAlign: 'center',
+    },
+    infoRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      borderBottomWidth: 0.5,
+      borderBottomColor: '#ddd',
+    },
+    infoLabel: {
+      fontSize: 16,
+      color: '#555',
+      fontWeight: '600',
+    },
+    infoValue: {
+      fontSize: 16,
+      color: '#111',
+      fontWeight: '400',
+      flexShrink: 1,
+      textAlign: 'right',
+    },
+  });
+  
+  
+  
+
+
 
 export default HistoryScreen;

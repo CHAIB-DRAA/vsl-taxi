@@ -86,14 +86,33 @@ exports.addContact = async (req, res) => {
   }
 };
 
+// controllers/userController.js
+
+// -----------------------------
+// Rechercher des utilisateurs
+// -----------------------------
 exports.searchUsers = async (req, res) => {
   try {
-    const searchQuery = req.query.search || '';
+    const query = req.query.q?.trim(); // Récupère le texte envoyé
+    if (!query || query.length < 3) {
+      // On n'effectue pas la recherche si moins de 3 caractères
+      return res.json([]);
+    }
+
+    // Recherche insensible à la casse par email ou fullName
+    const regex = new RegExp(query, 'i');
     const users = await User.find({
-      fullName: { $regex: searchQuery, $options: 'i' }
-    }, 'fullName email');
+      $or: [
+        { email: regex },
+        { fullName: regex }
+      ]
+    })
+    .limit(10) // Limite pour éviter trop de résultats
+    .select('_id fullName email');
+
     res.json(users);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('❌ Erreur searchUsers:', err);
+    res.status(500).json({ error: 'Erreur serveur', message: err.message });
   }
 };
