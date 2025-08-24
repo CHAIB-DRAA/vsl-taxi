@@ -6,8 +6,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
-import SignInScreen from './screens/SignInScreen';
-import SignUpScreen from './screens/SignUpScreen';
+import SignInScreen from './screens/SigninScreen';
+import SignUpScreen from './screens/SignupScreen';
 import CreateRideScreen from './screens/CreateRideScreen';
 import TodayRidesScreen from './screens/TodayRidesScreen';
 import AgendaScreen from './screens/AgendaScreen';
