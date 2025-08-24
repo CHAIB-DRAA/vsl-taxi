@@ -31,9 +31,10 @@ export const deleteContact = async (contactId) => {
 };
 
 // --- Utilisateurs (recherche) ---
+// --- Utilisateurs (recherche) ---
 export const searchUsers = async (query = '') => {
   const config = await getConfig();
-  const url = `${USERS_URL}${query ? `?search=${query}` : ''}`;
+  const url = `https://vsl-taxi.onrender.com/api/user/search${query ? `?q=${encodeURIComponent(query)}` : ''}`;
   const res = await axios.get(url, config);
   return res.data;
 };

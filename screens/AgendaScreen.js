@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, ActivityIndicator, StyleSheet,
-  Alert, TouchableOpacity, Modal, FlatList
+  Alert, TouchableOpacity, Modal, FlatList, TextInput, Animated
 } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialIcons'; // import icône
+
+
 import { Calendar } from 'react-native-calendars';
 import axios from 'axios';
 import moment from 'moment';
@@ -21,9 +24,15 @@ export default function AgendaScreen() {
   const [loading, setLoading] = useState(false);
   const [contacts, setContacts] = useState([]);
   const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [rideOptionsModalVisible, setRideOptionsModalVisible] = useState(false);
   const [selectedRide, setSelectedRide] = useState(null);
+  const [editMode, setEditMode] = useState(false);
   const [markedDates, setMarkedDates] = useState({});
   const [showCalendar, setShowCalendar] = useState(true);
+
+  const [editPatientName, setEditPatientName] = useState('');
+  const [editStartLocation, setEditStartLocation] = useState('');
+  const [editDateTime, setEditDateTime] = useState('');
 
   // --- Fetch courses ---
   const fetchRides = async () => {
@@ -38,20 +47,18 @@ export default function AgendaScreen() {
   
       const ridesData = res.data || [];
   
-      // Filtrer d'abord sur la date sélectionnée
       const dateRides = ridesData.filter(r =>
         new Date(r.date).toDateString() === new Date(selectedDate).toDateString()
       );
   
-      // Garder propres + partagées acceptées + partagées pending
       const visibleRides = dateRides.filter(r => {
-        if (!r.isShared) return true; // ma course
+        if (!r.isShared) return true;
         if (r.isShared && (r.statusPartage === 'accepted' || r.statusPartage === 'pending')) return true;
-        return false; // refusées
+        return false;
       });
   
       setRides(visibleRides);
-      markRidesOnCalendar(ridesData); // ici on peut marquer toutes les dates avec courses
+      markRidesOnCalendar(ridesData);
     } catch (err) {
       console.error('Erreur fetchRides:', err);
       Alert.alert('Erreur', 'Impossible de charger les courses.');
@@ -59,7 +66,6 @@ export default function AgendaScreen() {
       setLoading(false);
     }
   };
-  
 
   // --- Fetch contacts ---
   const fetchContacts = async () => {
@@ -83,14 +89,14 @@ export default function AgendaScreen() {
   // --- Partager une course ---
   const handleShareRide = async (rideId, contact) => {
     try {
-      const toUserId = contact.contactId;
+      const toUserId = contact.contactId?._id;
       if (!toUserId) return Alert.alert('Erreur', 'ID du chauffeur manquant.');
-
+  
       const token = await AsyncStorage.getItem('token');
       const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-
+  
       if (res.data.rideShare) {
         Alert.alert('Succès', `Course partagée avec ${contact.fullName || contact.email} !`);
         setShareModalVisible(false);
@@ -113,8 +119,6 @@ export default function AgendaScreen() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      console.log('Réponse Share:', res.data);
-
       setRides(prev =>
         prev.map(r => {
           if (r.shareId === rideShareId) {
@@ -133,39 +137,21 @@ export default function AgendaScreen() {
   // --- Marquer uniquement les jours avec courses ---
   const markRidesOnCalendar = (ridesList) => {
     const marks = {};
-  
-    // Filtrer les courses valides : propres ou partagées acceptées
     const visibleRides = ridesList.filter(ride =>
       !ride.isShared || ride.statusPartage === 'accepted'
     );
-  
     visibleRides.forEach(ride => {
       const day = moment(ride.date).format('YYYY-MM-DD');
       if (!marks[day]) marks[day] = { dots: [] };
-  
-      let dot = null;
-      if (!ride.isShared) {
-        dot = { key: `${ride._id}-own`, color: '#4CAF50' };
-      } else if (ride.isShared && ride.statusPartage === 'accepted') {
-        dot = { key: `${ride._id}-toMe`, color: '#FF9800' };
-      }
-  
-      if (dot && !marks[day].dots.some(d => d.key === dot.key)) {
-        marks[day].dots.push(dot);
-      }
+      let dot = !ride.isShared ? { key: `${ride._id}-own`, color: '#4CAF50' } : { key: `${ride._id}-toMe`, color: '#FF9800' };
+      if (!marks[day].dots.some(d => d.key === dot.key)) marks[day].dots.push(dot);
     });
-  
-    // Sélection du jour courant
     if (!marks[selectedDate]) marks[selectedDate] = { dots: [] };
     marks[selectedDate].selected = true;
     marks[selectedDate].selectedColor = '#4CAF50';
-  
-    console.log('📅 Calendrier marqué (filtered):', JSON.stringify(marks, null, 2));
     setMarkedDates(marks);
   };
-  
-  
-  
+
   const getRideColor = (ride) => {
     if (ride.isShared && ride.sharedBy && !ride.sharedToName) return '#FF9800';
     if (ride.isShared && ride.sharedToName) return '#2196F3';
@@ -180,6 +166,80 @@ export default function AgendaScreen() {
     if (ride.isShared && ride.sharedToName)
       return `Partagée à : ${ride.sharedToName} (${ride.statusPartage})`;
     return ride.type;
+  };
+
+  const AnimatedBadge = ({ visible }) => {
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+      Animated.timing(fadeAnim, {
+        toValue: visible ? 1 : 0,
+        duration: 500,
+        useNativeDriver: true,
+      }).start();
+    }, [visible]);
+    if (!visible) return null;
+    return (
+      <Animated.View style={[styles.finishedBadge, { opacity: fadeAnim }]}>
+        <Text style={styles.finishedBadgeText}>Terminée</Text>
+      </Animated.View>
+    );
+  };
+
+  // --- Modal Options: Modifier / Supprimer ---
+  const handleDeleteRide = async (ride) => {
+    Alert.alert(
+      'Supprimer',
+      `Voulez-vous supprimer la course "${ride.patientName}" ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer', style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await AsyncStorage.getItem('token');
+              await axios.delete(`${API_URL}/${ride._id}`, { headers: { Authorization: `Bearer ${token}` } });
+              Alert.alert('Supprimé', 'Course supprimée.');
+              fetchRides();
+              setRideOptionsModalVisible(false);
+            } catch (err) {
+              console.error(err);
+              Alert.alert('Erreur', 'Impossible de supprimer la course.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleEditRide = async () => {
+    if (!editPatientName || !editStartLocation || !editDateTime) {
+      return Alert.alert('Erreur', 'Veuillez remplir tous les champs.');
+    }
+    try {
+      const token = await AsyncStorage.getItem('token');
+      await axios.put(`${API_URL}/${selectedRide._id}`, {
+        patientName: editPatientName,
+        startLocation: editStartLocation,
+        date: editDateTime
+      }, { headers: { Authorization: `Bearer ${token}` } });
+
+      Alert.alert('Succès', 'Course modifiée avec succès.');
+      fetchRides();
+      setEditMode(false);
+      setRideOptionsModalVisible(false);
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de modifier la course.');
+    }
+  };
+
+  const openOptionsModal = (ride) => {
+    setSelectedRide(ride);
+    setEditPatientName(ride.patientName);
+    setEditStartLocation(ride.startLocation);
+    setEditDateTime(moment(ride.date).format('YYYY-MM-DDTHH:mm'));
+    setEditMode(false);
+    setRideOptionsModalVisible(true);
   };
 
   return (
@@ -205,65 +265,63 @@ export default function AgendaScreen() {
         />
       )}
 
-      <Text style={styles.title}>
-        Courses du {moment(selectedDate).format('DD MMMM YYYY')}
-      </Text>
+      <Text style={styles.title}>Courses du {moment(selectedDate).format('DD MMMM YYYY')}</Text>
 
       {loading ? (
         <ActivityIndicator size="large" color="#4CAF50" style={{ marginTop: 20 }} />
       ) : (
         <ScrollView style={styles.ridesList}>
-          {rides.length === 0 ? (
-            <Text style={styles.emptyText}>Aucune course prévue.</Text>
-          ) : rides.map((ride) => (
-            <View
-              key={ride._id + (ride.isShared ? (ride.sharedToName ? '-byMe' : '-toMe') : '-own')}
-              style={[styles.rideCard, { borderLeftColor: getRideColor(ride) }]}
-            >
-              <Text style={styles.rideText}>Client : {ride.patientName || ride.clientName}</Text>
-              <Text style={styles.rideText}>Départ : {ride.startLocation}</Text>
-              <Text style={styles.rideText}>Heure : {moment(ride.date).format('HH:mm')}</Text>
 
-              <Text style={[styles.sharedText, { color: getRideColor(ride) }]}>
-                {getSharedText(ride)}
-              </Text>
 
-              {/* Accept / Refuse */}
-              {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && (
-                <View style={{ flexDirection: 'row', marginTop: 5 }}>
-                  <TouchableOpacity
-                    style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, true)}
-                  >
-                    <Text style={styles.shareButtonText}>Accepter</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]}
-                    onPress={() => respondToShare(ride.shareId, false)}
-                  >
-                    <Text style={styles.shareButtonText}>Refuser</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+// --- dans le ScrollView ---
+{rides.map((ride) => {
+  const isFinished = !!ride.endTime;
+  return (
+    <View key={ride._id} style={[
+      styles.rideCard,
+      { borderLeftColor: getRideColor(ride) },
+      isFinished && styles.finishedRideCard
+    ]}>
+      {isFinished && <AnimatedBadge visible={isFinished} />}
 
-              {/* Bouton partager */}
-              {!ride.sharedToName && !ride.isShared && (
-                <TouchableOpacity
-                  style={styles.shareButton}
-                  onPress={() => {
-                    setSelectedRide(ride);
-                    setShareModalVisible(true);
-                  }}
-                >
-                  <Text style={styles.shareButtonText}>Partager</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ))}
+      <Text style={[styles.rideText, isFinished && styles.finishedText]}>Client : {ride.patientName || ride.clientName}</Text>
+      <Text style={[styles.rideText, isFinished && styles.finishedText]}>Départ : {ride.startLocation}</Text>
+      <Text style={[styles.rideText, isFinished && styles.finishedText]}>Heure : {moment(ride.date).format('HH:mm')}</Text>
+      <Text style={[styles.sharedText, { color: getRideColor(ride) }, isFinished && styles.finishedText]}>
+        {getSharedText(ride)}
+      </Text>
+      <TouchableOpacity         style={styles.editIcon} onPress={() => openOptionsModal(ride)}>
+            <Icon name="edit" size={24} color="#FF9800" />
+          </TouchableOpacity>
+
+      {ride.isShared && ride.sharedBy && !ride.sharedToName && ride.statusPartage === 'pending' && !isFinished && (
+        <View style={{ flexDirection: 'row', marginTop: 5 }}>
+          <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#4CAF50', flex: 1, marginRight: 5 }]} onPress={() => respondToShare(ride.shareId, true)}>
+            <Text style={styles.shareButtonText}>Accepter</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#FF5252', flex: 1, marginLeft: 5 }]} onPress={() => respondToShare(ride.shareId, false)}>
+            <Text style={styles.shareButtonText}>Refuser</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!ride.sharedToName && !ride.isShared && !isFinished && (
+        <View style={{ flexDirection: 'row', marginTop: 5, justifyContent: 'space-between', alignItems: 'center' }}>
+          <TouchableOpacity style={[styles.shareButton, { flex: 1, marginRight: 5 }]} onPress={() => { setSelectedRide(ride); setShareModalVisible(true); }}>
+            <Text style={styles.shareButtonText}>Partager</Text>
+          </TouchableOpacity>
+          
+        </View>
+      )}
+    </View>
+  );
+})}
+
+
         </ScrollView>
       )}
 
-      {/* Modal partage */}
+      {/* Modal Partage */}
       <Modal visible={shareModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -289,12 +347,44 @@ export default function AgendaScreen() {
               }
             />
 
-            <TouchableOpacity
-              style={[styles.shareButton, { backgroundColor: '#888', marginTop: 10 }]}
-              onPress={() => setShareModalVisible(false)}
-            >
+            <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#888', marginTop: 10 }]} onPress={() => setShareModalVisible(false)}>
               <Text style={styles.shareButtonText}>Annuler</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Options Modifier / Supprimer */}
+      <Modal visible={rideOptionsModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {editMode ? (
+              <>
+                <Text style={styles.modalTitle}>Modifier la course</Text>
+                <TextInput style={styles.input} placeholder="Nom du client" value={editPatientName} onChangeText={setEditPatientName} />
+                <TextInput style={styles.input} placeholder="Lieu de départ" value={editStartLocation} onChangeText={setEditStartLocation} />
+                <TextInput style={styles.input} placeholder="Date & Heure (YYYY-MM-DDTHH:mm)" value={editDateTime} onChangeText={setEditDateTime} />
+                <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#FF9800' }]} onPress={handleEditRide}>
+                  <Text style={styles.shareButtonText}>Enregistrer</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#888' }]} onPress={() => setEditMode(false)}>
+                  <Text style={styles.shareButtonText}>Annuler</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>Options pour la course</Text>
+                <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#FF9800' }]} onPress={() => setEditMode(true)}>
+                  <Text style={styles.shareButtonText}>Modifier</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#FF5252' }]} onPress={() => handleDeleteRide(selectedRide)}>
+                  <Text style={styles.shareButtonText}>Supprimer</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.shareButton, { backgroundColor: '#888' }]} onPress={() => setRideOptionsModalVisible(false)}>
+                  <Text style={styles.shareButtonText}>Annuler</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -318,5 +408,18 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10 },
   contactButton: { padding: 10, backgroundColor: '#E0E0E0', borderRadius: 6 },
   contactText: { fontSize: 14 },
-  emptyText: { textAlign: 'center', marginTop: 20, color: '#888' }
+  emptyText: { textAlign: 'center', marginTop: 20, color: '#888' },
+  finishedRideCard: { backgroundColor: '#F0F0F0', borderWidth: 1, borderColor: '#FF9800', borderRadius: 8, opacity: 0.85, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
+  finishedText: { color: '#888' },
+  finishedBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: '#FF9800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 5, zIndex: 10 },
+  finishedBadgeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, marginBottom: 10 },
+  editIcon: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 10,
+    padding: 4,
+  }
+  
 });
