@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "vsl-mobile",
-    "slug": "vsl-mobile",
+    "slug": "taxiapp",
+    "owner": "chaibdraa",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,7 +14,8 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mostafa27001.vslmobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +30,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "012dea00-6cf7-4645-b3b4-4c07ba5168cd"
+        "projectId": "9f89c996-4932-4444-b59c-cc71cc54366d"
       }
     }
   }
