@@ -2,8 +2,9 @@ const mongoose = require('mongoose');
 
 const documentSchema = mongoose.Schema({
   patientName: { type: String, required: true },
-  type: { type: String, required: true }, // PMT, Vitale, Mutuelle
-  imageData: { type: String, required: true }, // L'image convertie en texte (Base64)
+  rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' }, // <-- NOUVEAU
+  type: { type: String, required: true }, // PMT, CarteVitale, Mutuelle
+  imageData: { type: String, required: true },
   uploadDate: { type: Date, default: Date.now }
 });
 

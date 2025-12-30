@@ -1,62 +1,70 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const Document = require('../models/Document'); // On importe le nouveau modèle
+const Document = require('../models/Document');
+const Ride = require('../models/Ride'); // Besoin pour trouver le nom du patient via l'ID de course
 
-// On stocke l'image temporairement dans la mémoire vive (RAM)
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// Route POST : /api/documents/upload
+// --- UPLOAD (Ajout intelligent) ---
 router.post('/upload', upload.single('photo'), async (req, res) => {
   try {
-    const { patientName, docType } = req.body;
+    const { patientName, docType, rideId } = req.body;
     const file = req.file;
 
-    if (!file) {
-      return res.status(400).json({ message: "Aucune image reçue" });
-    }
+    if (!file) return res.status(400).json({ message: "Aucune image reçue" });
 
-    console.log(`📸 Réception scan pour ${patientName} (${docType})`);
-
-    // 1. CONVERSION MAGIQUE : Buffer (Fichier) -> String (Base64)
-    // On crée une chaîne du type : "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+    // Conversion Base64
     const base64Image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 
-    // 2. SAUVEGARDE DANS MONGODB
+    // Création du document
     const newDoc = new Document({
       patientName: patientName,
+      rideId: rideId, // On lie à la course spécifique
       type: docType,
       imageData: base64Image
     });
 
     await newDoc.save();
-
-    console.log("✅ Document sauvegardé en sécurité dans MongoDB");
-
-    res.json({ message: "Document sécurisé dans la base de données" });
+    res.json({ message: "Document sauvegardé" });
 
   } catch (err) {
-    console.error("❌ Erreur sauvegarde MongoDB:", err);
+    console.error("❌ Erreur Upload:", err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 });
-// ... (code existant upload) ...
 
-// Route GET : Récupérer les documents d'un patient
-router.get('/:patientName', async (req, res) => {
-    try {
-      const { patientName } = req.params;
-      
-      // On cherche les documents de ce patient
-      const docs = await Document.find({ patientName: patientName }).sort({ uploadDate: -1 });
-      
-      res.json(docs);
-    } catch (err) {
-      res.status(500).json({ message: "Erreur récupération documents", error: err.message });
-    }
-  });
-  
+// --- RÉCUPÉRATION INTELLIGENTE (La clé de ta demande) ---
+router.get('/by-ride/:rideId', async (req, res) => {
+  try {
+    const { rideId } = req.params;
 
+    // 1. On récupère les infos de la course pour avoir le nom du patient
+    const ride = await Ride.findById(rideId);
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+
+    const patientName = ride.patientName;
+
+    // 2. La requête "MAGIQUE" :
+    // - Soit c'est un document lié à CETTE course (ex: le PMT du jour)
+    // - Soit c'est un document Permanent (Vitale/Mutuelle) de CE patient (peu importe la course)
+    const docs = await Document.find({
+      $or: [
+        { rideId: rideId }, // Documents spécifiques à la course (PMT)
+        { 
+          patientName: patientName, 
+          type: { $in: ['CarteVitale', 'Mutuelle'] } // Documents permanents
+        }
+      ]
+    }).sort({ uploadDate: -1 }); // Les plus récents en premier
+
+    res.json(docs);
+
+  } catch (err) {
+    console.error("Erreur récup docs:", err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
 
 module.exports = router;
