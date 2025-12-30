@@ -9,4 +9,7 @@ router.use(authMiddleware);
 router.get('/', patientController.getPatients);
 router.post('/', patientController.createPatient);
 
+router.put('/:id', patientController.updatePatient);   
+router.delete('/:id', patientController.deletePatient);
+
 module.exports = router;
