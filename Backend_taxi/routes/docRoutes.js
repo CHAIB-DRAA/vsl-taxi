@@ -1,24 +1,44 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage() }); // Stockage en mémoire tampon
-const driveService = require('../services/driveService');
+const Document = require('../models/Document'); // On importe le nouveau modèle
+
+// On stocke l'image temporairement dans la mémoire vive (RAM)
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 // Route POST : /api/documents/upload
 router.post('/upload', upload.single('photo'), async (req, res) => {
   try {
     const { patientName, docType } = req.body;
-    const file = req.req.file; // Multer met le fichier ici
+    const file = req.file;
 
-    if (!file) return res.status(400).json({ message: "Aucune image envoyée" });
+    if (!file) {
+      return res.status(400).json({ message: "Aucune image reçue" });
+    }
 
-    // Envoi vers Google Drive
-    const result = await driveService.uploadToDrive(file, patientName, docType);
+    console.log(`📸 Réception scan pour ${patientName} (${docType})`);
 
-    res.json({ message: "Document sauvegardé sur Drive", link: result.webViewLink });
+    // 1. CONVERSION MAGIQUE : Buffer (Fichier) -> String (Base64)
+    // On crée une chaîne du type : "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+    const base64Image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+
+    // 2. SAUVEGARDE DANS MONGODB
+    const newDoc = new Document({
+      patientName: patientName,
+      type: docType,
+      imageData: base64Image
+    });
+
+    await newDoc.save();
+
+    console.log("✅ Document sauvegardé en sécurité dans MongoDB");
+
+    res.json({ message: "Document sécurisé dans la base de données" });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Erreur lors de l'envoi vers Drive", error: err.message });
+    console.error("❌ Erreur sauvegarde MongoDB:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 });
 
