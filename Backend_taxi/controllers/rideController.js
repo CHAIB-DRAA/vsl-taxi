@@ -171,3 +171,30 @@ exports.respondRideShare = async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
+
+// ... (le reste de tes fonctions)
+
+// --- GESTION FACTURATION (La fonction manquante) ---
+exports.updateRideFacturation = async (req, res) => {
+  try {
+    const { statuFacturation } = req.body;
+    
+    // On vérifie que le statut est valide
+    if (!['Non facturé', 'Facturé'].includes(statuFacturation)) {
+      return res.status(400).json({ message: 'Statut invalide' });
+    }
+
+    const ride = await Ride.findOneAndUpdate(
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { $set: { statuFacturation } },
+      { new: true }
+    );
+
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+
+    res.json(ride);
+  } catch (err) {
+    console.error("Erreur facturation:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
