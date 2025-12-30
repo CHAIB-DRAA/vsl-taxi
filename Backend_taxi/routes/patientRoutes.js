@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const patientController = require('../controllers/patientController');
-const authMiddleware = require('../middleware/authMiddleware'); // Important pour savoir qui est le chauffeur
+const authMiddleware = require('../middleware/auth');
 
 // Toutes les routes sont protégées par le login (authMiddleware)
 router.use(authMiddleware);
