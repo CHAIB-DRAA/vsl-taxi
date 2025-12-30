@@ -25,7 +25,7 @@ router.post('/respond', authMiddleware, rideController.respondRideShare);
 router.put('/:id/facturation', authMiddleware, rideController.updateRideFacturation);
 
 // 6. Anciennes routes (Tu peux les garder pour l'instant)
-router.post('/:id/start', authMiddleware, rideController.startRide);
-router.post('/:id/end', authMiddleware, rideController.endRide);
+//router.post('/:id/start', authMiddleware, rideController.startRide);
+//router.post('/:id/end', authMiddleware, rideController.endRide);
 
 module.exports = router;
