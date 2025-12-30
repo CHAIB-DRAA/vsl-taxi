@@ -115,28 +115,35 @@ exports.deleteRide = async (req, res) => {
 // --- 5. PARTAGE ---
 exports.shareRide = async (req, res) => {
   try {
-    const { rideId, toUserId } = req.body;
-    const fromUserId = req.user.id;
+    const { rideId } = req.params;
+    const { targetUserId, note } = req.body; // <--- On récupère la note ici
 
-    if (fromUserId === toUserId) return res.status(400).json({ message: "Impossible de partager à soi-même" });
+    const originalRide = await Ride.findById(rideId);
+    if (!originalRide) return res.status(404).json({ message: "Course introuvable" });
 
-    const ride = await Ride.findOne({ _id: rideId, chauffeurId: fromUserId });
-    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+    // On crée la copie pour le collègue
+    const newRide = new Ride({
+      patientName: originalRide.patientName,
+      startLocation: originalRide.startLocation,
+      endLocation: originalRide.endLocation,
+      date: originalRide.date,
+      time: originalRide.time,
+      type: originalRide.type,
+      isRoundTrip: originalRide.isRoundTrip,
+      
+      userId: targetUserId, // On l'attribue au collègue
+      
+      // INFOS DE PARTAGE
+      isShared: true,
+      sharedByName: req.user.fullName, // Ton nom à toi
+      shareNote: note || '' // <--- ON SAUVEGARDE LA NOTE ICI
+    });
 
-    // Vérifier si déjà partagé
-    const existingShare = await RideShare.findOne({ rideId, toUserId });
-    if (existingShare) return res.status(400).json({ message: "Déjà partagé avec ce chauffeur" });
+    await newRide.save();
+    res.status(200).json({ message: "Course partagée avec succès" });
 
-    const rideShare = new RideShare({ rideId, fromUserId, toUserId, statusPartage: "pending" });
-    await rideShare.save();
-
-    ride.isShared = true;
-    await ride.save();
-
-    res.json({ message: "Partage envoyé", rideShare });
   } catch (err) {
-    console.error("Erreur shareRide:", err);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(500).json({ message: err.message });
   }
 };
 

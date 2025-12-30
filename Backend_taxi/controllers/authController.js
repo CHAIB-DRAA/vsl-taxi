@@ -34,3 +34,14 @@ exports.loginUser = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+// Mettre à jour le Push Token
+exports.updatePushToken = async (req, res) => {
+    try {
+      const { pushToken } = req.body;
+      // On met à jour l'utilisateur connecté
+      await User.findByIdAndUpdate(req.user.id, { pushToken: pushToken });
+      res.status(200).json({ message: "Token de notification mis à jour" });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  };

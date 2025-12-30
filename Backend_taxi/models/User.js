@@ -1,10 +1,13 @@
 const mongoose = require('mongoose');
 
-const userSchema = new mongoose.Schema({
+const userSchema = mongoose.Schema({
+  fullName: { type: String, required: true },
   email: { type: String, required: true, unique: true },
-  fullName: { type: String },
   password: { type: String, required: true },
-  contacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+  
+  // AJOUTE CE CHAMP :
+  pushToken: { type: String, default: '' }, // L'adresse pour envoyer la notif
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

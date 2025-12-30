@@ -4,6 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+
+router.put('/push-token', authMiddleware, authController.updatePushToken);
 // Inscription
 router.post('/register', async (req, res) => {
   try {
