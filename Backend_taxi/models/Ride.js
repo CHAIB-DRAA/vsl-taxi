@@ -6,6 +6,7 @@ const rideSchema = mongoose.Schema({
 
   // --- INFOS PATIENT & TRAJET ---
   patientName: { type: String, required: true },
+  patientPhone: { type: String, default: '' }, // <--- AJOUTE CE CHAMP
   startLocation: { type: String, required: true },
   endLocation: { type: String, required: true },
   date: { type: Date, required: true },

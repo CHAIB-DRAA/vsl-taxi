@@ -31,3 +31,39 @@ exports.createPatient = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+// ... getPatients et createPatient existants ...
+
+// 3. Modifier un patient
+exports.updatePatient = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      
+      // On s'assure que c'est bien TON patient (chauffeurId)
+      const patient = await Patient.findOneAndUpdate(
+        { _id: id, chauffeurId: req.user.id },
+        { $set: updates },
+        { new: true } // Renvoie la version modifiée
+      );
+  
+      if (!patient) return res.status(404).json({ message: "Patient introuvable" });
+      res.json(patient);
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  };
+  
+  // 4. Supprimer un patient
+  exports.deletePatient = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const patient = await Patient.findOneAndDelete({ _id: id, chauffeurId: req.user.id });
+      
+      if (!patient) return res.status(404).json({ message: "Patient introuvable" });
+      res.json({ message: "Patient supprimé" });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  };

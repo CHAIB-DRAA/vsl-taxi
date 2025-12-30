@@ -9,14 +9,17 @@ const expo = new Expo();
 exports.createRide = async (req, res) => {
   try {
     const chauffeurId = req.user.id;
-    const { date, ...rest } = req.body;
+    // 👇 MODIFICATION ICI : On récupère explicitement le téléphone
+    const { date, patientPhone, ...rest } = req.body;
 
     if (!date) return res.status(400).json({ message: 'Date manquante' });
     
     const ride = new Ride({
       ...rest,
       date: new Date(date),
-      chauffeurId, // C'est toi le propriétaire
+      chauffeurId,
+      // 👇 ON ENREGISTRE LE TÉLÉPHONE DANS LA BASE DE DONNÉES
+      patientPhone: patientPhone || '', 
       status: 'En attente'
     });
 
@@ -44,7 +47,7 @@ exports.getRides = async (req, res) => {
       filter.date = { $gte: start, $lte: end };
     }
 
-    // On récupère tout (les tiennes + celles partagées car elles ont ton chauffeurId maintenant)
+    // On récupère tout (les tiennes + celles partagées acceptées ou en attente)
     const rides = await Ride.find(filter).sort({ date: 1 });
     
     res.json(rides);
@@ -85,11 +88,11 @@ exports.deleteRide = async (req, res) => {
   }
 };
 
-// --- 5. PARTAGE AVEC NOTIFICATION ---
+// --- 5. PARTAGE AVEC NOTIFICATION & TÉLÉPHONE ---
 exports.shareRide = async (req, res) => {
   try {
     const { rideId } = req.params;
-    const { targetUserId, note } = req.body; // On récupère la note
+    const { targetUserId, note } = req.body;
 
     // 1. Trouver la course originale
     const originalRide = await Ride.findById(rideId);
@@ -103,6 +106,9 @@ exports.shareRide = async (req, res) => {
     const newRide = new Ride({
       // Copie des infos
       patientName: originalRide.patientName,
+      // 👇 C'EST ICI QUE LE NUMÉRO EST TRANSMIS AU COLLÈGUE
+      patientPhone: originalRide.patientPhone || '', 
+      
       startLocation: originalRide.startLocation,
       endLocation: originalRide.endLocation,
       date: originalRide.date,
@@ -127,7 +133,7 @@ exports.shareRide = async (req, res) => {
         to: targetUser.pushToken,
         sound: 'default',
         title: '🚕 Course reçue !',
-        body: `${req.user.fullName} vous a envoyé une course. Note : ${note ? 'Oui' : 'Non'}`,
+        body: `${req.user.fullName} vous a envoyé une course.`,
         data: { rideId: newRide._id },
         badge: 1,
       };
@@ -136,7 +142,7 @@ exports.shareRide = async (req, res) => {
       expo.sendPushNotificationsAsync([message]).catch(e => console.error("Erreur Push:", e));
     }
 
-    res.status(200).json({ message: "Course partagée et notifiée" });
+    res.status(200).json({ message: "Course partagée avec numéro" });
 
   } catch (err) {
     console.error(err);
@@ -157,9 +163,7 @@ exports.respondRideShare = async (req, res) => {
       ride.statusPartage = 'accepted'; 
       // Elle reste 'isShared: true' pour garder l'historique de qui l'a envoyée
     } else {
-      // Si refusée, on la supprime carrément de son agenda ? 
-      // Ou on met un statut 'refused' (selon ta préférence).
-      // Ici, on supprime pour ne pas polluer l'agenda.
+      // Si refusée, on la supprime de l'agenda du collègue
       await Ride.findByIdAndDelete(rideId);
       return res.json({ message: "Course refusée et retirée de l'agenda" });
     }
