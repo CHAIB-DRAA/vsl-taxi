@@ -41,11 +41,10 @@ exports.updatePatient = async (req, res) => {
       const { id } = req.params;
       const updates = req.body;
       
-      // On s'assure que c'est bien TON patient (chauffeurId)
       const patient = await Patient.findOneAndUpdate(
         { _id: id, chauffeurId: req.user.id },
         { $set: updates },
-        { new: true } // Renvoie la version modifiée
+        { new: true }
       );
   
       if (!patient) return res.status(404).json({ message: "Patient introuvable" });
