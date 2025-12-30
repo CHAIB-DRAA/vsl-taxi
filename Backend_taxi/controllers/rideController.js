@@ -1,7 +1,9 @@
 const Ride = require('../models/Ride');
-const RideShare = require('../models/RideShare');
 const User = require('../models/User');
-const Contact = require('../models/contact');
+const { Expo } = require('expo-server-sdk'); // <--- IMPORT POUR NOTIFS
+
+// Initialisation du SDK Expo pour les notifs
+const expo = new Expo();
 
 // --- 1. CRÉATION ---
 exports.createRide = async (req, res) => {
@@ -14,8 +16,8 @@ exports.createRide = async (req, res) => {
     const ride = new Ride({
       ...rest,
       date: new Date(date),
-      chauffeurId,
-      status: 'En attente' // Statut par défaut
+      chauffeurId, // C'est toi le propriétaire
+      status: 'En attente'
     });
 
     await ride.save();
@@ -32,71 +34,42 @@ exports.getRides = async (req, res) => {
     const userId = req.user.id;
     const { date } = req.query;
 
-    let dateFilter = {};
+    let filter = { chauffeurId: userId }; // On cherche TES courses
+
+    // Filtre par date si demandé
     if (date) {
       const d = new Date(date);
       const start = new Date(d.setHours(0,0,0,0));
       const end   = new Date(d.setHours(23,59,59,999));
-      dateFilter = { date: { $gte: start, $lte: end } };
+      filter.date = { $gte: start, $lte: end };
     }
 
-    // 1. Mes courses
-    const ownRides = await Ride.find({ chauffeurId: userId, ...dateFilter }).lean();
-
-    // 2. Courses partagées avec moi
-    const shares = await RideShare.find({ toUserId: userId }).lean();
-    const shareIds = shares.map(s => s.rideId);
+    // On récupère tout (les tiennes + celles partagées car elles ont ton chauffeurId maintenant)
+    const rides = await Ride.find(filter).sort({ date: 1 });
     
-    // On récupère les courses partagées (attention au filtre date si appliqué)
-    const sharedRidesRaw = await Ride.find({ _id: { $in: shareIds }, ...dateFilter }).lean();
-
-    // On ajoute les métadonnées de partage
-    const sharedRides = await Promise.all(sharedRidesRaw.map(async (ride) => {
-      const link = shares.find(s => String(s.rideId) === String(ride._id));
-      const fromUser = await User.findById(link.fromUserId).select('fullName email').lean();
-      return {
-        ...ride,
-        isShared: true,
-        sharedBy: link.fromUserId,
-        sharedByName: fromUser?.fullName || fromUser?.email || 'Collègue',
-        statusPartage: link.statusPartage,
-        shareId: link._id
-      };
-    }));
-
-    // Fusion et tri
-    const all = [...ownRides, ...sharedRides].sort((a,b) => new Date(a.date) - new Date(b.date));
-    res.json(all);
+    res.json(rides);
   } catch (err) {
     console.error('Erreur getRides:', err);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 };
 
-// --- 3. MISE À JOUR GÉNÉRIQUE (PATCH) ---
-// C'est cette fonction qui gère le Démarrage, la Fin, et la modification
+// --- 3. MISE À JOUR (PATCH) ---
 exports.updateRide = async (req, res) => {
   try {
     const updates = req.body;
     
-    // Sécurité : On vérifie que c'est bien TA course avant de la modifier
     const ride = await Ride.findOneAndUpdate(
-      { _id: req.params.id, chauffeurId: req.user.id }, // Filtre : ID + Propriétaire
-      { $set: updates }, // Mise à jour
-      { new: true } // Renvoie la version mise à jour
+      { _id: req.params.id, chauffeurId: req.user.id },
+      { $set: updates },
+      { new: true }
     );
 
     if (!ride) {
-      // Si on ne trouve rien, c'est soit l'ID est faux, soit ce n'est pas ta course
-      return res.status(404).json({ message: "Course introuvable ou vous n'êtes pas le chauffeur" });
+      return res.status(404).json({ message: "Course introuvable" });
     }
-
-    // Petit log pour le débug
-    console.log(`Course ${ride._id} mise à jour. Status: ${ride.status}`);
-    
     res.json(ride);
   } catch (err) {
-    console.error("Erreur updateRide:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -112,81 +85,97 @@ exports.deleteRide = async (req, res) => {
   }
 };
 
-// --- 5. PARTAGE ---
+// --- 5. PARTAGE AVEC NOTIFICATION ---
 exports.shareRide = async (req, res) => {
   try {
     const { rideId } = req.params;
-    const { targetUserId, note } = req.body; // <--- On récupère la note ici
+    const { targetUserId, note } = req.body; // On récupère la note
 
+    // 1. Trouver la course originale
     const originalRide = await Ride.findById(rideId);
     if (!originalRide) return res.status(404).json({ message: "Course introuvable" });
 
-    // On crée la copie pour le collègue
+    // 2. Trouver le collègue (pour son token notif)
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) return res.status(404).json({ message: "Collègue introuvable" });
+
+    // 3. Créer la copie pour le collègue
     const newRide = new Ride({
+      // Copie des infos
       patientName: originalRide.patientName,
       startLocation: originalRide.startLocation,
       endLocation: originalRide.endLocation,
       date: originalRide.date,
-      time: originalRide.time,
       type: originalRide.type,
       isRoundTrip: originalRide.isRoundTrip,
       
-      userId: targetUserId, // On l'attribue au collègue
+      // Attribution au collègue
+      chauffeurId: targetUserId, 
       
-      // INFOS DE PARTAGE
+      // Infos de partage
       isShared: true,
-      sharedByName: req.user.fullName, // Ton nom à toi
-      shareNote: note || '' // <--- ON SAUVEGARDE LA NOTE ICI
+      statusPartage: 'pending', // En attente d'acceptation
+      sharedByName: req.user.fullName, // Ton nom
+      shareNote: note || '' // La note
     });
 
     await newRide.save();
-    res.status(200).json({ message: "Course partagée avec succès" });
+
+    // 4. ENVOYER LA NOTIFICATION PUSH
+    if (targetUser.pushToken && Expo.isExpoPushToken(targetUser.pushToken)) {
+      const message = {
+        to: targetUser.pushToken,
+        sound: 'default',
+        title: '🚕 Course reçue !',
+        body: `${req.user.fullName} vous a envoyé une course. Note : ${note ? 'Oui' : 'Non'}`,
+        data: { rideId: newRide._id },
+        badge: 1,
+      };
+
+      // Envoi sans bloquer la réponse
+      expo.sendPushNotificationsAsync([message]).catch(e => console.error("Erreur Push:", e));
+    }
+
+    res.status(200).json({ message: "Course partagée et notifiée" });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
 
+// --- 6. RÉPONSE AU PARTAGE (Accepter/Refuser) ---
 exports.respondRideShare = async (req, res) => {
   try {
-    const { shareId, action } = req.body; // action: 'accepted' ou 'refused'
+    const { rideId, action } = req.body; // action: 'accepted' ou 'refused'
     
-    const share = await RideShare.findById(shareId);
-    if (!share) return res.status(404).json({ message: "Partage introuvable" });
+    // On cherche la course copiée chez le collègue
+    const ride = await Ride.findOne({ _id: rideId, chauffeurId: req.user.id });
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
 
-    if (String(share.toUserId) !== req.user.id) return res.status(403).json({ message: "Non autorisé" });
-
-    const ride = await Ride.findById(share.rideId);
-    
     if (action === 'accepted') {
-      share.statusPartage = 'accepted';
-      // TRANSFERT DE PROPRIÉTÉ
-      ride.chauffeurId = req.user.id; 
-      ride.isShared = true; // Reste marqué comme partagé pour l'historique
+      ride.statusPartage = 'accepted'; 
+      // Elle reste 'isShared: true' pour garder l'historique de qui l'a envoyée
     } else {
-      share.statusPartage = 'refused';
-      // Si refusé, on pourrait remettre isShared à false si c'était le seul partage, 
-      // mais on garde simple pour l'instant.
+      // Si refusée, on la supprime carrément de son agenda ? 
+      // Ou on met un statut 'refused' (selon ta préférence).
+      // Ici, on supprime pour ne pas polluer l'agenda.
+      await Ride.findByIdAndDelete(rideId);
+      return res.json({ message: "Course refusée et retirée de l'agenda" });
     }
 
-    await share.save();
     await ride.save();
-
-    res.json({ message: `Partage ${action}` });
+    res.json({ message: "Course acceptée" });
   } catch (err) {
-    console.error("Erreur respond:", err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
 
-// ... (le reste de tes fonctions)
-
-// --- GESTION FACTURATION (La fonction manquante) ---
+// --- 7. FACTURATION ---
 exports.updateRideFacturation = async (req, res) => {
   try {
     const { statuFacturation } = req.body;
     
-    // On vérifie que le statut est valide
     if (!['Non facturé', 'Facturé'].includes(statuFacturation)) {
       return res.status(400).json({ message: 'Statut invalide' });
     }
@@ -201,7 +190,6 @@ exports.updateRideFacturation = async (req, res) => {
 
     res.json(ride);
   } catch (err) {
-    console.error("Erreur facturation:", err);
     res.status(500).json({ message: err.message });
   }
 };
