@@ -6,6 +6,7 @@ const dotenv = require('dotenv');
 const rideRoutes = require('./routes/rideRoutes');
 const userRoutes = require('./routes/userRoutes');
 const contactRoutes = require('./routes/contactRoutes');
+const docRoutes = require('./routes/docRoutes');
 // Chargement des variables d'environnement
 dotenv.config();
 
@@ -25,7 +26,7 @@ mongoose.connect(process.env.MONGO_URI)
 app.use('/api/rides', rideRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/contacts', contactRoutes); // <- nouveau
-
+app.use('/api/documents', docRoutes);
 // Démarrage du serveur
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
