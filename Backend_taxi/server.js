@@ -7,6 +7,7 @@ const rideRoutes = require('./routes/rideRoutes');
 const userRoutes = require('./routes/userRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const docRoutes = require('./routes/docRoutes');
+const patientRoutes = require('./routes/patientRoutes');
 // Chargement des variables d'environnement
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.use('/api/rides', rideRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/contacts', contactRoutes); // <- nouveau
 app.use('/api/documents', docRoutes);
+app.use('/api/patients', patientRoutes);
 // Démarrage du serveur
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
