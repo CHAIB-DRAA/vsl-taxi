@@ -41,5 +41,22 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 });
+// ... (code existant upload) ...
+
+// Route GET : Récupérer les documents d'un patient
+router.get('/:patientName', async (req, res) => {
+    try {
+      const { patientName } = req.params;
+      
+      // On cherche les documents de ce patient
+      const docs = await Document.find({ patientName: patientName }).sort({ uploadDate: -1 });
+      
+      res.json(docs);
+    } catch (err) {
+      res.status(500).json({ message: "Erreur récupération documents", error: err.message });
+    }
+  });
+  
+
 
 module.exports = router;
