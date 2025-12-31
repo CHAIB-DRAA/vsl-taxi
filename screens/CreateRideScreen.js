@@ -19,8 +19,12 @@ export default function CreateRideScreen({ navigation }) {
   
   // --- GESTION DES DATES (Aller & Retour) ---
   const [date, setDate] = useState(new Date()); // Date Aller
-  const [returnDate, setReturnDate] = useState(new Date()); // <--- NOUVEAU : Date Retour
-  const [dateMode, setDateMode] = useState('start'); // 'start' ou 'return' pour savoir quoi modifier
+  const [returnDate, setReturnDate] = useState(new Date()); // Date Retour
+  
+  // Correction Crash Android : On gère le mode (date vs time)
+  const [dateMode, setDateMode] = useState('start'); // 'start' ou 'return' (Quelle variable on modifie ?)
+  const [pickerMode, setPickerMode] = useState('date'); // 'date' ou 'time' (Quel écran on affiche ?)
+  const [showDatePicker, setShowDatePicker] = useState(false);
   
   const [type, setType] = useState('Aller');
   const [isRoundTrip, setIsRoundTrip] = useState(false);
@@ -34,7 +38,6 @@ export default function CreateRideScreen({ navigation }) {
   // --- MODALS ---
   const [modalVisible, setModalVisible] = useState(false);
   const [newPatient, setNewPatient] = useState({ fullName: '', phone: '', address: '' });
-  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // CHARGEMENT
   useEffect(() => { loadPatients(); }, []);
@@ -78,28 +81,54 @@ export default function CreateRideScreen({ navigation }) {
     } catch (err) { Alert.alert("Erreur", "Problème création"); }
   };
 
-  // --- LOGIQUE DATE PICKER ---
-  const openDatePicker = (mode) => {
-    setDateMode(mode); // On définit si on modifie 'start' ou 'return'
+  // --- LOGIQUE DATE PICKER (CORRIGÉE POUR ANDROID) ---
+  const openDatePicker = (target) => {
+    setDateMode(target); // On cible 'start' ou 'return'
+    
+    if (Platform.OS === 'ios') {
+      setPickerMode('datetime'); // iOS supporte date+heure
+    } else {
+      setPickerMode('date'); // Android doit commencer par la date
+    }
     setShowDatePicker(true);
   };
 
   const onChangeDate = (event, selectedDate) => {
-    setShowDatePicker(Platform.OS === 'ios');
-    if (selectedDate) {
-      if (dateMode === 'start') {
-        setDate(selectedDate);
-        // Si la date aller dépasse la date retour, on avance la date retour
-        if (selectedDate > returnDate) {
-            setReturnDate(selectedDate);
-        }
-      } else {
-        // Mode 'return'
-        if (selectedDate < date) {
-            return Alert.alert("Erreur", "Le retour ne peut pas être avant l'aller !");
-        }
-        setReturnDate(selectedDate);
+    // Si l'utilisateur annule
+    if (event.type === 'dismissed') {
+      setShowDatePicker(false);
+      return;
+    }
+
+    const currentDate = selectedDate || (dateMode === 'start' ? date : returnDate);
+
+    // Sur Android, le picker se ferme après sélection
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+
+    // 1. Sauvegarde de la date/heure choisie
+    if (dateMode === 'start') {
+      setDate(currentDate);
+      // Si la nouvelle date de départ est après le retour, on pousse le retour
+      if (currentDate > returnDate) {
+          setReturnDate(currentDate);
       }
+    } else {
+      // Mode retour
+      if (currentDate < date) {
+        Alert.alert("Attention", "Le retour ne peut pas être avant l'aller.");
+        // On ne met pas à jour pour éviter l'incohérence
+      } else {
+        setReturnDate(currentDate);
+      }
+    }
+
+    // 2. CHAÎNAGE ANDROID : Date -> puis Heure
+    if (Platform.OS === 'android' && pickerMode === 'date') {
+      setPickerMode('time'); // On passe en mode heure
+      // Petit délai pour rouvrir le picker proprement
+      setTimeout(() => setShowDatePicker(true), 100);
     }
   };
 
@@ -115,7 +144,6 @@ export default function CreateRideScreen({ navigation }) {
         startLocation,
         endLocation,
         date: date.toISOString(),
-        // 👇 ON AJOUTE LA DATE DE RETOUR SI C'EST UN ALLER-RETOUR
         returnDate: isRoundTrip ? returnDate.toISOString() : null, 
         type,
         isRoundTrip
@@ -126,7 +154,7 @@ export default function CreateRideScreen({ navigation }) {
       Alert.alert('Succès', 'Course enregistrée.');
       // Reset
       setPatientName(''); setPatientPhone(''); setStartLocation(''); setEndLocation('');
-      setIsRoundTrip(false); // On remet à zéro
+      setIsRoundTrip(false); 
       navigation.navigate('Agenda'); 
 
     } catch (error) { Alert.alert('Erreur', "Echec création."); } 
@@ -199,13 +227,13 @@ export default function CreateRideScreen({ navigation }) {
             </View>
           </TouchableOpacity>
 
-          {/* SWITCH ALLER-RETOUR DÉPLACÉ ICI POUR L'ERGONOMIE */}
+          {/* SWITCH ALLER-RETOUR */}
           <View style={styles.switchRowInside}>
              <Text style={styles.switchLabel}>Ajouter un Retour ?</Text>
              <Switch value={isRoundTrip} onValueChange={setIsRoundTrip} trackColor={{ false: "#767577", true: "#FF6B00" }} />
           </View>
 
-          {/* BOUTON DATE RETOUR (VISIBLE SI SWITCH ACTIVE) */}
+          {/* BOUTON DATE RETOUR */}
           {isRoundTrip && (
             <TouchableOpacity style={[styles.dateBtn, styles.returnBtn]} onPress={() => openDatePicker('return')}>
                 <Ionicons name="calendar" size={20} color="#1976D2" />
@@ -216,14 +244,15 @@ export default function CreateRideScreen({ navigation }) {
             </TouchableOpacity>
           )}
 
-          {/* LE PICKER CACHÉ */}
+          {/* LE PICKER CACHÉ & CONFIGURÉ */}
           {showDatePicker && (
             <DateTimePicker 
                 value={dateMode === 'start' ? date : returnDate} 
-                mode="datetime" 
+                mode={pickerMode} // Dynamique (date puis time sur Android)
+                is24Hour={true}
                 display="default" 
                 onChange={onChangeDate} 
-                minimumDate={dateMode === 'start' ? new Date() : date} // Le retour ne peut pas être avant l'aller
+                minimumDate={dateMode === 'start' ? new Date() : date} 
             />
           )}
         </View>
@@ -232,7 +261,7 @@ export default function CreateRideScreen({ navigation }) {
         <View style={styles.section}>
           <Text style={styles.label}>Type de transport</Text>
           <View style={styles.typeRow}>
-            {['Aller', 'Retour', 'Consultation', 'Hospit','HDJ'].map((t) => (
+            {['Aller', 'Retour', 'Consultation', 'Hospit', 'HDJ'].map((t) => (
               <TouchableOpacity key={t} style={[styles.typeBadge, type === t && styles.typeSelected]} onPress={() => setType(t)}>
                 <Text style={[styles.typeText, type === t && styles.typeTextSelected]}>{t}</Text>
               </TouchableOpacity>
@@ -246,7 +275,7 @@ export default function CreateRideScreen({ navigation }) {
           <Ionicons name="checkmark-circle" size={24} color="#FFF" style={{ marginLeft: 10 }} />
         </TouchableOpacity>
 
-        {/* MODAL PATIENT (IDENTIQUE) */}
+        {/* MODAL PATIENT */}
         <Modal visible={modalVisible} animationType="slide" transparent={true}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
