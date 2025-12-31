@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middleware/authMiddleware'); // Vérifie ce chemin
+const authMiddleware = require('../middleware/auth');
 const { addContact, getContacts, deleteContact, searchUsers } = require('../controllers/contactController');
 
 router.use(authMiddleware); // Protection de toutes les routes
