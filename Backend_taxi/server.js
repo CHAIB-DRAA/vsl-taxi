@@ -34,3 +34,6 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
 	console.log(`🚀 Serveur démarré sur le port ${PORT}`);
 });
+app.get('/ping', (req, res) => {
+	res.status(200).send('Pong! Server is alive 🤖');
+  });
