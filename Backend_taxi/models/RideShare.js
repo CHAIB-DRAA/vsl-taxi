@@ -5,22 +5,25 @@ const rideShareSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Ride', 
     required: true 
-  }, // Course partagée
+  }, // La course originale
   fromUserId: { 
-    type: String, 
+    type: mongoose.Schema.Types.ObjectId, // <--- CHANGÉ (était String)
+    ref: 'User',                           // <--- AJOUTÉ
     required: true 
-  }, // Celui qui partage
+  }, 
   toUserId: { 
-    type: String, 
+    type: mongoose.Schema.Types.ObjectId, // <--- CHANGÉ (était String)
+    ref: 'User',                          // <--- AJOUTÉ
     required: true 
-  }, // Destinataire
+  }, 
+  sharedNote: { type: String }, // <--- AJOUTÉ (Pour stocker le petit message)
   statusPartage: { 
     type: String, 
-    enum: ['pending', 'accepted', 'refused'], // <-- Ajouter refused ici
+    enum: ['pending', 'accepted', 'refused'], 
     default: 'pending' 
-  } // Statut du partage
+  }
 }, {
-  timestamps: true // createdAt et updatedAt automatiques
+  timestamps: true 
 });
 
 module.exports = mongoose.model('RideShare', rideShareSchema);

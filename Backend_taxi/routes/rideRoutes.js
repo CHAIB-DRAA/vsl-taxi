@@ -5,7 +5,6 @@ const authMiddleware = require('../middleware/auth');
 
 // 1. Récupération
 router.get('/', authMiddleware, rideController.getRides);
-
 // 2. Création
 router.post('/', authMiddleware, rideController.createRide);
 
@@ -19,7 +18,7 @@ router.put('/:id', authMiddleware, rideController.updateRide);
 // 4. Suppression
 router.delete('/:id', authMiddleware, rideController.deleteRide);
 // 5. Partage & Réponse
-router.post('/:rideId/share', rideController.shareRide); // 👈 LA ROUTE MANQUANTE
+router.post('/:rideId/share', authMiddleware,rideController.shareRide); // La route de partage
 router.post('/respond', authMiddleware, rideController.respondRideShare);
 router.put('/:id/facturation', authMiddleware, rideController.updateRideFacturation);
 

@@ -34,26 +34,42 @@ exports.createRide = async (req, res) => {
 // --- 2. RÉCUPÉRATION (GET) ---
 exports.getRides = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { date } = req.query;
+    const myId = req.user.id;
 
-    let filter = { chauffeurId: userId }; // On cherche TES courses
+    // A. Récupérer mes courses créées par moi
+    const myRides = await Ride.find({ userId: myId }).lean(); // .lean() rend l'objet modifiable
 
-    // Filtre par date si demandé
-    if (date) {
-      const d = new Date(date);
-      const start = new Date(d.setHours(0,0,0,0));
-      const end   = new Date(d.setHours(23,59,59,999));
-      filter.date = { $gte: start, $lte: end };
-    }
+    // B. Récupérer les courses partagées avec moi
+    const sharedShares = await RideShare.find({ toUserId: myId })
+      .populate('rideId')      // Récupère les détails de la course
+      .populate('fromUserId', 'fullName') // Récupère le nom du collègue
+      .lean();
 
-    // On récupère tout (les tiennes + celles partagées acceptées ou en attente)
-    const rides = await Ride.find(filter).sort({ date: 1 });
-    
-    res.json(rides);
+    // C. Transformer les partages pour qu'ils ressemblent à des courses normales
+    const formattedSharedRides = sharedShares.map(share => {
+      if (!share.rideId) return null; // Sécurité si la course originale a été supprimée
+      
+      return {
+        ...share.rideId, // On prend toutes les infos de la course (date, patient...)
+        _id: share.rideId._id, // On garde l'ID de la course
+        isShared: true, // Marqueur pour le Frontend (couleur différente ?)
+        sharedByName: share.fromUserId ? share.fromUserId.fullName : 'Inconnu',
+        shareStatus: share.statusPartage,
+        shareNote: share.sharedNote
+      };
+    }).filter(r => r !== null);
+
+    // D. Fusionner les deux listes
+    const allRides = [...myRides, ...formattedSharedRides];
+
+    // E. Tri par date (le plus récent en premier ou inversement)
+    allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    res.json(allRides);
+
   } catch (err) {
-    console.error('Erreur getRides:', err);
-    res.status(500).json({ message: 'Erreur serveur' });
+    console.error(err);
+    res.status(500).json({ message: "Erreur récupération courses" });
   }
 };
 
@@ -93,60 +109,31 @@ exports.shareRide = async (req, res) => {
   try {
     const { rideId } = req.params;
     const { targetUserId, note } = req.body;
+    const myId = req.user.id;
 
-    // 1. Trouver la course originale
-    const originalRide = await Ride.findById(rideId);
-    if (!originalRide) return res.status(404).json({ message: "Course introuvable" });
+    // 1. Vérifier si la course existe
+    const ride = await Ride.findOne({ _id: rideId, userId: myId });
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
 
-    // 2. Trouver le collègue (pour son token notif)
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) return res.status(404).json({ message: "Collègue introuvable" });
+    // 2. Vérifier si déjà partagée
+    const existing = await RideShare.findOne({ rideId, toUserId: targetUserId });
+    if (existing) return res.status(400).json({ message: "Déjà partagée avec ce collègue" });
 
-    // 3. Créer la copie pour le collègue
-    const newRide = new Ride({
-      // Copie des infos
-      patientName: originalRide.patientName,
-      // 👇 C'EST ICI QUE LE NUMÉRO EST TRANSMIS AU COLLÈGUE
-      patientPhone: originalRide.patientPhone || '', 
-      
-      startLocation: originalRide.startLocation,
-      endLocation: originalRide.endLocation,
-      date: originalRide.date,
-      type: originalRide.type,
-      isRoundTrip: originalRide.isRoundTrip,
-      
-      // Attribution au collègue
-      chauffeurId: targetUserId, 
-      
-      // Infos de partage
-      isShared: true,
-      statusPartage: 'pending', // En attente d'acceptation
-      sharedByName: req.user.fullName, // Ton nom
-      shareNote: note || '' // La note
+    // 3. Créer le partage
+    const share = new RideShare({
+      rideId,
+      fromUserId: myId,
+      toUserId: targetUserId,
+      sharedNote: note,
+      statusPartage: 'pending' // Ou 'accepted' direct selon ta logique
     });
 
-    await newRide.save();
-
-    // 4. ENVOYER LA NOTIFICATION PUSH
-    if (targetUser.pushToken && Expo.isExpoPushToken(targetUser.pushToken)) {
-      const message = {
-        to: targetUser.pushToken,
-        sound: 'default',
-        title: '🚕 Course reçue !',
-        body: `${req.user.fullName} vous a envoyé une course.`,
-        data: { rideId: newRide._id },
-        badge: 1,
-      };
-
-      // Envoi sans bloquer la réponse
-      expo.sendPushNotificationsAsync([message]).catch(e => console.error("Erreur Push:", e));
-    }
-
-    res.status(200).json({ message: "Course partagée avec numéro" });
+    await share.save();
+    res.json({ message: "Course partagée !" });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Erreur serveur" });
   }
 };
 
