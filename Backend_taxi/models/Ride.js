@@ -10,7 +10,7 @@ const rideSchema = mongoose.Schema({
   startLocation: { type: String, required: true },
   endLocation: { type: String, required: true },
   date: { type: Date, required: true },
-  
+  returnDate: { type: Date },
   // J'ai ajouté 'Ambulance' et 'VSL' pour que ça colle avec tes badges Frontend
   type: { 
     type: String, 
