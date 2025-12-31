@@ -32,25 +32,29 @@ exports.addContact = async (req, res) => {
     const { contactId } = req.body;
     const userId = req.user.id;
 
-    if (userId === contactId) {
-      return res.status(400).json({ message: "Vous ne pouvez pas vous ajouter vous-même." });
+    // 1. On vérifie qu'on ne s'ajoute pas soi-même
+    if (contactId === userId) {
+      return res.status(400).json({ message: "Vous ne pouvez pas vous ajouter." });
     }
 
-    // Vérifier si existe déjà
+    // 2. On vérifie si le contact existe déjà
     const existing = await Contact.findOne({ userId, contactId });
     if (existing) {
       return res.status(400).json({ message: "Ce contact est déjà dans votre liste." });
     }
 
-    const newContact = new Contact({ userId, contactId });
+    // 3. On crée le lien
+    const newContact = new Contact({
+      userId,
+      contactId
+    });
+
     await newContact.save();
-
-    // On peuple les infos pour le renvoyer au front immédiatement
-    await newContact.populate('contactId', 'fullName email');
-
     res.status(201).json(newContact);
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
   }
 };
 

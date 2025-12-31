@@ -5,7 +5,6 @@ const { addContact, getContacts, deleteContact } = require('../controllers/conta
 
 // Ajouter un contact
 router.post('/', authMiddleware, addContact);
-
 // Récupérer mes contacts
 router.get('/', authMiddleware, getContacts);
 
