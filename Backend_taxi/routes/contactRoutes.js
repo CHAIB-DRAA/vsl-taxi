@@ -1,14 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middleware/auth');
-const { addContact, getContacts, deleteContact } = require('../controllers/contactController');
+const authMiddleware = require('../middleware/authMiddleware'); // Vérifie ce chemin
+const { addContact, getContacts, deleteContact, searchUsers } = require('../controllers/contactController');
 
-// Ajouter un contact
-router.post('/', authMiddleware, addContact);
-// Récupérer mes contacts
-router.get('/', authMiddleware, getContacts);
+router.use(authMiddleware); // Protection de toutes les routes
 
-// Supprimer un contact
-router.delete('/:contactId', authMiddleware, deleteContact);
+// 1. Rechercher (DOIT être déclaré avant /:id)
+router.get('/search', searchUsers);
+
+// 2. Ajouter et Lister
+router.post('/', addContact);
+router.get('/', getContacts);
+
+// 3. Supprimer
+router.delete('/:id', deleteContact);
 
 module.exports = router;

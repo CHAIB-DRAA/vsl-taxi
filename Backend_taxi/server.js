@@ -26,9 +26,9 @@ mongoose.connect(process.env.MONGO_URI)
 // Routes
 app.use('/api/rides', rideRoutes);
 app.use('/api/user', userRoutes);
-app.use('/api/contacts', contactRoutes); // <- nouveau
 app.use('/api/documents', docRoutes);
 app.use('/api/patients', patientRoutes);
+app.use('/api/contacts', contactRoutes);
 // Démarrage du serveur
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
