@@ -32,44 +32,58 @@ exports.createRide = async (req, res) => {
 };
 
 // --- 2. RÉCUPÉRATION (GET) ---
+
+
+// ... tes autres fonctions (createRide, shareRide...) ...
+
+// 🚀 FONCTION BLINDÉE : Récupérer TOUTES les courses
 exports.getRides = async (req, res) => {
   try {
     const myId = req.user.id;
+    // console.log("Récupération des courses pour :", myId); // Décommente pour débugger
 
     // A. Récupérer mes courses créées par moi
-    const myRides = await Ride.find({ userId: myId }).lean(); // .lean() rend l'objet modifiable
+    const myRides = await Ride.find({ userId: myId }).lean();
 
     // B. Récupérer les courses partagées avec moi
-    const sharedShares = await RideShare.find({ toUserId: myId })
-      .populate('rideId')      // Récupère les détails de la course
-      .populate('fromUserId', 'fullName') // Récupère le nom du collègue
-      .lean();
+    // On met un try/catch interne pour que si ça plante ici, ça n'empêche pas de voir SES courses
+    let formattedSharedRides = [];
+    try {
+      const sharedShares = await RideShare.find({ toUserId: myId })
+        .populate('rideId')                // Récupère la course
+        .populate('fromUserId', 'fullName') // Récupère le nom du collègue
+        .lean();
 
-    // C. Transformer les partages pour qu'ils ressemblent à des courses normales
-    const formattedSharedRides = sharedShares.map(share => {
-      if (!share.rideId) return null; // Sécurité si la course originale a été supprimée
-      
-      return {
-        ...share.rideId, // On prend toutes les infos de la course (date, patient...)
-        _id: share.rideId._id, // On garde l'ID de la course
-        isShared: true, // Marqueur pour le Frontend (couleur différente ?)
-        sharedByName: share.fromUserId ? share.fromUserId.fullName : 'Inconnu',
-        shareStatus: share.statusPartage,
-        shareNote: share.sharedNote
-      };
-    }).filter(r => r !== null);
+      formattedSharedRides = sharedShares.map(share => {
+        // SÉCURITÉ 1 : Si la course originale a été supprimée, on ignore
+        if (!share.rideId) return null; 
 
-    // D. Fusionner les deux listes
+        return {
+          ...share.rideId,           // Les infos de la course (date, adresses...)
+          _id: share.rideId._id,     // Important : On garde l'ID de la course
+          isShared: true,            // Marqueur pour le Frontend
+          sharedByName: share.fromUserId ? share.fromUserId.fullName : 'Utilisateur Inconnu',
+          shareStatus: share.statusPartage,
+          shareNote: share.sharedNote
+        };
+      }).filter(r => r !== null); // On retire les nulls (courses supprimées)
+
+    } catch (errShare) {
+      console.error("Erreur lecture partages :", errShare.message);
+      // On continue quand même, tant pis pour les partages
+    }
+
+    // C. Fusionner les deux listes
     const allRides = [...myRides, ...formattedSharedRides];
 
-    // E. Tri par date (le plus récent en premier ou inversement)
+    // D. Tri par date
     allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json(allRides);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Erreur récupération courses" });
+    console.error("CRASH CRITIQUE GET RIDES :", err); // Regarde ton terminal serveur !
+    res.status(500).json({ message: "Erreur serveur lors du chargement des courses" });
   }
 };
 
