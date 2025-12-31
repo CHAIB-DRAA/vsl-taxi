@@ -18,9 +18,8 @@ router.put('/:id', authMiddleware, rideController.updateRide);
 
 // 4. Suppression
 router.delete('/:id', authMiddleware, rideController.deleteRide);
-
 // 5. Partage & Réponse
-router.post('/share', authMiddleware, rideController.shareRide);
+router.post('/:rideId/share', rideController.shareRide); // 👈 LA ROUTE MANQUANTE
 router.post('/respond', authMiddleware, rideController.respondRideShare);
 router.put('/:id/facturation', authMiddleware, rideController.updateRideFacturation);
 
