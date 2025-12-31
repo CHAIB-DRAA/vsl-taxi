@@ -129,19 +129,33 @@ export default function AgendaScreen() {
   };
 
   const finalizeShare = async () => {
-    if (!activeRide || !contactToShare) return;
+    // 1. Vérification des données avant envoi
+    if (!activeRide) return Alert.alert("Erreur", "Aucune course sélectionnée");
+    if (!contactToShare || !contactToShare.contactId) return Alert.alert("Erreur", "Contact invalide");
+
+    const targetUserId = contactToShare.contactId._id;
+    const rideId = activeRide._id;
+
+    console.log("Tentative de partage :", { rideId, targetUserId, shareNote });
+
     try {
-      await shareRide(activeRide._id, contactToShare.contactId?._id, shareNote);
+      // 2. Appel API
+      await shareRide(rideId, targetUserId, shareNote);
+      
+      // 3. Succès
       setModals({ ...modals, share: false });
       setContactToShare(null);
       setShareNote('');
-      loadData();
-      Alert.alert('Envoyé', `Course envoyée à ${contactToShare.contactId?.fullName}`);
+      loadData(); // Rafraîchir l'agenda
+      Alert.alert('Succès', `Course envoyée à ${contactToShare.contactId.fullName}`);
+
     } catch (err) { 
-      Alert.alert('Erreur', "Le partage a échoué."); 
+      // 4. Affichage de la VRAIE erreur
+      console.error("Erreur Partage:", err);
+      const message = err.response?.data?.message || "Erreur de connexion au serveur";
+      Alert.alert('Échec du partage', message); 
     }
   };
-
   const handleDelete = async () => {
     try { await deleteRide(activeRide._id); setModals({...modals, options:false}); loadData(); }
     catch(e) { Alert.alert('Erreur', 'Suppression impossible'); }
