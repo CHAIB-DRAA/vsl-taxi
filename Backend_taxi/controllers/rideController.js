@@ -32,58 +32,28 @@ exports.createRide = async (req, res) => {
 };
 
 // --- 2. RÉCUPÉRATION (GET) ---
-
-
-// ... tes autres fonctions (createRide, shareRide...) ...
-
-// 🚀 FONCTION BLINDÉE : Récupérer TOUTES les courses
 exports.getRides = async (req, res) => {
   try {
-    const myId = req.user.id;
-    // console.log("Récupération des courses pour :", myId); // Décommente pour débugger
+    const userId = req.user.id;
+    const { date } = req.query;
 
-    // A. Récupérer mes courses créées par moi
-    const myRides = await Ride.find({ userId: myId }).lean();
+    let filter = { chauffeurId: userId }; // On cherche TES courses
 
-    // B. Récupérer les courses partagées avec moi
-    // On met un try/catch interne pour que si ça plante ici, ça n'empêche pas de voir SES courses
-    let formattedSharedRides = [];
-    try {
-      const sharedShares = await RideShare.find({ toUserId: myId })
-        .populate('rideId')                // Récupère la course
-        .populate('fromUserId', 'fullName') // Récupère le nom du collègue
-        .lean();
-
-      formattedSharedRides = sharedShares.map(share => {
-        // SÉCURITÉ 1 : Si la course originale a été supprimée, on ignore
-        if (!share.rideId) return null; 
-
-        return {
-          ...share.rideId,           // Les infos de la course (date, adresses...)
-          _id: share.rideId._id,     // Important : On garde l'ID de la course
-          isShared: true,            // Marqueur pour le Frontend
-          sharedByName: share.fromUserId ? share.fromUserId.fullName : 'Utilisateur Inconnu',
-          shareStatus: share.statusPartage,
-          shareNote: share.sharedNote
-        };
-      }).filter(r => r !== null); // On retire les nulls (courses supprimées)
-
-    } catch (errShare) {
-      console.error("Erreur lecture partages :", errShare.message);
-      // On continue quand même, tant pis pour les partages
+    // Filtre par date si demandé
+    if (date) {
+      const d = new Date(date);
+      const start = new Date(d.setHours(0,0,0,0));
+      const end   = new Date(d.setHours(23,59,59,999));
+      filter.date = { $gte: start, $lte: end };
     }
 
-    // C. Fusionner les deux listes
-    const allRides = [...myRides, ...formattedSharedRides];
-
-    // D. Tri par date
-    allRides.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-    res.json(allRides);
-
+    // On récupère tout (les tiennes + celles partagées acceptées ou en attente)
+    const rides = await Ride.find(filter).sort({ date: 1 });
+    
+    res.json(rides);
   } catch (err) {
-    console.error("CRASH CRITIQUE GET RIDES :", err); // Regarde ton terminal serveur !
-    res.status(500).json({ message: "Erreur serveur lors du chargement des courses" });
+    console.error('Erreur getRides:', err);
+    res.status(500).json({ message: 'Erreur serveur' });
   }
 };
 
@@ -125,48 +95,28 @@ exports.shareRide = async (req, res) => {
     const { targetUserId, note } = req.body;
     const myId = req.user.id;
 
-    console.log("--- DEBUG PARTAGE ---");
-    console.log("1. ID de la course demandé :", rideId);
-    console.log("2. Mon ID (celui qui clique) :", myId);
+    // 1. Vérifier si la course existe
+    const ride = await Ride.findOne({ _id: rideId, userId: myId });
+    if (!ride) return res.status(404).json({ message: "Course introuvable" });
 
-    // ÉTAPE A : On cherche la course SANS vérifier le propriétaire d'abord
-    const rideToCheck = await Ride.findById(rideId);
-
-    if (!rideToCheck) {
-      console.log("ERREUR : La course n'existe pas du tout dans la base.");
-      return res.status(404).json({ message: "Course inexistante" });
-    }
-
-    console.log("3. Propriétaire réel de la course :", rideToCheck.userId);
-
-    // ÉTAPE B : Comparaison
-    // On convertit en String pour être sûr que la comparaison marche
-    if (String(rideToCheck.userId) !== String(myId)) {
-        console.log("ERREUR : Ce n'est pas votre course !");
-        return res.status(403).json({ message: "Vous ne pouvez partager que VOS courses." });
-    }
-
-    // ÉTAPE C : Vérification doublon partage
+    // 2. Vérifier si déjà partagée
     const existing = await RideShare.findOne({ rideId, toUserId: targetUserId });
-    if (existing) {
-        return res.status(400).json({ message: "Déjà partagée avec ce collègue" });
-    }
+    if (existing) return res.status(400).json({ message: "Déjà partagée avec ce collègue" });
 
-    // ÉTAPE D : Création du partage
+    // 3. Créer le partage
     const share = new RideShare({
       rideId,
       fromUserId: myId,
       toUserId: targetUserId,
       sharedNote: note,
-      statusPartage: 'pending'
+      statusPartage: 'pending' // Ou 'accepted' direct selon ta logique
     });
 
     await share.save();
-    console.log("SUCCÈS : Course partagée !");
     res.json({ message: "Course partagée !" });
 
   } catch (err) {
-    console.error("CRASH SERVEUR :", err);
+    console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
