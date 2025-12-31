@@ -1,123 +1,142 @@
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
-// URL de base de ton backend
-const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
+/**
+ * CONFIGURATION
+ */
+const BASE_URL = 'https://vsl-taxi.onrender.com/api';
+const SESSION_KEY = 'user_session';
 
-// --- Gestion du token ---
-let token = null;
+const api = axios.create({
+  baseURL: BASE_URL,
+  timeout: 40000, 
+  headers: { 'Content-Type': 'application/json' },
+});
 
-// Définir le token manuellement (après login)
-export const setToken = (t) => {
-  token = t;
-};
+/** INTERCEPTEURS (Sécurité & Token) */
+api.interceptors.request.use(
+  async (config) => {
+    try {
+      const sessionData = await SecureStore.getItemAsync(SESSION_KEY);
+      if (sessionData) {
+        const { token } = JSON.parse(sessionData);
+        if (token) config.headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (err) { console.error("🔒 Erreur Token:", err); }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
-// Récupérer le token (variable ou AsyncStorage)
-const getToken = async () => {
-  if (token) return token;
-  const t = await AsyncStorage.getItem('token');
-  if (!t) throw new Error('Token manquant');
-  return t;
-};
-
-// Config Axios avec Authorization
-const getConfig = async () => {
-  const t = await getToken();
-  return { headers: { Authorization: `Bearer ${t}` } };
-};
-
-// ---------------------------
-// CRUD Courses
-// ---------------------------
-
-// Créer une course
-export const createRide = async (ride) => {
-  try {
-    const config = await getConfig();
-    const res = await axios.post(API_URL, ride, config); // POST sur /api/rides
-    return res.data;
-  } catch (err) {
-    console.error('Erreur API createRide:', err.response?.data || err.message);
-    throw err;
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      console.warn("⚠️ Session expirée ou invalide");
+      // Ici tu pourrais ajouter une logique pour déconnecter l'user
+    }
+    return Promise.reject(error);
   }
-};
-// --- Récupérer toutes les courses (propres + partagées) ---
-export const getRides = async (date) => {
-  try {
-    const config = await getConfig();
-    const url = date ? `${API_URL}?date=${date}` : API_URL;
-    const res = await axios.get(url, config);
-    return res.data || [];
-  } catch (err) {
-    console.error('Erreur API getRides:', err.response?.data || err.message);
-    throw err;
-  }
-};
+);
 
-// --- Mettre à jour une course ---
-export const updateRide = async (id, data) => {
-  const config = await getConfig();
-  const res = await axios.patch(`${API_URL}/${id}`, data, config);
-  return res.data;
+// =========================================================
+// 1. AUTHENTIFICATION & NOTIFICATIONS (Nouveau)
+// =========================================================
+
+export const login = (credentials) => api.post('/auth/login', credentials);
+export const register = (userData) => api.post('/auth/register', userData);
+
+// Envoi du Token de notification (Push)
+export const updatePushToken = async (pushToken) => {
+  return api.put('/auth/push-token', { pushToken });
 };
 
-// --- Supprimer une course ---
-export const deleteRide = async (id) => {
-  const config = await getConfig();
-  const res = await axios.delete(`${API_URL}/${id}`, config);
-  return res.data;
-};
-
-// --- Démarrer / Terminer une course ---
-export const startRideById = async (id) => {
-  const config = await getConfig();
-  const res = await axios.post(`${API_URL}/${id}/start`, {}, config);
-  return res.data;
-};
-
-export const finishRideById = async (id, distance) => {
-  if (!distance || isNaN(distance)) throw new Error('Distance invalide');
-  const config = await getConfig();
-  const res = await axios.post(`${API_URL}/${id}/end`, { distance: parseFloat(distance) }, config);
-  return res.data;
-};
-
-// --- Partage de course ---
-export const shareRide = async (rideId, toUserId) => {
-  const config = await getConfig();
-  const res = await axios.post(`${API_URL}/share`, { rideId, toUserId }, config);
-  return res.data;
-};
-
-export const respondToShare = async (shareId, action) => {
-  if (!['accepted', 'declined'].includes(action)) throw new Error('Action invalide');
-  const config = await getConfig();
-  const res = await axios.post(`${API_URL}/share/respond`, { shareId, action }, config);
-  return res.data;
-};
-  
-
-// Mettre à jour le statut d’une course
-export const updateRideStatus = async (id, status) => {
-  const config = await getConfig();
-  const res = await axios.patch(`${API_URL}/${id}`, { status }, config);
-  return res.data;
-};
-
-
+// =========================================================
+// 2. CONTACTS & UTILISATEURS
+// =========================================================
 
 export const getContacts = async () => {
-  try {
-    const token = await AsyncStorage.getItem('token');
-    if (!token) throw new Error('Token manquant');
+  const res = await api.get('/contacts');
+  return res.data;
+};
 
-    const res = await axios.get(API_URL, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+export const searchUsers = async (emailQuery) => {
+  const res = await api.get(`/contacts/search?q=${encodeURIComponent(emailQuery)}`);
+  return res.data;
+};
 
+export const addContact = async (contactId) => {
+  const res = await api.post('/contacts', { contactId });
+  return res.data;
+};
+
+export const deleteContact = (contactId) => api.delete(`/contacts/${contactId}`);
+
+// =========================================================
+// 3. GESTION DES PATIENTS (Nouveau pour RideForm)
+// =========================================================
+
+export const getPatients = async () => {
+  const res = await api.get('/patients');
+  return res.data;
+};
+
+export const createPatient = async (patientData) => {
+  // patientData = { fullName, address, phone }
+  const res = await api.post('/patients', patientData);
+  return res.data;
+};
+
+// =========================================================
+// 4. GESTION DES COURSES (CRUD)
+// =========================================================
+
+export const getRides = async (date) => {
+  const url = date ? `/rides?date=${date}` : '/rides';
+  const res = await api.get(url);
+  return res.data || [];
+};
+
+export const createRide = async (rideData) => {
+  const res = await api.post('/rides', rideData);
+  return res.data;
+};
+
+export const updateRide = async (id, data) => {
+  const res = await api.patch(`/rides/${id}`, data);
+  return res.data;
+};
+
+export const deleteRide = async (id) => {
+  const res = await api.delete(`/rides/${id}`);
+  return res.data;
+};
+
+// =========================================================
+// 5. PARTAGE (RÉSEAU)
+// =========================================================
+
+export const shareRide = async (rideId, contactId, note = '') => {
+  const response = await api.post(`/rides/${rideId}/share`, { 
+    targetUserId: contactId,
+    note: note 
+  });
+  return response.data;
+};
+
+// Correction : On utilise rideId, pas shareId, selon ton dernier contrôleur Backend
+export const respondToShare = (rideId, action) => 
+  api.post('/rides/share/respond', { rideId, action });
+
+
+  export const updatePatient = async (id, data) => {
+    const res = await api.put(`/patients/${id}`, data);
     return res.data;
-  } catch (err) {
-    console.error('Erreur getContacts:', err.response?.data || err.message);
-    return [];
-  }
-};  
+  };
+  
+  export const deletePatient = async (id) => {
+    const res = await api.delete(`/patients/${id}`);
+    return res.data;
+  };
+
+export default api;

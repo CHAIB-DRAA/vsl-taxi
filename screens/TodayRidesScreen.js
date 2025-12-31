@@ -1,3 +1,4 @@
+// TodayRidesScreen.js
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -13,15 +14,15 @@ import {
   TextInput,
   Modal,
 } from 'react-native';
-import { getRides, startRideById, finishRideById } from '../services/api';
 import { Swipeable } from 'react-native-gesture-handler';
+import { getRides, startRideById, finishRideById } from '../services/api';
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental &&
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const TodayRidesScreen = () => {
+export default function TodayRidesScreen() {
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -32,43 +33,39 @@ const TodayRidesScreen = () => {
     try {
       setLoading(true);
       const data = await getRides();
-  
-      const today = new Date();
-      // Courses visibles aujourd'hui
+      const today = new Date().toDateString();
+
       const visibleRides = data.filter(ride => {
-        const rideDate = new Date(ride.date);
-        const isToday = rideDate.toDateString() === today.toDateString();
-        // Affiche soit : propre, soit partagé accepté
+        const rideDate = new Date(ride.date).toDateString();
+        const isToday = rideDate === today;
         const isOwn = !ride.isShared;
         const isSharedAccepted = ride.isShared && ride.statusPartage === 'accepted';
         return isToday && (isOwn || isSharedAccepted);
       }).sort((a, b) => (!a.startTime ? -1 : 0));
-  
+
       setRides(visibleRides);
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
       Alert.alert('Erreur', 'Impossible de récupérer les courses.');
     } finally {
       setLoading(false);
     }
   };
-  
-  
 
   useEffect(() => { fetchRides(); }, []);
 
-  const handleStartRide = async (id) => {
+  const handleStartRide = async id => {
     try {
       await startRideById(id);
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       fetchRides();
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
       Alert.alert('Erreur', 'Impossible de démarrer la course.');
     }
   };
 
-  const handleFinishRide = (id) => {
+  const handleFinishRide = id => {
     setCurrentRideId(id);
     setDistance('');
     setModalVisible(true);
@@ -80,7 +77,6 @@ const TodayRidesScreen = () => {
       Alert.alert('Erreur', 'Veuillez entrer une distance valide.');
       return;
     }
-
     try {
       await finishRideById(currentRideId, parsedDistance);
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -88,14 +84,14 @@ const TodayRidesScreen = () => {
       setCurrentRideId(null);
       setDistance('');
       fetchRides();
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
       Alert.alert('Erreur', 'Impossible de terminer la course.');
     }
   };
 
-  const renderRightActions = (item) => {
-    if (!item.startTime || item.endTime) return null; 
+  const renderRightActions = item => {
+    if (!item.startTime || item.endTime) return null;
     return (
       <TouchableOpacity
         style={styles.swipeButton}
@@ -111,7 +107,7 @@ const TodayRidesScreen = () => {
     let buttonLabel = 'Démarrer';
     let buttonAction = () => handleStartRide(item._id);
     let cardBackground = '#e3f2fd';
-    let buttonColor = '#007bff'; // couleur btn principale
+    let buttonColor = '#007bff';
     let textColor = '#000';
 
     if (item.startTime && !item.endTime) {
@@ -159,7 +155,7 @@ const TodayRidesScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#007bff" />
+        <ActivityIndicator size="large" color="#FF6B00" />
       </View>
     );
   }
@@ -168,7 +164,7 @@ const TodayRidesScreen = () => {
     <View style={{ flex: 1 }}>
       <FlatList
         data={rides}
-        keyExtractor={(item) => item._id}
+        keyExtractor={item => item._id}
         renderItem={renderItem}
         contentContainerStyle={styles.container}
         ListEmptyComponent={() => (
@@ -194,10 +190,16 @@ const TodayRidesScreen = () => {
               style={styles.input}
             />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 }}>
-              <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.button, { backgroundColor: '#9E9E9E', flex: 0.45 }]}>
+              <TouchableOpacity
+                onPress={() => setModalVisible(false)}
+                style={[styles.button, { backgroundColor: '#9E9E9E', flex: 0.45 }]}
+              >
                 <Text style={styles.buttonText}>Annuler</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={submitDistance} style={[styles.button, { backgroundColor: '#4CAF50', flex: 0.45 }]}>
+              <TouchableOpacity
+                onPress={submitDistance}
+                style={[styles.button, { backgroundColor: '#4CAF50', flex: 0.45 }]}
+              >
                 <Text style={styles.buttonText}>Valider</Text>
               </TouchableOpacity>
             </View>
@@ -206,24 +208,22 @@ const TodayRidesScreen = () => {
       </Modal>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: { padding: 10, paddingBottom: 80 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  card: { padding: 15, marginVertical: 8, borderRadius: 8, elevation: 3, position: 'relative' },
+  card: { padding: 15, marginVertical: 8, borderRadius: 12, elevation: 3, position: 'relative', shadowColor: "#000", shadowOffset: { width:0, height:2 }, shadowOpacity:0.1, shadowRadius:4 },
   title: { fontWeight: 'bold', fontSize: 16, marginBottom: 4 },
-  button: { marginTop: 10, padding: 12, borderRadius: 8, alignItems: 'center' },
+  button: { marginTop: 10, padding: 12, borderRadius: 12, alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  floatingButton: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#007bff', padding: 15, borderRadius: 50, elevation: 5 },
+  floatingButton: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#FF6B00', padding: 15, borderRadius: 50, elevation: 5 },
   floatingButtonText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
-  finishedBadge: { position: 'absolute', top: 10, right: 10, backgroundColor: '#4CAF50', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, zIndex: 10 },
+  finishedBadge: { position: 'absolute', top: 10, right: 10, backgroundColor: '#4CAF50', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, zIndex: 10 },
   finishedText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   swipeButton: { backgroundColor: '#FF9800', justifyContent: 'center', alignItems: 'center', width: 90, marginVertical: 8, borderRadius: 8 },
   swipeButtonText: { color: '#fff', fontWeight: 'bold' },
   modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
   modalContainer: { width: '80%', backgroundColor: '#fff', padding: 20, borderRadius: 12 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 10 },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 12, padding: 12, marginBottom: 10 },
 });
-
-export default TodayRidesScreen;

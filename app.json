@@ -29,9 +29,21 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "eas": {
-        "projectId": "9f89c996-4932-4444-b59c-cc71cc54366d"
-      }
-    }
+     
+        "eas": {
+          "projectId": "012dea00-6cf7-4645-b3b4-4c07ba5168cd"
+        }
+    
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "L'application a besoin d'accéder à vos photos pour scanner les documents.",
+          "cameraPermission": "L'application a besoin d'accéder à la caméra pour scanner les bons de transport."
+        }
+      ]
+    ]
   }
 }

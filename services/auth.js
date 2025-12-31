@@ -8,6 +8,8 @@ export const signUp = async (email, fullName, password) => {
 export const signIn = async (email, password) => {
   const res = await axios.post(`${API_URL}/signin`, { email, password });
   return res.data.user; // renvoie user pour session
+  token: res.data.token    // le token JWT renvoyé par le backend
+
 };
 
 export const getCurrentSession = async () => {

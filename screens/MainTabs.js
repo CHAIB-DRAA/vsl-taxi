@@ -1,96 +1,54 @@
-// screens/MainTabs.js
-import React, { useEffect, useState } from 'react';
-import { TouchableOpacity } from 'react-native';
+import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
-import { useIsFocused } from '@react-navigation/native';
+import { TouchableOpacity } from 'react-native';
 
-// Screens internes
-import CreateRideScreen from './CreateRideScreen';
+import HomeScreen from './HomeTabs';
 import AgendaScreen from './AgendaScreen';
-import HistoryScreen from './HistoryScreen';
-import TodayRidesScreen from './TodayRidesScreen';
-import SettingsScreen from './SettingsScreen';
+import CreateRideScreen from './CreateRideScreen';
+import HistoryScreen from './HistoryScreen'; // <--- NOUVEAU
 
 const Tab = createBottomTabNavigator();
-const API_URL = 'https://vsl-taxi.onrender.com/api/rides';
 
-export default function MainTabs({ navigation, todayRidesCount }) {
-  const [pendingSharedCount, setPendingSharedCount] = useState(0);
-  const isFocused = useIsFocused();
-
-  const fetchPendingShared = async () => {
-    console.info('refresh'); // console.info du polling
-    try {
-      const res = await axios.get(API_URL);
-      const rides = res.data || [];
-      console.log('Nombre total de courses:', rides.length);
-
-      const pending = rides.filter(
-        r => r.isShared && r.statusPartage === 'pending'
-      );
-      console.log('Courses pending partagées:', pending.length);
-
-      setPendingSharedCount(pending.length);
-    } catch (err) {
-      console.error('Erreur fetchPendingShared:', err.message);
-    }
-  };
-
-  useEffect(() => {
-    if (!isFocused) return;
-
-    console.log('MainTabs focus détecté, fetchPendingShared exécuté');
-    fetchPendingShared();
-
-    const interval = setInterval(() => {
-      console.log('Polling toutes les 5 secondes');
-      fetchPendingShared();
-    }, 5000);
-
-    return () => {
-      console.log('MainTabs blur ou unmount, arrêt du polling');
-      clearInterval(interval);
-    };
-  }, [isFocused]);
-
+export default function MainTabs({ navigation }) {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        tabBarIcon: ({ color, size }) => {
-          const icons = {
-            Créer: 'add-circle-outline',
-            Agenda: 'calendar-outline',
-            Historique: 'list-outline',
-            AujourdHui: 'today-outline',
-          };
-          return <Ionicons name={icons[route.name]} size={size} color={color} />;
+        tabBarStyle: {
+          backgroundColor: '#FFF', borderTopWidth: 0, elevation: 10,
+          shadowOpacity: 0.1, height: 60, paddingBottom: 10,
         },
-        tabBarActiveTintColor: '#007bff',
-        tabBarInactiveTintColor: 'gray',
+        tabBarActiveTintColor: '#FF6B00',
+        tabBarInactiveTintColor: '#999',
+        tabBarLabelStyle: { fontWeight: '600', fontSize: 10 },
+        
+        tabBarIcon: ({ color, size, focused }) => {
+          let iconName;
+
+          if (route.name === 'Accueil') iconName = focused ? 'home' : 'home-outline';
+          else if (route.name === 'Agenda') iconName = focused ? 'calendar' : 'calendar-outline';
+          else if (route.name === 'Créer') {
+            iconName = focused ? 'add-circle' : 'add-circle-outline';
+            return <Ionicons name={iconName} size={32} color={color} style={{ marginTop: -5 }} />;
+          } 
+          else if (route.name === 'Historique') iconName = focused ? 'file-tray-full' : 'file-tray-full-outline'; // Icône dossier
+
+          return <Ionicons name={iconName} size={24} color={color} />;
+        },
         headerRight: () => (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
-            style={{ marginRight: 15 }}
-          >
-            <Ionicons name="person-circle-outline" size={30} color="#007bff" />
+          <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={{ marginRight: 20 }}>
+            <Ionicons name="settings-outline" size={24} color="#333" />
           </TouchableOpacity>
         ),
       })}
     >
-      <Tab.Screen name="Créer" component={CreateRideScreen} />
-      <Tab.Screen
-        name="AujourdHui"
-        component={TodayRidesScreen}
-        options={{ tabBarBadge: todayRidesCount || null }}
-      />
-      <Tab.Screen name="Agenda" component={AgendaScreen} />
-      <Tab.Screen
-        name="Historique"
-        component={HistoryScreen}
-        options={{ tabBarBadge: pendingSharedCount || null }}
-      />
+      <Tab.Screen name="Accueil" component={HomeScreen} options={{ headerShown: false }} />
+      <Tab.Screen name="Agenda" component={AgendaScreen} options={{ title: 'Mon Planning' }} />
+      <Tab.Screen name="Créer" component={CreateRideScreen} options={{ title: 'Nouvelle Course' }} />
+      
+      {/* L'Onglet Historique remplace Collègues ici pour l'accès rapide */}
+      <Tab.Screen name="Historique" component={HistoryScreen} options={{ title: 'Comptabilité' }} />
+      
     </Tab.Navigator>
   );
 }

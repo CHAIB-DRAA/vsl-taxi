@@ -1,176 +1,169 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView 
 } from 'react-native';
-import { getContacts, addContact, deleteContact, searchUsers } from '../services/contactService';
+import { Ionicons } from '@expo/vector-icons';
+import api from '../services/api'; // Ton instance axios configurée
 
-export default function ContactsScreen() {
-  const [contacts, setContacts] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [search, setSearch] = useState('');
-  const [loadingContacts, setLoadingContacts] = useState(true);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+export default function ContactScreen({ navigation }) {
+  const [contacts, setContacts] = useState([]); // Mes amis
+  const [searchResults, setSearchResults] = useState([]); // Résultats de recherche
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('list'); // 'list' ou 'search'
 
-  // Charger contacts
-  const fetchContacts = async () => {
+  // 1. Charger mes contacts
+  const loadContacts = useCallback(async () => {
     try {
-      setLoadingContacts(true);
-      const data = await getContacts();
-      setContacts(data);
+      setLoading(true);
+      const res = await api.get('/contacts');
+      setContacts(res.data);
     } catch (err) {
-      console.error('❌ Erreur getContacts:', err.response?.data || err.message);
-      Alert.alert('Erreur', 'Impossible de charger les contacts.');
+      console.error("Erreur contacts:", err);
     } finally {
-      setLoadingContacts(false);
+      setLoading(false);
     }
-  };
-
-  // Vérifier si le texte est un email valide partiel
-  const isEmailFormat = (text) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{0,}$/; // ex: example@example.
-    return emailRegex.test(text);
-  };
-
-  // Rechercher utilisateurs seulement si le texte ressemble à un email
-  const fetchUsers = async (query = '') => {
-    if (!query || !isEmailFormat(query)) {
-      setUsers([]);
-      return;
-    }
-    try {
-      setLoadingUsers(true);
-      const data = await searchUsers(query);
-      setUsers(data);
-    } catch (err) {
-      console.error('❌ Erreur searchUsers:', err.response?.data || err.message);
-      Alert.alert('Erreur', 'Impossible de charger les utilisateurs.');
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
-
-  const handleSearch = (text) => {
-    setSearch(text);
-    fetchUsers(text);
-  };
-
-  // Ajouter un contact
-  const handleAddContact = async (contactId) => {
-    try {
-      await addContact(contactId);
-      Alert.alert('Succès', 'Contact ajouté !');
-      fetchContacts();
-      setSearch('');
-      setUsers([]);
-    } catch (err) {
-      console.error('❌ Erreur addContact:', err.response?.data || err.message);
-      Alert.alert('Erreur', err.response?.data?.error || 'Impossible d’ajouter le contact.');
-    }
-  };
-
-  // Supprimer un contact
-  const handleDeleteContact = async (contactId) => {
-    try {
-      await deleteContact(contactId);
-      Alert.alert('Succès', 'Contact supprimé !');
-      fetchContacts();
-    } catch (err) {
-      console.error('❌ Erreur deleteContact:', err.response?.data || err.message);
-      Alert.alert('Erreur', err.response?.data?.error || 'Impossible de supprimer le contact.');
-    }
-  };
-
-  // Initial load des contacts seulement
-  useEffect(() => {
-    fetchContacts();
   }, []);
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Mes contacts</Text>
+  useEffect(() => { loadContacts(); }, [loadContacts]);
 
-      {loadingContacts ? (
-        <ActivityIndicator size="large" color="#4CAF50" />
-      ) : (
-        <FlatList
-          data={contacts}
-          keyExtractor={(item) => item._id}
-          ListEmptyComponent={<Text>Aucun contact ajouté.</Text>}
-          renderItem={({ item }) => (
-            <View style={styles.contactItem}>
-              <Text>{item.fullName || item.email}</Text>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => handleDeleteContact(item.contactId._id)}
-              >
-                <Text style={styles.deleteText}>Supprimer</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        />
-      )}
+  // 2. Rechercher des utilisateurs (pour en ajouter)
+  const handleSearch = async () => {
+    if (searchQuery.length < 2) return;
+    try {
+      setLoading(true);
+      const res = await api.get(`/contacts/search?q=${searchQuery}`);
+      setSearchResults(res.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      <Text style={[styles.header, { marginTop: 20 }]}>Ajouter un contact</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Rechercher par email (ex: example@example.)"
-        value={search}
-        onChangeText={handleSearch}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
+  // 3. Ajouter un contact
+  const addContact = async (userId) => {
+    try {
+      await api.post('/contacts', { contactId: userId });
+      Alert.alert("Succès", "Collègue ajouté !");
+      setSearchQuery('');
+      setSearchResults([]);
+      setActiveTab('list');
+      loadContacts();
+    } catch (err) {
+      Alert.alert("Erreur", err.response?.data?.message || "Impossible d'ajouter");
+    }
+  };
 
-      {loadingUsers && <ActivityIndicator size="small" color="#4CAF50" />}
+  // 4. Supprimer un contact
+  const removeContact = async (id) => {
+    try {
+      await api.delete(`/contacts/${id}`);
+      loadContacts();
+    } catch (err) {
+      Alert.alert("Erreur", "Suppression impossible");
+    }
+  };
+
+  const renderItem = ({ item, isSearch }) => (
+    <View style={styles.card}>
+      <View style={styles.avatarPlaceholder}>
+        <Text style={styles.avatarText}>
+          {isSearch ? item.fullName?.charAt(0) : item.contactId?.fullName?.charAt(0)}
+        </Text>
+      </View>
+      <View style={{ flex: 1, marginLeft: 15 }}>
+        <Text style={styles.name}>
+          {isSearch ? item.fullName : item.contactId?.fullName}
+        </Text>
+        <Text style={styles.email}>
+          {isSearch ? item.email : item.contactId?.email}
+        </Text>
+      </View>
       
-      <FlatList
-        data={users}
-        keyExtractor={(item) => item._id}
-        ListEmptyComponent={!search ? null : <Text>Aucun utilisateur trouvé.</Text>}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => handleAddContact(item._id)}
-          >
-            <Text style={styles.addText}>{item.fullName || item.email}</Text>
-          </TouchableOpacity>
-        )}
-      />
+      {isSearch ? (
+        <TouchableOpacity style={styles.addBtn} onPress={() => addContact(item._id)}>
+          <Ionicons name="person-add" size={20} color="#FFF" />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity style={styles.delBtn} onPress={() => removeContact(item._id)}>
+          <Ionicons name="trash-outline" size={20} color="#D32F2F" />
+        </TouchableOpacity>
+      )}
     </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* TABS HEADER */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'list' && styles.activeTab]} 
+          onPress={() => setActiveTab('list')}
+        >
+          <Text style={[styles.tabText, activeTab === 'list' && styles.activeTabText]}>Mes Collègues</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'search' && styles.activeTab]} 
+          onPress={() => setActiveTab('search')}
+        >
+          <Text style={[styles.tabText, activeTab === 'search' && styles.activeTabText]}>Ajouter</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.content}>
+        {activeTab === 'search' && (
+          <View style={styles.searchBar}>
+            <TextInput 
+              style={styles.input} 
+              placeholder="Rechercher nom ou email..." 
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearch}
+            />
+            <TouchableOpacity onPress={handleSearch} style={styles.searchBtnIcon}>
+              <Ionicons name="search" size={24} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {loading ? (
+          <ActivityIndicator color="#FF6B00" style={{marginTop: 50}} />
+        ) : (
+          <FlatList 
+            data={activeTab === 'list' ? contacts : searchResults}
+            keyExtractor={item => item._id}
+            renderItem={({ item }) => renderItem({ item, isSearch: activeTab === 'search' })}
+            contentContainerStyle={{ padding: 15 }}
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>
+                {activeTab === 'list' ? "Aucun collègue enregistré." : "Aucun résultat."}
+              </Text>
+            }
+          />
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 15, backgroundColor: '#FFF' },
-  header: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
-  contactItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#F5F5F5',
-    padding: 10,
-    marginBottom: 8,
-    borderRadius: 8,
-  },
-  deleteButton: { backgroundColor: '#FF5252', padding: 5, borderRadius: 5 },
-  deleteText: { color: '#FFF', fontWeight: 'bold' },
-  input: {
-    borderWidth: 1,
-    borderColor: '#CCC',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 10,
-  },
-  addButton: {
-    backgroundColor: '#4CAF50',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  addText: { color: '#FFF', fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  tabContainer: { flexDirection: 'row', backgroundColor: '#FFF', padding: 5, margin: 15, borderRadius: 10, elevation: 2 },
+  tab: { flex: 1, padding: 12, alignItems: 'center', borderRadius: 8 },
+  activeTab: { backgroundColor: '#FF6B00' },
+  tabText: { fontWeight: 'bold', color: '#666' },
+  activeTabText: { color: '#FFF' },
+  content: { flex: 1 },
+  searchBar: { flexDirection: 'row', marginHorizontal: 15, marginBottom: 10 },
+  input: { flex: 1, backgroundColor: '#FFF', padding: 12, borderTopLeftRadius: 10, borderBottomLeftRadius: 10, elevation: 1 },
+  searchBtnIcon: { backgroundColor: '#333', justifyContent: 'center', padding: 12, borderTopRightRadius: 10, borderBottomRightRadius: 10 },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 15, marginBottom: 10, borderRadius: 12, elevation: 1 },
+  avatarPlaceholder: { width: 45, height: 45, borderRadius: 25, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center' },
+  avatarText: { fontSize: 20, fontWeight: 'bold', color: '#EF6C00' },
+  name: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  email: { fontSize: 12, color: '#888' },
+  addBtn: { backgroundColor: '#4CAF50', padding: 10, borderRadius: 20 },
+  delBtn: { padding: 10 },
+  emptyText: { textAlign: 'center', marginTop: 30, color: '#999' }
 });

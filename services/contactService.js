@@ -1,40 +1,34 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://vsl-taxi.onrender.com/api/contacts';
-const USERS_URL = 'https://vsl-taxi.onrender.com/api/user/search';
+const API_BASE = 'https://vsl-taxi.onrender.com/api';
 
-// Récupérer config Axios avec token
 const getConfig = async () => {
   const token = await AsyncStorage.getItem('token');
   if (!token) throw new Error('Token manquant');
   return { headers: { Authorization: `Bearer ${token}` } };
 };
 
-// --- Contacts ---
 export const getContacts = async () => {
   const config = await getConfig();
-  const res = await axios.get(API_URL, config);
+  const res = await axios.get(`${API_BASE}/contacts`, config);
   return res.data;
 };
 
 export const addContact = async (contactId) => {
   const config = await getConfig();
-  const res = await axios.post(API_URL, { contactId }, config);
+  const res = await axios.post(`${API_BASE}/contacts`, { contactId }, config);
   return res.data;
 };
 
-export const deleteContact = async (contactId) => {
+export const deleteContact = async (id) => {
   const config = await getConfig();
-  const res = await axios.delete(`${API_URL}/${contactId}`, config);
+  const res = await axios.delete(`${API_BASE}/contacts/${id}`, config);
   return res.data;
 };
 
-// --- Utilisateurs (recherche) ---
-// --- Utilisateurs (recherche) ---
 export const searchUsers = async (query = '') => {
   const config = await getConfig();
-  const url = `https://vsl-taxi.onrender.com/api/user/search${query ? `?q=${encodeURIComponent(query)}` : ''}`;
-  const res = await axios.get(url, config);
+  const res = await axios.get(`${API_BASE}/user/search?q=${encodeURIComponent(query)}`, config);
   return res.data;
 };
