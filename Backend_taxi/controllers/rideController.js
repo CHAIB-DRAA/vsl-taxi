@@ -111,28 +111,48 @@ exports.shareRide = async (req, res) => {
     const { targetUserId, note } = req.body;
     const myId = req.user.id;
 
-    // 1. Vérifier si la course existe
-    const ride = await Ride.findOne({ _id: rideId, userId: myId });
-    if (!ride) return res.status(404).json({ message: "Course introuvable" });
+    console.log("--- DEBUG PARTAGE ---");
+    console.log("1. ID de la course demandé :", rideId);
+    console.log("2. Mon ID (celui qui clique) :", myId);
 
-    // 2. Vérifier si déjà partagée
+    // ÉTAPE A : On cherche la course SANS vérifier le propriétaire d'abord
+    const rideToCheck = await Ride.findById(rideId);
+
+    if (!rideToCheck) {
+      console.log("ERREUR : La course n'existe pas du tout dans la base.");
+      return res.status(404).json({ message: "Course inexistante" });
+    }
+
+    console.log("3. Propriétaire réel de la course :", rideToCheck.userId);
+
+    // ÉTAPE B : Comparaison
+    // On convertit en String pour être sûr que la comparaison marche
+    if (String(rideToCheck.userId) !== String(myId)) {
+        console.log("ERREUR : Ce n'est pas votre course !");
+        return res.status(403).json({ message: "Vous ne pouvez partager que VOS courses." });
+    }
+
+    // ÉTAPE C : Vérification doublon partage
     const existing = await RideShare.findOne({ rideId, toUserId: targetUserId });
-    if (existing) return res.status(400).json({ message: "Déjà partagée avec ce collègue" });
+    if (existing) {
+        return res.status(400).json({ message: "Déjà partagée avec ce collègue" });
+    }
 
-    // 3. Créer le partage
+    // ÉTAPE D : Création du partage
     const share = new RideShare({
       rideId,
       fromUserId: myId,
       toUserId: targetUserId,
       sharedNote: note,
-      statusPartage: 'pending' // Ou 'accepted' direct selon ta logique
+      statusPartage: 'pending'
     });
 
     await share.save();
+    console.log("SUCCÈS : Course partagée !");
     res.json({ message: "Course partagée !" });
 
   } catch (err) {
-    console.error(err);
+    console.error("CRASH SERVEUR :", err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
