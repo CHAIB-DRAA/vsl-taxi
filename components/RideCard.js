@@ -16,8 +16,16 @@ const typeColors = {
 export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
   const isFinished = !!ride.endTime;
   const isStarted = !!ride.startTime && !ride.endTime;
-  const isIncomingShare = ride.isShared && ride.statusPartage === 'pending';
-  const hasNote = ride.isShared && ride.shareNote && ride.shareNote.length > 0;
+  
+  // LOGIQUE CRITIQUE : Détecter une invitation en attente
+  const isIncomingShare = ride.isShared && ride.statusPartage === 'pending'; // Supposons que 'statusPartage' vient du back
+  // Si ton back renvoie 'shareStatus' (comme dans mon code précédent), utilise ride.shareStatus
+  // Je mets les deux pour la sécurité :
+  const pendingStatus = ride.shareStatus === 'pending' || ride.statusPartage === 'pending';
+  const showResponseButtons = ride.isShared && pendingStatus;
+
+  const hasNote = ride.isShared && (ride.shareNote || ride.sharedNote) && (ride.shareNote?.length > 0 || ride.sharedNote?.length > 0);
+  const noteContent = ride.shareNote || ride.sharedNote;
   
   // Fonction GPS
   const openGPS = (address) => {
@@ -39,11 +47,11 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
     <TouchableOpacity 
       activeOpacity={0.9}
       onPress={() => !isFinished && onPress && onPress(ride)}
-      disabled={isIncomingShare}
+      disabled={showResponseButtons} // On désactive le clic global si on doit répondre
       style={[
         styles.card, 
         isFinished && styles.cardFinished,
-        isIncomingShare && styles.cardIncoming,
+        showResponseButtons && styles.cardIncoming, // Style jaune si invitation
         isStarted && styles.cardActive 
       ]}
     >
@@ -68,14 +76,16 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         <View style={{marginBottom: 10}}>
           <View style={styles.sharedBadge}>
             <Ionicons name="arrow-undo" size={12} color="#EF6C00" />
-            <Text style={styles.sharedText}>Reçu de {ride.sharedByName || "un collègue"}</Text>
+            <Text style={styles.sharedText}>
+               {showResponseButtons ? "Invitation Reçue" : `Partagé par ${ride.sharedByName || "un collègue"}`}
+            </Text>
           </View>
           {hasNote && (
             <View style={styles.noteContainer}>
               <Ionicons name="warning" size={18} color="#D84315" style={{marginTop: 2}} />
               <View style={{marginLeft: 10, flex: 1}}>
                 <Text style={styles.noteLabel}>NOTE :</Text>
-                <Text style={styles.noteText}>"{ride.shareNote}"</Text>
+                <Text style={styles.noteText}>"{noteContent}"</Text>
               </View>
             </View>
           )}
@@ -86,8 +96,6 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
       <View style={styles.patientRow}>
         <Text style={styles.patientName} numberOfLines={1}>{ride.patientName}</Text>
         
-        {/* MODIFICATION ICI : J'ai enlevé la condition pour que tu puisses voir le bouton */}
-        {/* Le bouton s'affiche toujours, mais s'il n'y a pas de numéro, il est gris */}
         <TouchableOpacity 
           style={[styles.callBtn, !ride.patientPhone && { backgroundColor: '#CCC' }]} 
           onPress={callPatient}
@@ -112,8 +120,8 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </TouchableOpacity>
       </View>
 
-      {/* 5. ACTIONS */}
-      {!isIncomingShare && !isFinished && onStatusChange && (
+      {/* 5. ACTIONS (Démarrer / Terminer) */}
+      {!showResponseButtons && !isFinished && onStatusChange && (
         <View style={styles.actionZone}>
           {!isStarted ? (
             <TouchableOpacity style={[styles.statusBtn, styles.btnStart]} onPress={() => onStatusChange(ride, 'start')}>
@@ -129,21 +137,22 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </View>
       )}
 
-      {/* 6. RÉPONSE PARTAGE */}
-      {isIncomingShare && (
+      {/* 6. RÉPONSE PARTAGE (Accepter / Refuser) */}
+      {showResponseButtons && (
         <View style={styles.footer}>
-           <Text style={styles.shareLabel}>Demande reçue :</Text>
-           <TouchableOpacity style={[styles.btn, styles.btnAccept]} onPress={() => onRespond(ride._id, 'accepted')}>
+           <Text style={styles.shareLabel}>Répondre :</Text>
+           {/* Adaptation ici : on passe l'objet 'ride' entier */}
+           <TouchableOpacity style={[styles.btn, styles.btnAccept]} onPress={() => onRespond(ride, 'accepted')}>
              <Text style={styles.btnText}>Accepter</Text>
            </TouchableOpacity>
-           <TouchableOpacity style={[styles.btn, styles.btnDecline]} onPress={() => onRespond(ride._id, 'refused')}>
+           <TouchableOpacity style={[styles.btn, styles.btnDecline]} onPress={() => onRespond(ride, 'refused')}>
              <Text style={styles.btnText}>Refuser</Text>
            </TouchableOpacity>
         </View>
       )}
       
       {/* 7. INFO FIN */}
-      {!isIncomingShare && (ride.isShared || isFinished) && (
+      {!showResponseButtons && (ride.isShared || isFinished) && (
          <View style={styles.footerInfo}>
             {isFinished && <Text style={{color:'#888', fontStyle:'italic', fontSize:12}}>Terminée à {moment(ride.endTime).format('HH:mm')}</Text>}
          </View>
@@ -156,7 +165,8 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#FFF', borderRadius: 16, padding: 15, marginBottom: 12, elevation: 3, borderLeftWidth: 4, borderLeftColor: '#DDD' },
   cardFinished: { backgroundColor: '#F2F2F2', opacity: 0.6 },
   cardActive: { borderLeftColor: '#4CAF50', backgroundColor: '#F1F8E9', borderWidth: 1, borderColor: '#C8E6C9' },
-  cardIncoming: { borderLeftColor: '#FF9800', backgroundColor: '#FFF8E1' },
+  // Style spécifique pour l'invitation en attente (Orange clair)
+  cardIncoming: { borderLeftColor: '#FF9800', backgroundColor: '#FFF3E0', borderWidth: 1, borderColor: '#FFE0B2' },
   
   header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   timeContainer: { flexDirection: 'row', alignItems: 'center' },
@@ -173,7 +183,6 @@ const styles = StyleSheet.create({
   patientRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   patientName: { fontSize: 18, fontWeight: 'bold', flex: 1 },
   
-  // STYLE APPEL
   callBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#009688', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginLeft: 10 },
   callBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
   
@@ -188,11 +197,11 @@ const styles = StyleSheet.create({
   btnFinish: { backgroundColor: '#333' },
   statusBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 14, marginLeft: 8, letterSpacing: 1 },
   
-  footer: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10, alignItems: 'center' },
-  shareLabel: { marginRight: 10, color: '#555', fontStyle:'italic' },
-  btn: { padding: 8, borderRadius: 8, marginLeft: 8 },
-  btnAccept: { backgroundColor: '#4CAF50' },
-  btnDecline: { backgroundColor: '#F44336' },
+  footer: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 15, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.05)', alignItems: 'center' },
+  shareLabel: { marginRight: 10, color: '#E65100', fontWeight:'bold' },
+  btn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, marginLeft: 10 },
+  btnAccept: { backgroundColor: '#4CAF50', elevation: 2 },
+  btnDecline: { backgroundColor: '#D32F2F', elevation: 2 },
   btnText: { color: '#FFF', fontWeight: 'bold' },
   footerInfo: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 5 }
 });

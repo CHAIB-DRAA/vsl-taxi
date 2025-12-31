@@ -9,7 +9,8 @@ import moment from 'moment';
 import 'moment/locale/fr';
 
 import RideCard from '../components/RideCard'; 
-import api, { getRides, getContacts, updateRide, shareRide, deleteRide } from '../services/api';
+// 👇 AJOUT DE 'respondToShare' DANS LES IMPORTS
+import api, { getRides, getContacts, updateRide, shareRide, deleteRide, respondToShare } from '../services/api';
 
 LocaleConfig.locales['fr'] = {
   monthNames: ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'],
@@ -79,6 +80,7 @@ export default function AgendaScreen() {
     allRides.forEach(ride => {
       const day = moment(ride.date).format('YYYY-MM-DD');
       if (!marks[day]) marks[day] = { dots: [] };
+      // Couleur Orange si partagée, Vert sinon
       const dotColor = ride.isShared ? '#FF9800' : '#4CAF50';
       if (!marks[day].dots.find(d => d.color === dotColor)) marks[day].dots.push({ key: ride._id, color: dotColor });
     });
@@ -89,7 +91,7 @@ export default function AgendaScreen() {
   const dailyRides = useMemo(() => {
     return allRides.filter(r => 
       moment(r.date).format('YYYY-MM-DD') === selectedDate &&
-      (!r.isShared || r.statusPartage !== 'refused')
+      (!r.isShared || r.statusPartage !== 'refused') // On cache les refusés
     ).sort((a, b) => new Date(a.date) - new Date(b.date));
   }, [allRides, selectedDate]);
 
@@ -122,14 +124,13 @@ export default function AgendaScreen() {
     } catch (err) { Alert.alert("Erreur", "Echec clôture."); }
   };
 
-  // 5. PARTAGE
+  // 5. PARTAGE (ENVOI)
   const selectContactForShare = (contactItem) => {
     setContactToShare(contactItem); 
     setShareNote(''); 
   };
 
   const finalizeShare = async () => {
-    // 1. Vérification des données avant envoi
     if (!activeRide) return Alert.alert("Erreur", "Aucune course sélectionnée");
     if (!contactToShare || !contactToShare.contactId) return Alert.alert("Erreur", "Contact invalide");
 
@@ -139,23 +140,48 @@ export default function AgendaScreen() {
     console.log("Tentative de partage :", { rideId, targetUserId, shareNote });
 
     try {
-      // 2. Appel API
       await shareRide(rideId, targetUserId, shareNote);
       
-      // 3. Succès
       setModals({ ...modals, share: false });
       setContactToShare(null);
       setShareNote('');
-      loadData(); // Rafraîchir l'agenda
+      loadData(); 
       Alert.alert('Succès', `Course envoyée à ${contactToShare.contactId.fullName}`);
 
     } catch (err) { 
-      // 4. Affichage de la VRAIE erreur
       console.error("Erreur Partage:", err);
       const message = err.response?.data?.message || "Erreur de connexion au serveur";
       Alert.alert('Échec du partage', message); 
     }
   };
+
+  // 👇 6. NOUVEAU : RÉPONSE PARTAGE (ACCEPTER/REFUSER)
+  const handleRespondShare = async (ride, action) => {
+    try {
+      // On met un petit loading pour l'UX
+      setLoading(true);
+      
+      // Appel API avec l'ID de la course et l'action ('accepted' ou 'refused')
+      await respondToShare(ride._id, action);
+      
+      // Feedback utilisateur
+      const msg = action === 'accepted' 
+        ? "Course acceptée et ajoutée à votre agenda." 
+        : "Invitation refusée.";
+        
+      Alert.alert("Succès", msg);
+      
+      // On recharge les données pour mettre à jour l'affichage
+      loadData();
+
+    } catch (err) {
+      console.error("Erreur réponse partage:", err);
+      Alert.alert("Erreur", "Impossible de traiter la réponse.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDelete = async () => {
     try { await deleteRide(activeRide._id); setModals({...modals, options:false}); loadData(); }
     catch(e) { Alert.alert('Erreur', 'Suppression impossible'); }
@@ -204,7 +230,8 @@ export default function AgendaScreen() {
                 onStatusChange={handleStatusChange} 
                 onPress={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, options: true })); }}
                 onShare={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, share: true })); }}
-                onRespond={() => {}} 
+                // 👇 C'EST ICI QUE ÇA SE PASSE : On branche la fonction
+                onRespond={handleRespondShare} 
               />
             )}
             ListEmptyComponent={<Text style={styles.emptyText}>Aucune course ce jour.</Text>}
@@ -268,7 +295,7 @@ export default function AgendaScreen() {
         </View>
       </Modal>
 
-      {/* 3. PARTAGE AVEC TÉLÉPHONE (AJOUTÉ ICI) */}
+      {/* 3. PARTAGE AVEC TÉLÉPHONE */}
       <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.modalHeader}>
@@ -307,7 +334,7 @@ export default function AgendaScreen() {
                  <Text style={styles.selectedContactName}>Pour : {contactToShare.contactId?.fullName}</Text>
               </View>
 
-              {/* ⚠️ INFO TÉLÉPHONE PATIENT (NOUVEAU BLOC) */}
+              {/* INFO TÉLÉPHONE PATIENT */}
               {activeRide && activeRide.patientPhone ? (
                  <View style={styles.phoneInfoBox}>
                     <Ionicons name="call" size={20} color="#4CAF50" />
@@ -402,7 +429,7 @@ const styles = StyleSheet.create({
   selectedContactHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, backgroundColor:'#FFF3E0', padding: 10, borderRadius: 10 },
   selectedContactName: { fontSize: 18, fontWeight: 'bold', color: '#E65100' },
   
-  // Style Box Info Téléphone (NOUVEAU)
+  // Style Box Info Téléphone
   phoneInfoBox: {
     flexDirection: 'row',
     alignItems: 'center',

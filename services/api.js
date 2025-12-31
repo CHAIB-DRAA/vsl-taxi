@@ -125,15 +125,19 @@ export const shareRide = async (rideId, contactId, note = '') => {
 };
 
 // Correction : On utilise rideId, pas shareId, selon ton dernier contrôleur Backend
-export const respondToShare = (rideId, action) => 
-  api.post('/rides/share/respond', { rideId, action });
+
 
 
   export const updatePatient = async (id, data) => {
     const res = await api.put(`/patients/${id}`, data);
     return res.data;
   };
- 
+ // services/api.js
+
+export const respondToShare = async (rideId, action) => {
+  // action doit être 'accepted' ou 'refused'
+  return api.post('/rides/respond-share', { rideId, action });
+};
   export const deletePatient = async (id) => {
     const res = await api.delete(`/patients/${id}`);
     return res.data;

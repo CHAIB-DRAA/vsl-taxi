@@ -102,38 +102,51 @@ exports.deleteRide = async (req, res) => {
 };
 
 // --- 5. PARTAGE (CORRIGÉ) ---
+// Assure-toi d'avoir ces imports en haut
+
+// ...
+
+// 🚀 5. PARTAGE AVEC NOTIFICATION PUSH
 exports.shareRide = async (req, res) => {
   try {
     const { rideId } = req.params;
     const { targetUserId, note } = req.body;
     const myId = req.user.id;
 
-    console.log(`Tentative de partage Course ${rideId} par ${myId}`);
-
-    // 👇 CORRECTION ICI : On utilise chauffeurId au lieu de userId
+    // 1. Vérif Chauffeur
     const ride = await Ride.findOne({ _id: rideId, chauffeurId: myId });
-    
-    if (!ride) {
-        console.log("Echec: Course introuvable ou mauvais propriétaire");
-        return res.status(404).json({ message: "Course introuvable (ou vous n'êtes pas le chauffeur)" });
-    }
+    if (!ride) return res.status(404).json({ message: "Course introuvable ou non autorisée" });
 
-    // 2. Vérifier si déjà partagée
+    // 2. Vérif Doublon
     const existing = await RideShare.findOne({ rideId, toUserId: targetUserId });
-    if (existing) return res.status(400).json({ message: "Déjà partagée avec ce collègue" });
+    if (existing) return res.status(400).json({ message: "Déjà partagée" });
 
-    // 3. Créer le partage
+    // 3. Créer le partage (En attente)
     const share = new RideShare({
       rideId,
       fromUserId: myId,
       toUserId: targetUserId,
       sharedNote: note,
-      statusPartage: 'pending'
+      statusPartage: 'pending' 
     });
-
     await share.save();
-    console.log("Succès partage");
-    res.json({ message: "Course partagée !" });
+
+    // 4. --- ENVOI DE LA NOTIFICATION ---
+    const targetUser = await User.findById(targetUserId);
+    
+    // Si le collègue a un token Expo enregistré
+    if (targetUser && Expo.isExpoPushToken(targetUser.pushToken)) {
+      await expo.sendPushNotificationsAsync([{
+        to: targetUser.pushToken,
+        sound: 'default',
+        title: '🚕 Nouvelle course partagée',
+        body: `Un collègue vous propose une course pour ${ride.patientName}.`,
+        data: { rideId: rideId, type: 'share_request' }, // Pour ouvrir l'app au bon endroit
+      }]);
+      console.log("Notification envoyée à", targetUser.fullName);
+    }
+
+    res.json({ message: "Invitation envoyée !" });
 
   } catch (err) {
     console.error("Erreur Share:", err);
@@ -141,27 +154,37 @@ exports.shareRide = async (req, res) => {
   }
 };
 
-// --- 6. RÉPONSE AU PARTAGE ---
+// 🚀 6. RÉPONSE (ACCEPTER / REFUSER)
 exports.respondRideShare = async (req, res) => {
   try {
-    // Note: Ici c'est un peu différent car on répond à une invitation RideShare, 
-    // pas directement sur la course. Mais gardons ta logique actuelle si elle te convient.
-    // Idéalement, on devrait modifier le document RideShare, pas la Ride elle-même.
-    // Pour l'instant, je laisse tel quel pour ne pas casser ta logique front.
+    const { rideId, action } = req.body; // action = 'accepted' ou 'refused'
+    const myId = req.user.id;
+
+    // On cherche le partage qui ME concerne (toUserId = moi)
+    const share = await RideShare.findOne({ rideId, toUserId: myId });
+
+    if (!share) return res.status(404).json({ message: "Demande de partage introuvable" });
+
+    if (action === 'refused') {
+      // Si refusé, on supprime le partage (la course disparaît de mon agenda)
+      await RideShare.findByIdAndDelete(share._id);
+      return res.json({ message: "Partage refusé." });
+    } 
     
-    const { rideId, action } = req.body;
-    
-    // Ici on ne vérifie PAS chauffeurId car c'est le collègue qui répond, pas le créateur
-    // On devrait vérifier via RideShare, mais passons pour ce correctif rapide.
-    
-    // ... Ta logique existante ...
-    res.json({ message: "Réponse enregistrée (Logique à affiner)" });
+    if (action === 'accepted') {
+      // Si accepté, on met à jour le statut
+      share.statusPartage = 'accepted';
+      await share.save();
+      return res.json({ message: "Course acceptée et ajoutée à votre agenda !" });
+    }
+
+    res.status(400).json({ message: "Action inconnue" });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
-
 // --- 7. FACTURATION ---
 exports.updateRideFacturation = async (req, res) => {
   try {
