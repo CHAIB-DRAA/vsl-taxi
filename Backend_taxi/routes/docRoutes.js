@@ -2,26 +2,28 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const Document = require('../models/Document');
-const Ride = require('../models/Ride'); // Besoin pour trouver le nom du patient via l'ID de course
+const Ride = require('../models/Ride'); 
+
+// 👇 AJOUTE CETTE LIGNE (C'est ce qu'il manquait)
+const auth = require('../middleware/auth'); 
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// --- UPLOAD (Ajout intelligent) ---
+// --- UPLOAD ---
 router.post('/upload', upload.single('photo'), async (req, res) => {
   try {
-    const { patientName, docType, rideId } = req.body;
+    const { patientName, docType, rideId, patientId } = req.body; // J'ai ajouté patientId au cas où
     const file = req.file;
 
     if (!file) return res.status(400).json({ message: "Aucune image reçue" });
 
-    // Conversion Base64
     const base64Image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 
-    // Création du document
     const newDoc = new Document({
       patientName: patientName,
-      rideId: rideId, // On lie à la course spécifique
+      rideId: rideId || null, 
+      patientId: patientId || null, // On sauvegarde aussi l'ID patient si dispo
       type: docType,
       imageData: base64Image
     });
@@ -35,29 +37,24 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
   }
 });
 
-// --- RÉCUPÉRATION INTELLIGENTE (La clé de ta demande) ---
+// --- RÉCUPÉRATION PAR COURSE (Ancienne méthode, toujours utile) ---
 router.get('/by-ride/:rideId', async (req, res) => {
   try {
     const { rideId } = req.params;
-
-    // 1. On récupère les infos de la course pour avoir le nom du patient
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: "Course introuvable" });
 
     const patientName = ride.patientName;
 
-    // 2. La requête "MAGIQUE" :
-    // - Soit c'est un document lié à CETTE course (ex: le PMT du jour)
-    // - Soit c'est un document Permanent (Vitale/Mutuelle) de CE patient (peu importe la course)
     const docs = await Document.find({
       $or: [
-        { rideId: rideId }, // Documents spécifiques à la course (PMT)
+        { rideId: rideId },
         { 
           patientName: patientName, 
-          type: { $in: ['CarteVitale', 'Mutuelle'] } // Documents permanents
+          type: { $in: ['CarteVitale', 'Mutuelle'] }
         }
       ]
-    }).sort({ uploadDate: -1 }); // Les plus récents en premier
+    }).sort({ uploadDate: -1 });
 
     res.json(docs);
 
@@ -66,28 +63,29 @@ router.get('/by-ride/:rideId', async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
-// GET /api/documents/patient/:patientId
-// Cette route doit trouver TOUS les docs liés à ce patient (via rideId OU patientId)
+
+// --- RÉCUPÉRATION PAR PATIENT (Nouvelle méthode pour le partage) ---
+// 👇 Maintenant 'auth' est bien défini grâce à l'import en haut
 router.get('/patient/:patientId', auth, async (req, res) => {
   try {
     const { patientId } = req.params;
 
-    // 1. Trouver toutes les courses de ce patient (pour récupérer les vieux docs liés aux rides)
+    // 1. Trouver toutes les courses liées à ce patient (si le modèle Ride a bien un champ patientId)
+    // Note : Si tes anciennes courses n'ont pas de patientId, cette partie renverra vide, ce n'est pas grave.
     const rides = await Ride.find({ patientId: patientId }).select('_id');
     const rideIds = rides.map(r => r._id);
 
-    // 2. Trouver les documents qui :
-    // - Soit ont le patientId direct
-    // - Soit sont liés à une course de ce patient
+    // 2. Trouver les documents
     const docs = await Document.find({
       $or: [
-        { patientId: patientId },
-        { rideId: { $in: rideIds } }
+        { patientId: patientId }, // Docs liés directement au patient
+        { rideId: { $in: rideIds } } // Docs liés aux courses de ce patient (PMT)
       ]
-    });
+    }).sort({ uploadDate: -1 });
 
     res.json(docs);
   } catch (err) {
+    console.error("Erreur route patient:", err);
     res.status(500).json({ error: "Erreur récupération documents" });
   }
 });
