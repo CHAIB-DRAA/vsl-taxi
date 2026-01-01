@@ -1,36 +1,28 @@
+const mongoose = require('mongoose'); // Import correct sans le '/' devant
 const Patient = require('../models/Patient');
 
-/const mongoose = require('mongoose'); // 👈 N'oublie pas cet import en haut
-const Patient = require('../models/Patient');
-
+// 1. Récupérer tous mes patients (Créés PAR moi OU Partagés AVEC moi)
 exports.getPatients = async (req, res) => {
   try {
-    // 1. Vérification de sécurité
+    // Vérification de sécurité
     if (!req.user || !req.user.id) {
-      console.log("❌ Pas de user dans la requête");
       return res.status(401).json({ message: "Utilisateur non connecté" });
     }
 
-    // 2. Conversion de l'ID en ObjectId MongoDB
-    // C'est souvent ici que ça bloque : String vs ObjectId
+    // Conversion de l'ID en ObjectId MongoDB pour que la recherche fonctionne
     const userId = new mongoose.Types.ObjectId(req.user.id);
-    
-    console.log("🔍 Recherche des patients pour l'ID :", userId);
 
-    // 3. La Requête
     const patients = await Patient.find({
       $or: [
-        { chauffeurId: userId },       // Je suis le créateur
-        { sharedWith: userId }         // On me l'a partagé
+        { chauffeurId: userId },       // Cas 1 : C'est mon patient (je suis le créateur)
+        { sharedWith: userId }         // Cas 2 : On me l'a partagé
       ]
     }).sort({ fullName: 1 });
-
-    console.log(`✅ ${patients.length} patients trouvés`);
 
     res.json(patients);
 
   } catch (err) {
-    console.error("❌ Erreur getPatients:", err);
+    console.error("Erreur getPatients:", err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
@@ -38,29 +30,25 @@ exports.getPatients = async (req, res) => {
 // 2. Créer un nouveau patient
 exports.createPatient = async (req, res) => {
   try {
-    // 1. Vérification de sécurité
     if (!req.user || !req.user.id) {
-      return res.status(401).json({ message: "Utilisateur non authentifié ou ID manquant" });
+      return res.status(401).json({ message: "Utilisateur non connecté" });
     }
 
     const { fullName, address, phone } = req.body;
 
     if (!fullName) return res.status(400).json({ message: "Le nom est obligatoire" });
 
-    // 2. Création avec le chauffeurId explicite
     const newPatient = new Patient({
-      chauffeurId: req.user.id, // 👈 C'est ça qui manquait dans ta base
+      chauffeurId: req.user.id, // On associe le patient au créateur
       fullName,
       address,
       phone,
-      sharedWith: [] 
+      sharedWith: [] // On initialise le tableau de partage vide
     });
 
     await newPatient.save();
     res.status(201).json(newPatient);
-
   } catch (err) {
-    console.error("Erreur création patient:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -70,9 +58,10 @@ exports.updatePatient = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
-    const userId = req.user.id;
+    const userId = req.user.id; // Pas besoin de convertir en ObjectId ici pour findOne, Mongoose gère souvent ça, mais userId est une string ici
 
-    // On autorise la modif si je suis le créateur OU si on me l'a partagé
+    // On cherche le patient si on est le créateur OU si on a les droits de partage
+    // Note: Pour update, souvent seul le créateur a le droit, mais si tu veux permettre aux collègues de modifier, garde le $or
     const patient = await Patient.findOne({
       _id: id,
       $or: [{ chauffeurId: userId }, { sharedWith: userId }]
@@ -80,7 +69,7 @@ exports.updatePatient = async (req, res) => {
 
     if (!patient) return res.status(404).json({ message: "Patient introuvable ou accès refusé" });
 
-    // Mise à jour des champs
+    // Mise à jour
     Object.assign(patient, updates);
     await patient.save();
 
@@ -95,14 +84,13 @@ exports.deletePatient = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // IMPORTANT : Seul le CRÉATEUR peut supprimer définitivement le patient
-    // Si c'est un patient partagé, on ne peut pas le supprimer (pour l'instant)
+    // IMPORTANT : Seul le propriétaire (chauffeurId) peut supprimer
     const patient = await Patient.findOneAndDelete({ 
       _id: id, 
       chauffeurId: req.user.id 
     });
     
-    if (!patient) return res.status(403).json({ message: "Impossible de supprimer : Vous n'êtes pas le propriétaire ou patient introuvable." });
+    if (!patient) return res.status(403).json({ message: "Impossible de supprimer (Non trouvé ou non propriétaire)" });
     
     res.json({ message: "Patient supprimé" });
   } catch (err) {
