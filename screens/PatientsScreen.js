@@ -9,14 +9,18 @@ import 'moment/locale/fr';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
-// 👇 On garde ça pour le PDF, mais on a retiré l'import direct de ImagePicker pour la caméra
-// car c'est maintenant géré par le composant.
+// 👇 NOUVEAUX IMPORTS POUR L'ANTI-FRAUDE
+import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
+import * as Linking from 'expo-linking';
+// Assure-toi que ce fichier existe (voir conversation précédente), sinon dis-le moi !
+import { extractSecuNumber } from '../services/ocrService'; 
 
 // Contexte & API
 import { useData } from '../contexts/DataContext';
 import api, { getPatients, updatePatient, deletePatient, getRides } from '../services/api';
 
-// 👇 IMPORT DU NOUVEAU COMPOSANT
+// Composant Scanner
 import DocumentScannerButton from '../components/DocumentScannerButton';
 
 export default function PatientsScreen() {
@@ -109,10 +113,9 @@ export default function PatientsScreen() {
       // Tri
       allDocs.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
       
-      // Filtre d'affichage (Unique Vitale/Mutuelle, Tous les PMT)
+      // Filtre d'affichage
       const finalDocs = [];
       const typesVus = {}; 
-
       allDocs.forEach(doc => {
         if (doc.type === 'PMT') {
           finalDocs.push(doc);
@@ -129,7 +132,50 @@ export default function PatientsScreen() {
     finally { setLoadingDetails(false); }
   };
 
-  // --- 📸 AJOUT DE DOCUMENT (CALLBACK DU COMPOSANT) ---
+  // --- 🛡️ FONCTION ANTI-FRAUDE (SCAN NIR) ---
+  const handleAntiFraudScan = async () => {
+    try {
+      // 1. Permission
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) return Alert.alert("Erreur", "Accès caméra requis");
+
+      // 2. Scan
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        quality: 1,
+      });
+
+      if (!result.canceled) {
+        setUploading(true); // Petit loader
+        
+        // 3. Extraction via le service OCR
+        const nir = await extractSecuNumber(result.assets[0].uri);
+        setUploading(false);
+
+        if (nir) {
+          await Clipboard.setStringAsync(nir);
+          Alert.alert(
+            "NIR Trouvé & Copié !",
+            `Numéro : ${nir}\n\nVoulez-vous ouvrir AmeliPro maintenant pour vérifier les droits ?`,
+            [
+              { text: "Non", style: "cancel" },
+              { 
+                text: "Ouvrir AmeliPro", 
+                onPress: () => Linking.openURL('https://professionnels.ameli.fr/') 
+              }
+            ]
+          );
+        } else {
+          Alert.alert("Échec", "Aucun numéro de sécu lisible. Réessayez avec plus de lumière.");
+        }
+      }
+    } catch (error) {
+      setUploading(false);
+      Alert.alert("Erreur", "Problème lors du scan.");
+    }
+  };
+
+  // --- 📸 AJOUT DE DOCUMENT CLASSIQUE ---
   const handleDocumentScanned = async (uri, docType) => {
     await uploadDocument(uri, docType);
   };
@@ -141,7 +187,7 @@ export default function PatientsScreen() {
       const formData = new FormData();
       formData.append('photo', { uri: uri, name: `scan.jpg`, type: 'image/jpeg' });
       formData.append('patientName', selectedPatient.fullName);
-      formData.append('patientId', selectedPatient._id); // Lien direct au patient
+      formData.append('patientId', selectedPatient._id);
       formData.append('docType', docType);
 
       await api.post('/documents/upload', formData, {
@@ -150,7 +196,7 @@ export default function PatientsScreen() {
       });
 
       Alert.alert("Succès", "Document ajouté !");
-      fetchPatientDetails(selectedPatient); // Rafraîchir la liste
+      fetchPatientDetails(selectedPatient);
 
     } catch (error) {
       console.error(error);
@@ -167,7 +213,7 @@ export default function PatientsScreen() {
         { text: "Supprimer", style: "destructive", onPress: async () => {
             try {
                 await api.delete(`/documents/${docId}`);
-                fetchPatientDetails(selectedPatient); // Rafraîchir
+                fetchPatientDetails(selectedPatient); 
             } catch (err) {
                 Alert.alert("Erreur", "Impossible de supprimer");
             }
@@ -246,7 +292,7 @@ export default function PatientsScreen() {
     Alert.alert("Attention", "Supprimer ?", [{ text: "Non", style: "cancel" }, { text: "Oui", style: "destructive", onPress: async () => { try { await deletePatient(selectedPatient._id); setModalVisible(false); loadPatients(); } catch (err) {} } }]);
   };
 
-  // RENDU
+  // RENDU ITEMS
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => openPatientModal(item)}>
       <View style={styles.avatar}><Text style={styles.avatarText}>{item.fullName.charAt(0).toUpperCase()}</Text></View>
@@ -280,10 +326,24 @@ export default function PatientsScreen() {
       case 'profil':
         return (
           <ScrollView style={styles.tabContent}>
+             {/* 👇 BOUTON ANTI-FRAUDE AJOUTÉ ICI 👇 */}
+             <TouchableOpacity style={styles.antiFraudBtn} onPress={handleAntiFraudScan} disabled={uploading}>
+                <View style={styles.antiFraudIcon}>
+                    <Ionicons name="shield-checkmark" size={24} color="#FFF" />
+                </View>
+                <View>
+                    <Text style={styles.antiFraudTitle}>Vérifier Droits (Anti-Fraude)</Text>
+                    <Text style={styles.antiFraudSub}>Scanner Vitale → Copier NIR → AmeliPro</Text>
+                </View>
+                {uploading && <ActivityIndicator color="#FFF" style={{marginLeft: 10}}/>}
+             </TouchableOpacity>
+             {/* 👆 FIN AJOUT 👆 */}
+
              <View style={styles.inputGroup}><Text style={styles.label}>Nom</Text><TextInput style={styles.input} value={formData.fullName} onChangeText={t => setFormData({...formData, fullName: t})} /></View>
              <View style={styles.inputGroup}><Text style={styles.label}>Tél</Text><TextInput style={styles.input} value={formData.phone} keyboardType="phone-pad" onChangeText={t => setFormData({...formData, phone: t})} /></View>
              <View style={styles.inputGroup}><Text style={styles.label}>Adresse</Text><TextInput style={styles.input} value={formData.address} multiline onChangeText={t => setFormData({...formData, address: t})} /></View>
              <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Text style={styles.saveBtnText}>Enregistrer</Text></TouchableOpacity>
+             
              <Text style={styles.sectionHeader}>PARTAGE</Text>
              <TouchableOpacity style={styles.shareBtnColl} onPress={() => setShareModalVisible(true)}><Ionicons name="people" size={20} color="#FFF" style={{marginRight: 10}} /><Text style={styles.saveBtnText}>Envoyer à un collègue</Text></TouchableOpacity>
              <TouchableOpacity style={styles.shareBtnPDF} onPress={() => initiateShareProcess('export')}><Ionicons name="document-text" size={20} color="#FF6B00" style={{marginRight: 10}} /><Text style={{color:'#FF6B00', fontWeight:'bold'}}>Exporter en PDF</Text></TouchableOpacity>
@@ -294,29 +354,10 @@ export default function PatientsScreen() {
       case 'docs':
         return (
           <View style={{flex:1}}>
-            {/* BOUTONS D'AJOUT (VIA COMPOSANT SCANNER) */}
             <View style={styles.scanGrid}>
-                <DocumentScannerButton 
-                    title="PMT" 
-                    docType="PMT" 
-                    color="#FF6B00" 
-                    onScan={handleDocumentScanned} 
-                    isLoading={uploading}
-                />
-                <DocumentScannerButton 
-                    title="Vitale" 
-                    docType="CarteVitale" 
-                    color="#4CAF50" 
-                    onScan={handleDocumentScanned} 
-                    isLoading={uploading}
-                />
-                <DocumentScannerButton 
-                    title="Mutuelle" 
-                    docType="Mutuelle" 
-                    color="#2196F3" 
-                    onScan={handleDocumentScanned} 
-                    isLoading={uploading}
-                />
+                <DocumentScannerButton title="PMT" docType="PMT" color="#FF6B00" onScan={handleDocumentScanned} isLoading={uploading}/>
+                <DocumentScannerButton title="Vitale" docType="CarteVitale" color="#4CAF50" onScan={handleDocumentScanned} isLoading={uploading}/>
+                <DocumentScannerButton title="Mutuelle" docType="Mutuelle" color="#2196F3" onScan={handleDocumentScanned} isLoading={uploading}/>
             </View>
 
             <FlatList 
@@ -329,7 +370,6 @@ export default function PatientsScreen() {
                         <Text style={styles.docTitle}>{item.type}</Text>
                         <Text style={styles.docDate}>{moment(item.uploadDate).format('DD/MM/YY')}</Text>
                     </TouchableOpacity>
-                    {/* BOUTON SUPPRIMER */}
                     <TouchableOpacity style={styles.deleteDocBadge} onPress={() => deleteDocument(item._id)}>
                         <Ionicons name="trash" size={14} color="#FFF" />
                     </TouchableOpacity>
@@ -442,6 +482,15 @@ const styles = StyleSheet.create({
   contentContainer: { flex: 1, padding: 20 },
   tabContent: { flex: 1 },
 
+  // STYLES BOUTON ANTI-FRAUDE (NOUVEAU)
+  antiFraudBtn: { 
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#43A047', 
+    padding: 15, borderRadius: 12, marginBottom: 20, elevation: 3 
+  },
+  antiFraudIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  antiFraudTitle: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  antiFraudSub: { color: 'rgba(255,255,255,0.8)', fontSize: 11 },
+
   inputGroup: { marginBottom: 15 },
   label: { fontSize: 12, color: '#666', marginBottom: 5, fontWeight: 'bold' },
   input: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#DDD', fontSize: 16 },
@@ -460,7 +509,6 @@ const styles = StyleSheet.create({
 
   // SCANNER STYLE GRID
   scanGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  // (Les styles addDocBtn et addDocText ne sont plus nécessaires, remplacés par le composant)
 
   docCardContainer: { flex: 0.5, margin: 6 },
   docCard: { backgroundColor: '#FFF', padding: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 2, minHeight: 110 },

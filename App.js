@@ -3,7 +3,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-// 👇 IMPORT INDISPENSABLE POUR LE DESIGN MODERNE
 import { SafeAreaProvider } from 'react-native-safe-area-context'; 
 
 import * as SecureStore from 'expo-secure-store';
@@ -15,13 +14,20 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 
-// Import des écrans
+// --- IMPORTS DES ÉCRANS ---
 import SignInScreen from './screens/SigninScreen';
 import SignUpScreen from './screens/SignupScreen';
 import SettingsScreen from './screens/SettingsScreen';
-import MainTabs from './screens/MainTabs';
+import MainTabs from './screens/MainTabs'; // Contient HomeScreen
 import ContactScreen from './screens/ContactScreen';
 import DocumentsScreen from './screens/DocumentsScreen';
+
+// 👇 AJOUT DES ÉCRANS MANQUANTS (Indispensable pour la navigation)
+import HistoryScreen from './screens/HistoryScreen';
+import PatientsScreen from './screens/PatientsScreen';
+import ProfileScreen from './screens/ProfileScreen';
+import AddRideScreen from './screens/CreateRideScreen'; 
+
 // Import de l'API
 import api, { getRides } from './services/api';
 
@@ -143,12 +149,12 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      {/* 👇 AJOUT CRUCIAL : SafeAreaProvider doit envelopper toute l'app */}
       <SafeAreaProvider>
         <DataProvider>
           <NavigationContainer>
             <Stack.Navigator>
               {!session ? (
+                // --- ÉCRANS NON CONNECTÉS ---
                 <Stack.Group screenOptions={{ headerShown: false }}>
                   <Stack.Screen name="SignIn">
                     {props => <SignInScreen {...props} onSignIn={handleLogin} />}
@@ -158,7 +164,9 @@ export default function App() {
                   </Stack.Screen>
                 </Stack.Group>
               ) : (
+                // --- ÉCRANS CONNECTÉS ---
                 <Stack.Group>
+                  {/* Écran principal avec les onglets en bas */}
                   <Stack.Screen name="Main" options={{ headerShown: false }}>
                     {props => (
                       <MainTabs
@@ -169,7 +177,34 @@ export default function App() {
                     )}
                   </Stack.Screen>
                   
-                  {/* 👇 MODIF ICI : On cache le header natif pour utiliser ton header "Mon Profil" */}
+                  {/* 👇 ENREGISTREMENT DES ÉCRANS MANQUANTS 👇 */}
+                  
+                  <Stack.Screen 
+                    name="History" 
+                    component={HistoryScreen} 
+                    options={{ title: 'Historique', headerTintColor: '#FF6B00' }} 
+                  />
+
+                  <Stack.Screen 
+                    name="Patients" 
+                    component={PatientsScreen} 
+                    options={{ title: 'Mes Patients', headerTintColor: '#FF6B00' }} 
+                  />
+
+                  <Stack.Screen 
+                    name="AddRide" 
+                    component={AddRideScreen} 
+                    options={{ title: 'Nouvelle Course', headerTintColor: '#FF6B00' }} 
+                  />
+
+                  <Stack.Screen 
+                    name="Profile" 
+                    component={ProfileScreen} 
+                    options={{ headerShown: false }} 
+                  />
+
+                  {/* 👆 FIN DES AJOUTS 👆 */}
+
                   <Stack.Screen
                     name="Settings"
                     options={{ headerShown: false }} 
@@ -187,11 +222,11 @@ export default function App() {
                     }} 
                   />
 
-<Stack.Screen 
-          name="Documents" 
-          component={DocumentsScreen} 
-          options={{ title: 'Mes Documents' }} 
-        />
+                  <Stack.Screen 
+                    name="Documents" 
+                    component={DocumentsScreen} 
+                    options={{ title: 'Mes Documents', headerTintColor: '#FF6B00' }} 
+                  />
                 </Stack.Group>
               )}
             </Stack.Navigator>
