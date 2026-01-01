@@ -116,3 +116,35 @@ exports.searchUsers = async (req, res) => {
     res.status(500).json({ error: 'Erreur serveur', message: err.message });
   }
 };
+
+
+exports.getProfile = async (req, res) => {
+  try {
+    // req.user.id vient du middleware 'auth'
+    const user = await User.findById(req.user.id).select('-password'); // On exclut le mot de passe
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+};
+
+// 2. Mettre à jour mon profil
+exports.updateProfile = async (req, res) => {
+  try {
+    const updates = req.body;
+    
+    // On empêche la modif du mot de passe ici (sécurité)
+    delete updates.password; 
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Erreur mise à jour" });
+  }
+};
