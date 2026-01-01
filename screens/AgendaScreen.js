@@ -192,7 +192,6 @@ export default function AgendaScreen() {
             onRefresh={() => loadData(false)}
             
             // 👇 C'EST ICI LA CLÉ POUR LES BOUTONS DU BAS 👇
-            // On met un grand paddingBottom pour que la dernière carte remonte au-dessus des boutons Android
             contentContainerStyle={{ padding: 15, paddingBottom: 120 }}
           />
         )}
@@ -354,4 +353,5 @@ const styles = StyleSheet.create({
   noteLabel: { fontWeight: 'bold', color: '#555', marginBottom: 10 },
   avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFE0B2', justifyContent:'center', alignItems:'center', marginRight: 15 },
   avatarText: { color: '#EF6C00', fontWeight: 'bold', fontSize: 18 },
-  selectedContactHeader: { flexDirection: 'row',
+  selectedContactHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, backgroundColor:'#FFF3E0', padding: 10, borderRadius: 10 },
+});
