@@ -12,7 +12,7 @@ router.post('/addContact', authMiddleware, addContact);
 router.get('/search', authMiddleware, searchUsers); // <- ici on appelle la fonction du controller
 
 
-router.get('/profile', auth, userController.getProfile);
-router.put('/profile', auth, userController.updateProfile);
+router.get('/profile',authMiddleware, userController.getProfile);
+router.put('/profile', authMiddleware, userController.updateProfile);
 
 module.exports = router;
