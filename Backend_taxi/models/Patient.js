@@ -1,13 +1,20 @@
 const mongoose = require('mongoose');
 
 const PatientSchema = new mongoose.Schema({
+  // 👇 C'est ici le plus important : required: true
+  chauffeurId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User', 
+    required: true 
+  },
   fullName: { type: String, required: true },
-  phone: String,
-  address: String,
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  address: { type: String, default: '' },
+  phone: { type: String, default: '' },
   
-  // 👈 AJOUT : Liste des collègues qui ont le droit de voir ce patient
+  // Liste des collègues qui ont le droit de voir ce patient
   sharedWith: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }] 
+}, { 
+  timestamps: true // 👇 Pour ravoir createdAt et updatedAt automatiquement
 });
 
 module.exports = mongoose.model('Patient', PatientSchema);
