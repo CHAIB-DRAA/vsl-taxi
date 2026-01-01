@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, 
-  ActivityIndicator, Alert, Modal, ScrollView, Image 
+  ActivityIndicator, Alert, Modal, ScrollView, Image, SafeAreaView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import moment from 'moment';
 import 'moment/locale/fr';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as ImagePicker from 'expo-image-picker'; // 👈 IMPORT IMPORTANT
 
 // Contexte & API
 import { useData } from '../contexts/DataContext';
@@ -23,13 +24,13 @@ export default function PatientsScreen() {
   const [search, setSearch] = useState('');
 
   // Modals
-  const [modalVisible, setModalVisible] = useState(false); // Fiche Patient
-  const [shareModalVisible, setShareModalVisible] = useState(false); // Choix Contact
-  const [docSelectionModal, setDocSelectionModal] = useState(false); // Choix Docs
+  const [modalVisible, setModalVisible] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [docSelectionModal, setDocSelectionModal] = useState(false);
 
   // Sélection pour partage
   const [selectedDocIds, setSelectedDocIds] = useState([]);
-  const [shareTarget, setShareTarget] = useState(null); // 'export' ou 'colleague'
+  const [shareTarget, setShareTarget] = useState(null);
   const [targetContact, setTargetContact] = useState(null);
 
   // Détails Patient
@@ -38,6 +39,9 @@ export default function PatientsScreen() {
   const [patientRides, setPatientRides] = useState([]);
   const [patientDocs, setPatientDocs] = useState([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  
+  // Upload & Delete États
+  const [uploading, setUploading] = useState(false);
 
   // Visionneuse
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -46,7 +50,7 @@ export default function PatientsScreen() {
   // Formulaire Edition
   const [formData, setFormData] = useState({ fullName: '', address: '', phone: '' });
 
-  // 1. CHARGEMENT LISTE PRINCIPALE
+  // 1. CHARGEMENT
   const loadPatients = useCallback(async () => {
     try {
       setLoading(true);
@@ -60,7 +64,6 @@ export default function PatientsScreen() {
 
   useEffect(() => { loadPatients(); }, [loadPatients]);
 
-  // 2. RECHERCHE
   const handleSearch = (text) => {
     setSearch(text);
     if (text) {
@@ -69,7 +72,6 @@ export default function PatientsScreen() {
     } else { setFilteredPatients(patients); }
   };
 
-  // 3. OUVERTURE FICHE & CHARGEMENT DONNÉES
   const openPatientModal = (patient) => {
     setSelectedPatient(patient);
     setFormData({ fullName: patient.fullName, address: patient.address || '', phone: patient.phone || '' });
@@ -82,37 +84,36 @@ export default function PatientsScreen() {
     try {
       setLoadingDetails(true);
       
-      // A. Historique des courses
+      // Historique
       const allRides = await getRides();
       const myRides = allRides.filter(r => r.patientName === patient.fullName);
       myRides.sort((a, b) => new Date(b.date) - new Date(a.date));
       setPatientRides(myRides);
 
-      // B. Documents (Nouvelle méthode via route dédiée)
-      // On essaye la route globale, sinon fallback sur les courses
+      // Documents
       let allDocs = [];
       try {
          const res = await api.get(`/documents/patient/${patient._id}`);
          allDocs = res.data;
       } catch (e) {
-         // Fallback si la route n'existe pas encore
          const docsPromises = myRides.map(r => api.get(`/documents/by-ride/${r._id}`).catch(() => ({ data: [] })));
          const docsResults = await Promise.all(docsPromises);
          allDocs = docsResults.flatMap(res => res.data);
       }
 
-      // Tri et Nettoyage
+      // Tri
       allDocs.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
       
+      // Filtre d'affichage (Unique Vitale/Mutuelle, Tous les PMT)
       const finalDocs = [];
       const typesVus = {}; 
 
       allDocs.forEach(doc => {
         if (doc.type === 'PMT') {
-          finalDocs.push(doc); // On garde tous les PMT
+          finalDocs.push(doc);
         } else {
           if (!typesVus[doc.type]) {
-            finalDocs.push(doc); // On garde le plus récent des Vitale/Mutuelle
+            finalDocs.push(doc);
             typesVus[doc.type] = true;
           }
         }
@@ -123,119 +124,142 @@ export default function PatientsScreen() {
     finally { setLoadingDetails(false); }
   };
 
-  // --- LOGIQUE PARTAGE ---
+  // --- 📸 AJOUT DE DOCUMENT (CAMÉRA) ---
+  const pickAndUploadImage = async (docType) => {
+    try {
+      // Permission
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (permission.status !== 'granted') {
+        return Alert.alert("Erreur", "Permission caméra refusée.");
+      }
 
+      // Ouvrir Caméra
+      let result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.5, // Compression
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        uploadDocument(result.assets[0].uri, docType);
+      }
+    } catch (err) {
+      Alert.alert("Erreur", "Impossible d'ouvrir la caméra");
+    }
+  };
+
+  const uploadDocument = async (uri, docType) => {
+    if (!selectedPatient) return;
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('photo', { uri: uri, name: `scan.jpg`, type: 'image/jpeg' });
+      formData.append('patientName', selectedPatient.fullName);
+      formData.append('patientId', selectedPatient._id); // Lien direct au patient
+      formData.append('docType', docType);
+
+      await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        transformRequest: (data) => data,
+      });
+
+      Alert.alert("Succès", "Document ajouté !");
+      fetchPatientDetails(selectedPatient); // Rafraîchir la liste
+
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Erreur", "Echec de l'envoi.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // --- 🗑 SUPPRESSION DOCUMENT ---
+  const deleteDocument = (docId) => {
+    Alert.alert("Supprimer", "Voulez-vous supprimer ce document définitivement ?", [
+        { text: "Annuler", style: "cancel" },
+        { text: "Supprimer", style: "destructive", onPress: async () => {
+            try {
+                await api.delete(`/documents/${docId}`);
+                fetchPatientDetails(selectedPatient); // Rafraîchir
+            } catch (err) {
+                Alert.alert("Erreur", "Impossible de supprimer");
+            }
+        }}
+    ]);
+  };
+
+  // --- PARTAGE ---
   const initiateShareProcess = (mode, contact = null) => {
     setShareTarget(mode);
     setTargetContact(contact);
-    
-    // Pré-cocher Vitale/Mutuelle, Décocher PMT
-    const preSelected = patientDocs
-      .filter(d => d.type !== 'PMT')
-      .map(d => d._id);
-    
+    const preSelected = patientDocs.filter(d => d.type !== 'PMT').map(d => d._id);
     setSelectedDocIds(preSelected);
     setDocSelectionModal(true);
     setShareModalVisible(false);
   };
 
   const toggleDocSelection = (id) => {
-    if (selectedDocIds.includes(id)) {
-      setSelectedDocIds(prev => prev.filter(docId => docId !== id));
-    } else {
-      setSelectedDocIds(prev => [...prev, id]);
-    }
+    if (selectedDocIds.includes(id)) setSelectedDocIds(prev => prev.filter(docId => docId !== id));
+    else setSelectedDocIds(prev => [...prev, id]);
   };
 
-  // --- ACTIONS DE TRANSFERT ---
+  const generateCustomPDF = async () => {
+    if (!selectedPatient) return null;
+    const docsToInclude = patientDocs.filter(doc => selectedDocIds.includes(doc._id));
+    let imagesHtml = '';
+    if (docsToInclude.length > 0) {
+        docsToInclude.forEach(doc => {
+            imagesHtml += `
+                <div style="margin-bottom: 20px; page-break-inside: avoid; border: 1px solid #ddd; padding: 10px; border-radius: 8px;">
+                    <p><strong>${doc.type}</strong> <span style="font-size:12px; color:#666;">(${moment(doc.uploadDate).format('DD/MM/YYYY')})</span></p>
+                    <img src="${doc.imageData}" style="width: 100%; max-height: 800px; object-fit: contain;" />
+                </div>`;
+        });
+    } else { imagesHtml = `<p>Aucun document joint.</p>`; }
 
-  // OPTION 1 : TRANSFERT APP À APP (API)
+    const html = `
+      <html><body style="font-family: Helvetica; padding: 40px;">
+          <h1 style="color: #FF6B00;">Fiche Patient</h1>
+          <h2>${selectedPatient.fullName}</h2>
+          <p>Tél: ${selectedPatient.phone}</p>
+          <h3>Documents</h3>${imagesHtml}
+      </body></html>`;
+    const { uri } = await Print.printToFileAsync({ html });
+    return uri;
+  };
+
   const handleInternalShare = async () => {
     if (!targetContact) return;
     setDocSelectionModal(false);
-    setLoading(true); // Petit loading global pour montrer que ça bosse
-
+    setLoading(true);
     try {
-      // Appel API Backend
       await api.post('/share/transfert-patient', { 
         patientId: selectedPatient._id,
         targetUserId: targetContact.contactId._id,
-        docIds: selectedDocIds // (Optionnel si tu veux filtrer côté back, mais souvent on partage tout l'accès)
+        docIds: selectedDocIds 
       });
-      
-      Alert.alert(
-        "Envoyé !", 
-        `Le dossier de ${selectedPatient.fullName} est maintenant accessible sur le téléphone de ${targetContact.contactId.fullName}.`
-      );
-    } catch (err) { 
-      console.error(err);
-      Alert.alert("Erreur", "Le transfert a échoué. Vérifiez votre connexion."); 
-    } finally {
-      setLoading(false);
-    }
+      Alert.alert("Envoyé !", `Dossier envoyé à ${targetContact.contactId.fullName}.`);
+    } catch (err) { Alert.alert("Erreur", "Echec transfert."); } 
+    finally { setLoading(false); }
   };
 
-  // OPTION 2 : WHATSAPP / PDF
   const handleSystemShare = async () => {
     setDocSelectionModal(false);
     try {
-        const docsToInclude = patientDocs.filter(doc => selectedDocIds.includes(doc._id));
-        
-        let imagesHtml = '';
-        if (docsToInclude.length > 0) {
-            docsToInclude.forEach(doc => {
-                imagesHtml += `
-                    <div style="margin-bottom: 20px; page-break-inside: avoid;">
-                    <p><strong>${doc.type}</strong> (${moment(doc.uploadDate).format('DD/MM/YYYY')})</p>
-                    <img src="${doc.imageData}" style="width: 100%; max-height: 600px; object-fit: contain; border: 1px solid #eee;" />
-                    </div>
-                `;
-            });
-        } else {
-            imagesHtml = `<p>Aucun document sélectionné.</p>`;
-        }
-
-        const html = `
-          <html>
-            <body style="font-family: Helvetica; padding: 40px;">
-              <h1 style="color: #FF6B00;">Fiche Patient</h1>
-              <h2>${selectedPatient.fullName}</h2>
-              <p>Tél: ${selectedPatient.phone || '--'} | Adresse: ${selectedPatient.address || '--'}</p>
-              <hr/>
-              <h3>Documents</h3>
-              ${imagesHtml}
-            </body>
-          </html>
-        `;
-
-        const { uri } = await Print.printToFileAsync({ html });
-        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-
-    } catch (err) { Alert.alert("Erreur", "Génération PDF impossible"); }
+      const pdfUri = await generateCustomPDF();
+      if (!pdfUri) return;
+      await Sharing.shareAsync(pdfUri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    } catch (err) { Alert.alert("Erreur", "PDF impossible"); }
   };
 
-  // --- UPDATE & DELETE ---
   const handleSave = async () => {
-    try {
-      await updatePatient(selectedPatient._id, formData);
-      setModalVisible(false);
-      Alert.alert("Succès", "Fiche mise à jour");
-      loadPatients();
-    } catch (err) { Alert.alert("Erreur", "Mise à jour impossible"); }
+    try { await updatePatient(selectedPatient._id, formData); setModalVisible(false); loadPatients(); } catch (err) { Alert.alert("Erreur", "Mise à jour impossible"); }
   };
-
   const handleDelete = () => {
-    Alert.alert("Attention", "Supprimer ce patient ?", [
-      { text: "Annuler", style: "cancel" },
-      { text: "Supprimer", style: "destructive", onPress: async () => {
-          try { await deletePatient(selectedPatient._id); setModalVisible(false); loadPatients(); } 
-          catch (err) { Alert.alert("Erreur", "Impossible de supprimer"); }
-        } 
-      }
-    ]);
+    Alert.alert("Attention", "Supprimer ?", [{ text: "Non", style: "cancel" }, { text: "Oui", style: "destructive", onPress: async () => { try { await deletePatient(selectedPatient._id); setModalVisible(false); loadPatients(); } catch (err) {} } }]);
   };
 
-  // --- RENDUS ---
+  // RENDU
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => openPatientModal(item)}>
       <View style={styles.avatar}><Text style={styles.avatarText}>{item.fullName.charAt(0).toUpperCase()}</Text></View>
@@ -257,10 +281,7 @@ export default function PatientsScreen() {
     return (
       <TouchableOpacity style={[styles.selectDocRow, isSelected && styles.selectDocRowActive]} onPress={() => toggleDocSelection(item._id)}>
          <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#FF6B00" : "#CCC"} />
-         <View style={{marginLeft: 15, flex:1}}>
-            <Text style={[styles.selectDocTitle, isSelected && {fontWeight:'bold'}]}>{item.type}</Text>
-            <Text style={styles.selectDocDate}>{moment(item.uploadDate).format('DD/MM/YYYY')}</Text>
-         </View>
+         <View style={{marginLeft: 15, flex:1}}><Text style={[styles.selectDocTitle, isSelected && {fontWeight:'bold'}]}>{item.type}</Text><Text style={styles.selectDocDate}>{moment(item.uploadDate).format('DD/MM/YYYY')}</Text></View>
       </TouchableOpacity>
     );
   };
@@ -272,37 +293,49 @@ export default function PatientsScreen() {
       case 'profil':
         return (
           <ScrollView style={styles.tabContent}>
-             <View style={styles.inputGroup}><Text style={styles.label}>Nom Complet</Text><TextInput style={styles.input} value={formData.fullName} onChangeText={t => setFormData({...formData, fullName: t})} /></View>
-             <View style={styles.inputGroup}><Text style={styles.label}>Téléphone</Text><TextInput style={styles.input} value={formData.phone} keyboardType="phone-pad" onChangeText={t => setFormData({...formData, phone: t})} /></View>
+             <View style={styles.inputGroup}><Text style={styles.label}>Nom</Text><TextInput style={styles.input} value={formData.fullName} onChangeText={t => setFormData({...formData, fullName: t})} /></View>
+             <View style={styles.inputGroup}><Text style={styles.label}>Tél</Text><TextInput style={styles.input} value={formData.phone} keyboardType="phone-pad" onChangeText={t => setFormData({...formData, phone: t})} /></View>
              <View style={styles.inputGroup}><Text style={styles.label}>Adresse</Text><TextInput style={styles.input} value={formData.address} multiline onChangeText={t => setFormData({...formData, address: t})} /></View>
              <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Text style={styles.saveBtnText}>Enregistrer</Text></TouchableOpacity>
-             
              <Text style={styles.sectionHeader}>PARTAGE</Text>
-             <TouchableOpacity style={styles.shareBtnColl} onPress={() => setShareModalVisible(true)}>
-                <Ionicons name="people" size={20} color="#FFF" style={{marginRight: 10}} />
-                <Text style={styles.saveBtnText}>Envoyer à un collègue</Text>
-             </TouchableOpacity>
-             <TouchableOpacity style={styles.shareBtnPDF} onPress={() => initiateShareProcess('export')}>
-                <Ionicons name="document-text" size={20} color="#FF6B00" style={{marginRight: 10}} />
-                <Text style={{color:'#FF6B00', fontWeight:'bold'}}>Exporter en PDF</Text>
-             </TouchableOpacity>
+             <TouchableOpacity style={styles.shareBtnColl} onPress={() => setShareModalVisible(true)}><Ionicons name="people" size={20} color="#FFF" style={{marginRight: 10}} /><Text style={styles.saveBtnText}>Envoyer à un collègue</Text></TouchableOpacity>
+             <TouchableOpacity style={styles.shareBtnPDF} onPress={() => initiateShareProcess('export')}><Ionicons name="document-text" size={20} color="#FF6B00" style={{marginRight: 10}} /><Text style={{color:'#FF6B00', fontWeight:'bold'}}>Exporter en PDF</Text></TouchableOpacity>
              <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}><Text style={styles.deleteText}>Supprimer le dossier</Text></TouchableOpacity>
           </ScrollView>
         );
 
       case 'docs':
         return (
-          <FlatList 
-            key="docs-grid" data={patientDocs} keyExtractor={(item, idx) => idx.toString()} numColumns={2} contentContainerStyle={{paddingBottom: 20}}
-            ListEmptyComponent={<Text style={styles.emptyText}>Aucun document.</Text>}
-            renderItem={({item}) => (
-              <TouchableOpacity style={styles.docCard} onPress={() => { setSelectedDoc(item); setViewerVisible(true); }}>
-                 <Ionicons name={item.type === 'PMT' ? 'document-text' : 'card'} size={32} color={item.type === 'PMT' ? '#5C6BC0' : '#4CAF50'} />
-                 <Text style={styles.docTitle}>{item.type}</Text>
-                 <Text style={styles.docDate}>{moment(item.uploadDate).format('DD/MM/YY')}</Text>
-              </TouchableOpacity>
-            )}
-          />
+          <View style={{flex:1}}>
+            {/* BOUTONS D'AJOUT */}
+            <View style={styles.addDocsContainer}>
+                {uploading ? <ActivityIndicator color="#FF6B00" /> : (
+                  <>
+                    <TouchableOpacity style={styles.addDocBtn} onPress={() => pickAndUploadImage('PMT')}><Ionicons name="camera" size={18} color="#FFF"/><Text style={styles.addDocText}>PMT</Text></TouchableOpacity>
+                    <TouchableOpacity style={[styles.addDocBtn, {backgroundColor:'#4CAF50'}]} onPress={() => pickAndUploadImage('CarteVitale')}><Ionicons name="card" size={18} color="#FFF"/><Text style={styles.addDocText}>Vitale</Text></TouchableOpacity>
+                    <TouchableOpacity style={[styles.addDocBtn, {backgroundColor:'#2196F3'}]} onPress={() => pickAndUploadImage('Mutuelle')}><Ionicons name="medkit" size={18} color="#FFF"/><Text style={styles.addDocText}>Mutuelle</Text></TouchableOpacity>
+                  </>
+                )}
+            </View>
+
+            <FlatList 
+                data={patientDocs} keyExtractor={(item, idx) => idx.toString()} numColumns={2} contentContainerStyle={{paddingBottom: 20}}
+                ListEmptyComponent={<Text style={styles.emptyText}>Aucun document.</Text>}
+                renderItem={({item}) => (
+                <View style={styles.docCardContainer}>
+                    <TouchableOpacity style={styles.docCard} onPress={() => { setSelectedDoc(item); setViewerVisible(true); }}>
+                        <Ionicons name={item.type === 'PMT' ? 'document-text' : 'card'} size={32} color={item.type === 'PMT' ? '#5C6BC0' : '#4CAF50'} />
+                        <Text style={styles.docTitle}>{item.type}</Text>
+                        <Text style={styles.docDate}>{moment(item.uploadDate).format('DD/MM/YY')}</Text>
+                    </TouchableOpacity>
+                    {/* BOUTON SUPPRIMER */}
+                    <TouchableOpacity style={styles.deleteDocBadge} onPress={() => deleteDocument(item._id)}>
+                        <Ionicons name="trash" size={14} color="#FFF" />
+                    </TouchableOpacity>
+                </View>
+                )}
+            />
+          </View>
         );
       case 'history':
         return (
@@ -318,7 +351,7 @@ export default function PatientsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.searchHeader}>
         <View style={styles.searchBar}>
           <Ionicons name="search" size={20} color="#999" />
@@ -330,7 +363,7 @@ export default function PatientsScreen() {
         <FlatList data={filteredPatients} keyExtractor={item => item._id} renderItem={renderItem} contentContainerStyle={{ padding: 15 }} ListEmptyComponent={<Text style={styles.emptyText}>Aucun patient trouvé.</Text>} />
       )}
 
-      {/* MODAL PRINCIPALE */}
+      {/* MODAL FICHE PATIENT */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
@@ -348,7 +381,7 @@ export default function PatientsScreen() {
         </View>
       </Modal>
 
-      {/* MODAL COLLÈGUE */}
+      {/* MODALS PARTAGE */}
       <Modal visible={shareModalVisible} animationType="slide" presentationStyle="formSheet">
         <View style={styles.modalContainer}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>Destinataire</Text><TouchableOpacity onPress={() => setShareModalVisible(false)}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity></View>
@@ -356,32 +389,18 @@ export default function PatientsScreen() {
         </View>
       </Modal>
 
-      {/* MODAL SÉLECTION DOCS + CHOIX METHODE */}
       <Modal visible={docSelectionModal} animationType="slide" presentationStyle="formSheet">
         <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Documents à joindre</Text>
-                <TouchableOpacity onPress={() => setDocSelectionModal(false)}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity>
-            </View>
-            <View style={{padding:15, backgroundColor:'#FFF3E0'}}><Text style={{color:'#E65100', fontSize:12}}>Sélectionnez les documents.</Text></View>
+            <View style={styles.modalHeader}><Text style={styles.modalTitle}>Documents à joindre</Text><TouchableOpacity onPress={() => setDocSelectionModal(false)}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity></View>
             <FlatList data={patientDocs} keyExtractor={item => item._id} renderItem={renderDocSelectionItem} contentContainerStyle={{padding:20}} />
-            
             <View style={styles.actionFooter}>
                 {shareTarget === 'colleague' ? (
                     <View style={{flexDirection:'row', gap:10}}>
-                        <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#2196F3', flex:1}]} onPress={handleInternalShare}>
-                            <Ionicons name="cloud-upload" size={20} color="#FFF" style={{marginRight:5}}/>
-                            <Text style={styles.actionBtnText}>Transfert App</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#4CAF50', flex:1}]} onPress={handleSystemShare}>
-                            <Ionicons name="logo-whatsapp" size={20} color="#FFF" style={{marginRight:5}}/>
-                            <Text style={styles.actionBtnText}>WhatsApp</Text>
-                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#2196F3', flex:1}]} onPress={handleInternalShare}><Ionicons name="cloud-upload" size={20} color="#FFF" style={{marginRight:5}}/><Text style={styles.actionBtnText}>Transfert App</Text></TouchableOpacity>
+                        <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#4CAF50', flex:1}]} onPress={handleSystemShare}><Ionicons name="logo-whatsapp" size={20} color="#FFF" style={{marginRight:5}}/><Text style={styles.actionBtnText}>WhatsApp</Text></TouchableOpacity>
                     </View>
                 ) : (
-                    <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#FF6B00'}]} onPress={handleSystemShare}>
-                        <Text style={styles.actionBtnText}>Générer PDF</Text>
-                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionBtn, {backgroundColor:'#FF6B00'}]} onPress={handleSystemShare}><Text style={styles.actionBtnText}>Générer PDF</Text></TouchableOpacity>
                 )}
             </View>
         </View>
@@ -393,7 +412,7 @@ export default function PatientsScreen() {
             {selectedDoc && <Image source={{ uri: selectedDoc.imageData }} style={styles.fullImage} resizeMode="contain" />}
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -438,7 +457,14 @@ const styles = StyleSheet.create({
   contactAvatarText: { color: '#1976D2', fontWeight: 'bold', fontSize: 18 },
   contactName: { fontSize: 16, fontWeight: '600', color: '#333', flex: 1 },
 
-  docCard: { backgroundColor: '#FFF', flex: 0.5, margin: 6, padding: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 2, minHeight: 110 },
+  // DOCS STYLES
+  addDocsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  addDocBtn: { flex:1, marginHorizontal:4, padding:10, borderRadius:8, backgroundColor:'#FF6B00', flexDirection:'row', justifyContent:'center', alignItems:'center' },
+  addDocText: { color:'#FFF', fontWeight:'bold', marginLeft:5, fontSize:12 },
+
+  docCardContainer: { flex: 0.5, margin: 6 },
+  docCard: { backgroundColor: '#FFF', padding: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 2, minHeight: 110 },
+  deleteDocBadge: { position:'absolute', top:-5, right:-5, backgroundColor:'#D32F2F', width:24, height:24, borderRadius:12, justifyContent:'center', alignItems:'center', elevation:3 },
   docTitle: { marginTop: 8, fontWeight: '700', color: '#333', fontSize: 13, textAlign:'center' },
   docDate: { fontSize: 10, color: '#999', marginTop: 2 },
   

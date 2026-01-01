@@ -89,5 +89,16 @@ router.get('/patient/:patientId', auth, async (req, res) => {
     res.status(500).json({ error: "Erreur récupération documents" });
   }
 });
+// DELETE /api/documents/:id
+// Supprimer un document spécifique
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const doc = await Document.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ message: "Document introuvable" });
+    res.json({ message: "Document supprimé avec succès" });
+  } catch (err) {
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
 
 module.exports = router;
