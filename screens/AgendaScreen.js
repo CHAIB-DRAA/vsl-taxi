@@ -1,19 +1,21 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, FlatList, ActivityIndicator, StyleSheet,
-  Alert, TouchableOpacity, Modal, SafeAreaView, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions
+  Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
 
-// 👇 IMPORT DE TON NOUVEAU COMPOSANT
+// Import Wrapper
 import ScreenWrapper from '../components/ScreenWrapper';
 
 import RideCard from '../components/RideCard'; 
 import { useData } from '../contexts/DataContext'; 
 import api, { updateRide, shareRide, deleteRide } from '../services/api';
+
+const { height, width } = Dimensions.get('window');
 
 // Config Calendrier
 LocaleConfig.locales['fr'] = {
@@ -24,7 +26,8 @@ LocaleConfig.locales['fr'] = {
 };
 LocaleConfig.defaultLocale = 'fr';
 
-export default function AgendaScreen() {
+// 👇 N'oublie pas de récupérer { navigation } ici
+export default function AgendaScreen({ navigation }) {
   const { allRides, contacts, loading, loadData, handleGlobalRespond } = useData();
 
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
@@ -146,15 +149,29 @@ export default function AgendaScreen() {
   };
 
   return (
-    // 👇 LE WRAPPER GÈRE LA BARRE DU HAUT
     <ScreenWrapper>
       
-      {/* HEADER */}
+      {/* HEADER AMÉLIORÉ (Avec Bouton Settings) */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Planning</Text>
-        <TouchableOpacity onPress={() => setShowCalendar(!showCalendar)}>
-          <Ionicons name={showCalendar ? "chevron-up" : "calendar-outline"} size={24} color="#FF6B00" />
-        </TouchableOpacity>
+        
+        <View style={styles.headerRightButtons}>
+            {/* Bouton Settings (Restauré) */}
+            <TouchableOpacity 
+                onPress={() => navigation.navigate('Settings')}
+                style={[styles.iconButton, {marginRight: 10}]}
+            >
+              <Ionicons name="settings-outline" size={24} color="#333" />
+            </TouchableOpacity>
+
+            {/* Bouton Calendrier Toggle */}
+            <TouchableOpacity 
+                onPress={() => setShowCalendar(!showCalendar)}
+                style={[styles.iconButton, {backgroundColor: '#FFF3E0'}]}
+            >
+              <Ionicons name={showCalendar ? "chevron-up" : "calendar-outline"} size={24} color="#FF6B00" />
+            </TouchableOpacity>
+        </View>
       </View>
 
       {/* CALENDRIER */}
@@ -163,7 +180,14 @@ export default function AgendaScreen() {
           onDayPress={(day) => setSelectedDate(day.dateString)}
           markedDates={markedDates}
           markingType={'multi-dot'}
-          theme={{ todayTextColor: '#FF6B00', selectedDayBackgroundColor: '#FF6B00', arrowColor: '#FF6B00' }}
+          theme={{ 
+              todayTextColor: '#FF6B00', 
+              selectedDayBackgroundColor: '#FF6B00', 
+              arrowColor: '#FF6B00',
+              textDayFontSize: 16, 
+              textMonthFontSize: 18,
+              textDayHeaderFontSize: 14
+          }}
         />
       )}
 
@@ -174,7 +198,7 @@ export default function AgendaScreen() {
           <View style={styles.countBadge}><Text style={styles.countText}>{dailyRides.length}</Text></View>
         </View>
 
-        {loading ? <ActivityIndicator color="#FF6B00" /> : (
+        {loading ? <ActivityIndicator color="#FF6B00" size="large" style={{marginTop: 50}} /> : (
           <FlatList
             data={dailyRides}
             keyExtractor={item => item._id}
@@ -187,22 +211,29 @@ export default function AgendaScreen() {
                 onRespond={(ride, action) => handleGlobalRespond(ride._id, action)} 
               />
             )}
-            ListEmptyComponent={<Text style={styles.emptyText}>Aucune course ce jour.</Text>}
+            ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                    <Ionicons name="car-sport-outline" size={50} color="#DDD" />
+                    <Text style={styles.emptyText}>Aucune course ce jour.</Text>
+                </View>
+            }
             refreshing={loading}
             onRefresh={() => loadData(false)}
             
-            // 👇 C'EST ICI LA CLÉ POUR LES BOUTONS DU BAS 👇
-            contentContainerStyle={{ padding: 15, paddingBottom: 120 }}
+            // 👇 FIX PADDING : 160 pour passer au dessus de la TabBar Flottante
+            contentContainerStyle={{ padding: 15, paddingBottom: 160 }}
+            showsVerticalScrollIndicator={false}
           />
         )}
       </View>
 
-      {/* ================= MODALS LOCALES ================= */}
+      {/* ================= MODALS ================= */}
 
       {/* 1. OPTIONS */}
       <Modal visible={modals.options} animationType="fade" transparent>
         <TouchableOpacity style={styles.modalOverlay} onPress={() => setModals({ ...modals, options: false })} activeOpacity={1}>
           <View style={styles.optionSheet}>
+            <View style={styles.sheetHandle} /> 
             <Text style={styles.sheetTitle}>Gérer la course</Text>
             <TouchableOpacity style={styles.sheetBtn} onPress={() => fetchRideDocuments(activeRide)}>
               <View style={[styles.iconBox, {backgroundColor: '#E3F2FD'}]}><Ionicons name="folder-open" size={24} color="#1976D2" /></View>
@@ -225,7 +256,9 @@ export default function AgendaScreen() {
         <View style={styles.docModalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.headerTitle}>Dossier Patient</Text>
-            <TouchableOpacity onPress={() => setModals({...modals, docs: false})}><Ionicons name="close-circle" size={30} color="#999"/></TouchableOpacity>
+            <TouchableOpacity onPress={() => setModals({...modals, docs: false})} hitSlop={{top:10, bottom:10, left:10, right:10}}>
+                <Ionicons name="close-circle" size={32} color="#999"/>
+            </TouchableOpacity>
           </View>
           {loadingDocs ? <ActivityIndicator size="large" color="#FF6B00" style={{marginTop:50}}/> : (
             <ScrollView contentContainerStyle={{padding: 20}}>
@@ -245,8 +278,11 @@ export default function AgendaScreen() {
       <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={closeShareModal}><Ionicons name="close" size={28} color="#333"/></TouchableOpacity>
+            <TouchableOpacity onPress={closeShareModal} hitSlop={{top:10, bottom:10, left:10, right:10}}>
+                <Ionicons name="close" size={28} color="#333"/>
+            </TouchableOpacity>
             <Text style={styles.headerTitle}>Partager la course</Text>
+            <View style={{width: 28}} /> 
           </View>
           {!contactToShare ? (
             <FlatList
@@ -264,7 +300,7 @@ export default function AgendaScreen() {
               )}
             />
           ) : (
-            <ScrollView contentContainerStyle={{padding: 20}}>
+            <ScrollView contentContainerStyle={{padding: 20}} keyboardShouldPersistTaps="handled">
               <View style={styles.selectedContactHeader}>
                  <View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{contactToShare.contactId?.fullName?.charAt(0)}</Text></View>
                  <Text style={styles.selectedContactName}>Pour : {contactToShare.contactId?.fullName}</Text>
@@ -283,7 +319,15 @@ export default function AgendaScreen() {
               )}
 
               <Text style={styles.noteLabel}>Message (Optionnel) :</Text>
-              <TextInput style={styles.noteInput} placeholder="Code porte, étage..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} />
+              <TextInput 
+                style={styles.noteInput} 
+                placeholder="Code porte, étage..." 
+                multiline 
+                numberOfLines={3} 
+                value={shareNote} 
+                onChangeText={setShareNote} 
+                textAlignVertical="top"
+              />
               
               <TouchableOpacity style={styles.sendShareBtn} onPress={finalizeShare}>
                 <Ionicons name="paper-plane" size={20} color="#FFF" style={{marginRight: 8}}/>
@@ -296,62 +340,122 @@ export default function AgendaScreen() {
 
       {/* 4. FIN DE COURSE */}
       <Modal visible={finishModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.finishCard}>
-            <Text style={styles.finishTitle}>Fin de Course</Text>
-            <TextInput style={styles.input} placeholder="KM Réels" keyboardType="numeric" value={billingData.kmReel} onChangeText={t => setBillingData({...billingData, kmReel: t})}/>
-            <TextInput style={styles.input} placeholder="Péages (€)" keyboardType="numeric" value={billingData.peage} onChangeText={t => setBillingData({...billingData, peage: t})}/>
-            <View style={styles.btnRow}>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => setFinishModal(false)}><Text>Annuler</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.confirmBtn} onPress={confirmFinishRide}><Text style={{color:'#FFF'}}>VALIDER</Text></TouchableOpacity>
+            <View style={styles.finishHeader}>
+                <Text style={styles.finishTitle}>Fin de Course</Text>
+                <TouchableOpacity onPress={() => setFinishModal(false)}>
+                    <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
             </View>
+            
+            <Text style={styles.inputLabel}>Kilométrage réel</Text>
+            <View style={styles.inputWrapper}>
+                <TextInput 
+                    style={styles.input} 
+                    placeholder="Ex: 25" 
+                    keyboardType="numeric" 
+                    value={billingData.kmReel} 
+                    onChangeText={t => setBillingData({...billingData, kmReel: t})}
+                />
+                <Text style={styles.unitText}>km</Text>
+            </View>
+
+            <Text style={styles.inputLabel}>Péages / Frais</Text>
+            <View style={styles.inputWrapper}>
+                <TextInput 
+                    style={styles.input} 
+                    placeholder="Ex: 5.50" 
+                    keyboardType="numeric" 
+                    value={billingData.peage} 
+                    onChangeText={t => setBillingData({...billingData, peage: t})}
+                />
+                <Text style={styles.unitText}>€</Text>
+            </View>
+            
+            <TouchableOpacity style={styles.confirmBtn} onPress={confirmFinishRide}>
+                <Text style={{color:'#FFF', fontWeight:'bold', fontSize: 16}}>VALIDER LA COURSE</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </ScreenWrapper>
   );
 }
 
 const styles = StyleSheet.create({
-  // Plus besoin de padding ici, ScreenWrapper gère le fond et le haut
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, backgroundColor: '#FFF' },
-  headerTitle: { fontSize: 22, fontWeight: 'bold' },
-  listContainer: { flex: 1, paddingHorizontal: 15 },
-  listHeader: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 15 },
-  dateTitle: { fontSize: 18, fontWeight: '600', textTransform: 'capitalize' },
-  countBadge: { backgroundColor: '#FF6B00', borderRadius: 12, paddingHorizontal: 10, justifyContent:'center' },
-  countText: { color: '#FFF', fontWeight: 'bold' },
-  emptyText: { textAlign: 'center', color: '#999', marginTop: 20 },
-  
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  optionSheet: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
-  sheetTitle: { textAlign: 'center', fontWeight: 'bold', color: '#999', marginBottom: 20 },
-  sheetBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#F5F5F5' },
-  iconBox: { width: 40, height: 40, borderRadius: 20, justifyContent:'center', alignItems:'center', marginRight: 15 },
-  sheetBtnText: { fontSize: 16, fontWeight: '500', color: '#333' },
+  // HEADER
+  header: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center',
+    padding: 20, 
+    backgroundColor: '#FFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    elevation: 2 
+  },
+  headerTitle: { fontSize: 26, fontWeight: '800', color: '#1A1A1A' },
+  headerRightButtons: { flexDirection: 'row', alignItems: 'center' },
+  iconButton: { padding: 8, borderRadius: 12, backgroundColor: '#F5F5F5' }, // Style bouton uniformisé
 
-  // Styles Docs & Share
+  // LISTE
+  listContainer: { flex: 1, paddingHorizontal: 15, backgroundColor: '#F8F9FA' },
+  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
+  dateTitle: { fontSize: 18, fontWeight: '700', textTransform: 'capitalize', color: '#333' },
+  countBadge: { backgroundColor: '#FF6B00', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4 },
+  countText: { color: '#FFF', fontWeight: 'bold' },
+  emptyContainer: { alignItems: 'center', marginTop: 50 },
+  emptyText: { textAlign: 'center', color: '#999', marginTop: 10, fontSize: 16 },
+  
+  // MODAL OVERLAY
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  
+  // OPTION SHEET
+  optionSheet: { 
+    backgroundColor: '#FFF', 
+    borderTopLeftRadius: 25, 
+    borderTopRightRadius: 25, 
+    padding: 25,
+    paddingBottom: 40 
+  },
+  sheetHandle: { width: 40, height: 4, backgroundColor: '#DDD', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  sheetTitle: { textAlign: 'center', fontWeight: 'bold', fontSize: 18, color: '#333', marginBottom: 25 },
+  sheetBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderColor: '#F5F5F5' },
+  sheetBtnText: { fontSize: 17, fontWeight: '500', color: '#333' },
+  iconBox: { width: 44, height: 44, borderRadius: 22, justifyContent:'center', alignItems:'center', marginRight: 15 },
+
+  // DOCS & SHARE
   docModalContainer: { flex: 1, backgroundColor: '#F2F2F2' },
-  docCard: { backgroundColor: '#FFF', borderRadius: 12, marginBottom: 20, padding: 10 },
-  docTitle: { fontWeight: 'bold', marginBottom: 5 },
-  docImage: { width: '100%', height: 200 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#EEE' },
-  contactName: { fontSize: 16, fontWeight: '500' },
-  selectedContactName: { fontSize: 18, fontWeight: 'bold', color: '#E65100', marginBottom: 10 },
-  noteInput: { backgroundColor: '#F5F5F5', borderRadius: 10, padding: 15, height: 100, marginBottom: 20 },
-  sendShareBtn: { backgroundColor: '#FF6B00', padding: 15, borderRadius: 10, alignItems: 'center', flexDirection:'row', justifyContent:'center' },
-  sendShareText: { color: '#FFF', fontWeight: 'bold' },
-  finishCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 15, margin: 20 },
-  finishTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
-  input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 8, padding: 10, marginBottom: 15, fontSize: 16 },
-  btnRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  cancelBtn: { padding: 15 },
-  confirmBtn: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 10 },
-  modalHeader: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#FFF' },
-  phoneInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', padding: 12, borderRadius: 8, marginBottom: 20 },
-  phoneInfoText: { marginLeft: 10, fontSize: 13, color: '#2E7D32', flex: 1 },
-  noteLabel: { fontWeight: 'bold', color: '#555', marginBottom: 10 },
-  avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFE0B2', justifyContent:'center', alignItems:'center', marginRight: 15 },
-  avatarText: { color: '#EF6C00', fontWeight: 'bold', fontSize: 18 },
-  selectedContactHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, backgroundColor:'#FFF3E0', padding: 10, borderRadius: 10 },
+  docCard: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 20, padding: 12, elevation: 2 },
+  docTitle: { fontWeight: 'bold', marginBottom: 8, fontSize: 16 },
+  docImage: { width: '100%', height: height * 0.35, borderRadius: 8 }, 
+  
+  contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1, borderColor: '#EEE' },
+  contactName: { fontSize: 17, fontWeight: '600', color: '#333' },
+  
+  selectedContactHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, backgroundColor:'#FFF3E0', padding: 12, borderRadius: 12 },
+  selectedContactName: { fontSize: 17, fontWeight: 'bold', color: '#E65100', marginLeft: 10 },
+  
+  noteInput: { backgroundColor: '#FFF', borderRadius: 12, padding: 15, height: 120, marginBottom: 20, borderWidth: 1, borderColor: '#DDD', fontSize: 16 },
+  sendShareBtn: { backgroundColor: '#FF6B00', padding: 18, borderRadius: 14, alignItems: 'center', flexDirection:'row', justifyContent:'center', elevation: 3 },
+  sendShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+
+  // FINISH CARD
+  finishCard: { backgroundColor: '#FFF', padding: 25, borderTopLeftRadius: 25, borderTopRightRadius: 25 },
+  finishHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  finishTitle: { fontSize: 20, fontWeight: 'bold' },
+  inputLabel: { fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 8 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#DDD', borderRadius: 12, paddingHorizontal: 15, marginBottom: 20, height: 55, backgroundColor: '#FAFAFA' },
+  input: { flex: 1, fontSize: 18, fontWeight: 'bold', color: '#333' },
+  unitText: { fontSize: 16, color: '#999', fontWeight: 'bold' },
+  confirmBtn: { backgroundColor: '#4CAF50', padding: 18, borderRadius: 14, alignItems: 'center', marginTop: 10, elevation: 2 },
+
+  // COMMUNS
+  modalHeader: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#F0F0F0' },
+  phoneInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', padding: 12, borderRadius: 12, marginBottom: 20 },
+  phoneInfoText: { marginLeft: 10, fontSize: 14, color: '#2E7D32', flex: 1, fontWeight: '500' },
+  noteLabel: { fontWeight: 'bold', color: '#555', marginBottom: 10, fontSize: 15 },
+  avatarPlaceholder: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFE0B2', justifyContent:'center', alignItems:'center', marginRight: 10 },
+  avatarText: { color: '#EF6C00', fontWeight: 'bold', fontSize: 20 },
 });

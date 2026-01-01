@@ -66,5 +66,30 @@ router.get('/by-ride/:rideId', async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+// GET /api/documents/patient/:patientId
+// Cette route doit trouver TOUS les docs liés à ce patient (via rideId OU patientId)
+router.get('/patient/:patientId', auth, async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    // 1. Trouver toutes les courses de ce patient (pour récupérer les vieux docs liés aux rides)
+    const rides = await Ride.find({ patientId: patientId }).select('_id');
+    const rideIds = rides.map(r => r._id);
+
+    // 2. Trouver les documents qui :
+    // - Soit ont le patientId direct
+    // - Soit sont liés à une course de ce patient
+    const docs = await Document.find({
+      $or: [
+        { patientId: patientId },
+        { rideId: { $in: rideIds } }
+      ]
+    });
+
+    res.json(docs);
+  } catch (err) {
+    res.status(500).json({ error: "Erreur récupération documents" });
+  }
+});
 
 module.exports = router;

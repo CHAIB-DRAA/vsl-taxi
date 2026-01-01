@@ -142,5 +142,8 @@ export const shareRide = async (rideId, contactId, note = '') => {
     const res = await api.delete(`/patients/${id}`);
     return res.data;
   };
+// services/api.js
+
+// ... tes autres imports et configs ...
 
 export default api;

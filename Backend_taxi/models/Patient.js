@@ -1,14 +1,13 @@
 const mongoose = require('mongoose');
 
-const patientSchema = mongoose.Schema({
-  // Le patient appartient à un chauffeur spécifique (toi)
-  chauffeurId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  
+const PatientSchema = new mongoose.Schema({
   fullName: { type: String, required: true },
-  address: { type: String, default: '' },
-  phone: { type: String, default: '' },
+  phone: String,
+  address: String,
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   
-  // Tu pourras ajouter plus tard : numéro sécu, mutuelle, etc.
-}, { timestamps: true });
+  // 👈 AJOUT : Liste des collègues qui ont le droit de voir ce patient
+  sharedWith: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }] 
+});
 
-module.exports = mongoose.model('Patient', patientSchema);
+module.exports = mongoose.model('Patient', PatientSchema);
