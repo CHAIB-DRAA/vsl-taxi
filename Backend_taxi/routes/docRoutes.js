@@ -3,17 +3,16 @@ const router = express.Router();
 const multer = require('multer');
 const Document = require('../models/Document');
 const Ride = require('../models/Ride'); 
-
-// 👇 AJOUTE CETTE LIGNE (C'est ce qu'il manquait)
-const auth = require('../middleware/auth'); 
+const auth = require('../middleware/auth'); // Import du middleware d'auth
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// --- UPLOAD ---
-router.post('/upload', upload.single('photo'), async (req, res) => {
+// --- 1. UPLOAD (Générique : Patient, Course ou Chauffeur) ---
+// J'ai ajouté 'auth' ici pour avoir accès à req.user.id
+router.post('/upload', auth, upload.single('photo'), async (req, res) => {
   try {
-    const { patientName, docType, rideId, patientId } = req.body; // J'ai ajouté patientId au cas où
+    const { patientName, docType, rideId, patientId } = req.body;
     const file = req.file;
 
     if (!file) return res.status(400).json({ message: "Aucune image reçue" });
@@ -21,9 +20,10 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
     const base64Image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 
     const newDoc = new Document({
-      patientName: patientName,
+      userId: req.user.id, // 👈 IMPORTANT : On lie le document au chauffeur connecté
+      patientName: patientName || "Inconnu",
       rideId: rideId || null, 
-      patientId: patientId || null, // On sauvegarde aussi l'ID patient si dispo
+      patientId: patientId || null,
       type: docType,
       imageData: base64Image
     });
@@ -37,21 +37,36 @@ router.post('/upload', upload.single('photo'), async (req, res) => {
   }
 });
 
-// --- RÉCUPÉRATION PAR COURSE (Ancienne méthode, toujours utile) ---
-router.get('/by-ride/:rideId', async (req, res) => {
+// --- 2. RÉCUPÉRER MES DOCUMENTS ADMIN (Chauffeur) ---
+router.get('/driver/me', auth, async (req, res) => {
+  try {
+    // On cherche les documents qui T'appartiennent (userId)
+    // et qui ont le mot-clé spécial "CHAUFFEUR"
+    const docs = await Document.find({
+      userId: req.user.id,     // 👈 Sécurité : Uniquement tes docs
+      patientName: "CHAUFFEUR" // Filtre : Uniquement les docs admin
+    }).sort({ uploadDate: -1 });
+
+    res.json(docs);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// --- 3. RÉCUPÉRER PAR COURSE (Historique) ---
+router.get('/by-ride/:rideId', auth, async (req, res) => {
   try {
     const { rideId } = req.params;
     const ride = await Ride.findById(rideId);
     if (!ride) return res.status(404).json({ message: "Course introuvable" });
 
-    const patientName = ride.patientName;
-
     const docs = await Document.find({
       $or: [
         { rideId: rideId },
         { 
-          patientName: patientName, 
-          type: { $in: ['CarteVitale', 'Mutuelle'] }
+          patientName: ride.patientName, 
+          type: { $in: ['CarteVitale', 'Mutuelle'] } // Documents permanents du patient
         }
       ]
     }).sort({ uploadDate: -1 });
@@ -64,22 +79,20 @@ router.get('/by-ride/:rideId', async (req, res) => {
   }
 });
 
-// --- RÉCUPÉRATION PAR PATIENT (Nouvelle méthode pour le partage) ---
-// 👇 Maintenant 'auth' est bien défini grâce à l'import en haut
+// --- 4. RÉCUPÉRER PAR PATIENT (Dossier Patient) ---
 router.get('/patient/:patientId', auth, async (req, res) => {
   try {
     const { patientId } = req.params;
 
-    // 1. Trouver toutes les courses liées à ce patient (si le modèle Ride a bien un champ patientId)
-    // Note : Si tes anciennes courses n'ont pas de patientId, cette partie renverra vide, ce n'est pas grave.
+    // 1. Trouver les courses de ce patient pour avoir aussi les PMT liés aux courses
     const rides = await Ride.find({ patientId: patientId }).select('_id');
     const rideIds = rides.map(r => r._id);
 
-    // 2. Trouver les documents
+    // 2. Trouver les documents (Directs + liés aux courses)
     const docs = await Document.find({
       $or: [
-        { patientId: patientId }, // Docs liés directement au patient
-        { rideId: { $in: rideIds } } // Docs liés aux courses de ce patient (PMT)
+        { patientId: patientId }, 
+        { rideId: { $in: rideIds } }
       ]
     }).sort({ uploadDate: -1 });
 
@@ -89,38 +102,21 @@ router.get('/patient/:patientId', auth, async (req, res) => {
     res.status(500).json({ error: "Erreur récupération documents" });
   }
 });
-// DELETE /api/documents/:id
-// Supprimer un document spécifique
+
+// --- 5. SUPPRIMER UN DOCUMENT ---
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const doc = await Document.findByIdAndDelete(req.params.id);
-    if (!doc) return res.status(404).json({ message: "Document introuvable" });
+    // 👈 SÉCURITÉ : On utilise findOneAndDelete avec userId
+    // Cela empêche de supprimer le document d'un autre chauffeur par erreur
+    const doc = await Document.findOneAndDelete({ 
+      _id: req.params.id, 
+      userId: req.user.id 
+    });
+
+    if (!doc) return res.status(404).json({ message: "Document introuvable ou accès refusé" });
+    
     res.json({ message: "Document supprimé avec succès" });
   } catch (err) {
-    res.status(500).json({ message: "Erreur serveur" });
-  }
-});
-// GET /api/documents/driver/me
-// Récupère les documents administratifs du chauffeur connecté
-router.get('/driver/me', auth, async (req, res) => {
-  try {
-    // On cherche les documents qui n'ont PAS de patientId NI de rideId
-    // et qui ont été uploadés par moi (via le middleware auth qui donne req.user.id)
-    // Note: Il faudra s'assurer que le modèle Document a bien un champ 'uploadedBy' ou qu'on filtre par un type spécifique.
-    
-    // Solution simple : On filtre par les types de documents administratifs
-    const adminTypes = ['Permis', 'CartePro', 'VisiteMedicale', 'Assurance', 'Kbis', 'Formation'];
-    
-    // Si tu n'as pas de champ 'uploadedBy' dans ton modèle Document, 
-    // on va supposer que tu es le seul utilisateur ou on filtre par patientName = "CHAUFFEUR"
-    const docs = await Document.find({
-      type: { $in: adminTypes },
-      patientName: "CHAUFFEUR" // On utilisera ce mot-clé pour tes docs perso
-    }).sort({ uploadDate: -1 });
-
-    res.json(docs);
-  } catch (err) {
-    console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
