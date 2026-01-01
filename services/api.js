@@ -134,8 +134,8 @@ export const shareRide = async (rideId, contactId, note = '') => {
   };
  // services/api.js
 
-export const respondToShare = async (rideId, action) => {
-  // action doit être 'accepted' ou 'refused'
+ export const respondToShare = async (rideId, action) => {
+  // L'URL doit être '/rides/respond-share' (le /api est souvent ajouté auto par axios)
   return api.post('/rides/respond-share', { rideId, action });
 };
   export const deletePatient = async (id) => {

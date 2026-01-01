@@ -19,9 +19,8 @@ router.put('/:id', authMiddleware, rideController.updateRide);
 router.delete('/:id', authMiddleware, rideController.deleteRide);
 // 5. Partage & Réponse
 router.post('/:rideId/share', authMiddleware,rideController.shareRide); // La route de partage
-router.post('/respond', authMiddleware, rideController.respondRideShare);
+router.post('/respond-share', authMiddleware, rideController.respondRideShare);
 router.put('/:id/facturation', authMiddleware, rideController.updateRideFacturation);
-
 // 6. Anciennes routes (Tu peux les garder pour l'instant)
 //router.post('/:id/start', authMiddleware, rideController.startRide);
 //router.post('/:id/end', authMiddleware, rideController.endRide);

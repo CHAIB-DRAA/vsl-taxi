@@ -157,31 +157,34 @@ exports.shareRide = async (req, res) => {
 // 🚀 6. RÉPONSE (ACCEPTER / REFUSER)
 exports.respondRideShare = async (req, res) => {
   try {
-    const { rideId, action } = req.body; // action = 'accepted' ou 'refused'
+    const { rideId, action } = req.body;
     const myId = req.user.id;
 
-    // On cherche le partage qui ME concerne (toUserId = moi)
-    const share = await RideShare.findOne({ rideId, toUserId: myId });
+    console.log(`Réponse partage : Ride ${rideId} - Action ${action} - User ${myId}`);
 
-    if (!share) return res.status(404).json({ message: "Demande de partage introuvable" });
+    // IMPORTANT : On cherche dans RideShare (l'invitation), pas dans Ride
+    const share = await RideShare.findOne({ rideId: rideId, toUserId: myId });
+
+    if (!share) {
+      console.log("Invitation introuvable dans RideShare");
+      return res.status(404).json({ message: "Invitation introuvable ou déjà traitée" });
+    }
 
     if (action === 'refused') {
-      // Si refusé, on supprime le partage (la course disparaît de mon agenda)
       await RideShare.findByIdAndDelete(share._id);
-      return res.json({ message: "Partage refusé." });
+      return res.json({ message: "Invitation refusée" });
     } 
     
     if (action === 'accepted') {
-      // Si accepté, on met à jour le statut
       share.statusPartage = 'accepted';
       await share.save();
-      return res.json({ message: "Course acceptée et ajoutée à votre agenda !" });
+      return res.json({ message: "Course acceptée" });
     }
 
     res.status(400).json({ message: "Action inconnue" });
 
   } catch (err) {
-    console.error(err);
+    console.error("Erreur respond:", err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
