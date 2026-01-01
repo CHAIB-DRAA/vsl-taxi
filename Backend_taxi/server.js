@@ -1,13 +1,15 @@
-// server.js
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+
+// Import des routes
 const rideRoutes = require('./routes/rideRoutes');
 const userRoutes = require('./routes/userRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const docRoutes = require('./routes/docRoutes');
 const patientRoutes = require('./routes/patientRoutes');
+const shareRoutes = require('./routes/shareRoutes'); // 👈 1. IMPORT AJOUTÉ
 // Chargement des variables d'environnement
 dotenv.config();
 
@@ -16,24 +18,28 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json()); // Remplace body-parser (inclus depuis Express v4.16+)
+app.use(express.json());
 
 // Connexion à MongoDB
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log('✅ Connecté à MongoDB'))
 .catch((err) => console.error('❌ Erreur de connexion à MongoDB :', err));
 
-// Routes
+// Définition des Routes
 app.use('/api/rides', rideRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/documents', docRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/contacts', contactRoutes);
+app.use('/api/share', shareRoutes); // 👈 2. ROUTE ACTIVÉE ICI
+
+// Route de test (Ping)
+app.get('/ping', (req, res) => {
+    res.status(200).send('Pong! Server is alive 🤖');
+});
+
 // Démarrage du serveur
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-	console.log(`🚀 Serveur démarré sur le port ${PORT}`);
+    console.log(`🚀 Serveur démarré sur le port ${PORT}`);
 });
-app.get('/ping', (req, res) => {
-	res.status(200).send('Pong! Server is alive 🤖');
-  });
