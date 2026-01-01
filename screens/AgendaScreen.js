@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, FlatList, ActivityIndicator, StyleSheet,
   Alert, TouchableOpacity, Modal, SafeAreaView, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions
@@ -48,21 +49,36 @@ export default function AgendaScreen() {
   const [finishModal, setFinishModal] = useState(false);
   const [billingData, setBillingData] = useState({ kmReel: '', peage: '' });
 
-  // 1. CHARGEMENT
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [ridesData, contactsData] = await Promise.all([getRides(), getContacts()]);
-      setAllRides(ridesData || []);
-      setContacts(contactsData || []);
-    } catch (err) {
-      console.error("Erreur Agenda:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+ // 1. CHARGEMENT (Modifié pour supporter le mode silencieux)
+ const loadData = useCallback(async (isSilent = false) => {
+  try {
+    // On affiche le spinner SEULEMENT si ce n'est pas un chargement silencieux
+    if (!isSilent) setLoading(true);
+    
+    const [ridesData, contactsData] = await Promise.all([getRides(), getContacts()]);
+    setAllRides(ridesData || []);
+    setContacts(contactsData || []);
+  } catch (err) {
+    console.error("Erreur Agenda:", err);
+  } finally {
+    if (!isSilent) setLoading(false);
+  }
+}, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+// MODIFICATION : Chargement initial + Rafraîchissement auto
+useEffect(() => {
+  // 1. Chargement initial (avec spinner)
+  loadData(false);
+
+  // 2. Mise en place du rafraîchissement auto toutes les 10 secondes
+  const interval = setInterval(() => {
+    console.log("🔄 Vérification auto des nouvelles courses...");
+    loadData(true); // true = mode silencieux (pas de spinner)
+  }, 10000); // 10000 ms = 10 secondes
+
+  // 3. Nettoyage quand on quitte l'écran (très important pour éviter les fuites de mémoire)
+  return () => clearInterval(interval);
+}, [loadData]);
 
   // 🔥 DÉTECTION AUTOMATIQUE DES INVITATIONS 🔥
   useEffect(() => {
@@ -77,6 +93,13 @@ export default function AgendaScreen() {
     }
   }, [allRides]);
 
+  
+  // Rafraîchir quand on revient sur l'écran (onglet)
+  useFocusEffect(
+    useCallback(() => {
+      loadData(true); // Chargement silencieux en revenant
+    }, [loadData])
+  );
 
   // 2. DOCUMENTS
   const fetchRideDocuments = async (ride) => {

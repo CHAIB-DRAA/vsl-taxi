@@ -155,30 +155,44 @@ exports.shareRide = async (req, res) => {
 };
 
 // 🚀 6. RÉPONSE (ACCEPTER / REFUSER)
+// 🚀 6. RÉPONSE : TRANSFERT DE PROPRIÉTÉ (VRAI REMPLACEMENT ID)
 exports.respondRideShare = async (req, res) => {
   try {
-    const { rideId, action } = req.body;
-    const myId = req.user.id;
+    const { rideId, action } = req.body; // 'accepted' ou 'refused'
+    const myId = req.user.id; // MOI (Celui qui accepte)
 
-    console.log(`Réponse partage : Ride ${rideId} - Action ${action} - User ${myId}`);
-
-    // IMPORTANT : On cherche dans RideShare (l'invitation), pas dans Ride
-    const share = await RideShare.findOne({ rideId: rideId, toUserId: myId });
+    // 1. On cherche l'invitation
+    const share = await RideShare.findOne({ rideId: rideId, toUserId: myId })
+      .populate('fromUserId', 'fullName'); // On récupère le nom de l'expéditeur pour l'historique
 
     if (!share) {
-      console.log("Invitation introuvable dans RideShare");
-      return res.status(404).json({ message: "Invitation introuvable ou déjà traitée" });
+      return res.status(404).json({ message: "Invitation introuvable ou expirée" });
     }
 
     if (action === 'refused') {
+      // Si refusé, on supprime juste l'invitation. La course reste chez l'expéditeur.
       await RideShare.findByIdAndDelete(share._id);
       return res.json({ message: "Invitation refusée" });
     } 
     
     if (action === 'accepted') {
-      share.statusPartage = 'accepted';
-      await share.save();
-      return res.json({ message: "Course acceptée" });
+      // 🔥 C'EST ICI QUE LE TRANSFERT SE FAIT 🔥
+      
+      // 1. On met à jour la course originale : 
+      // - On remplace le chauffeurId par le TIEN (myId)
+      // - On note qu'elle vient d'un partage (pour afficher le badge orange)
+      await Ride.findByIdAndUpdate(rideId, {
+        chauffeurId: myId, // <--- CHANGEMENT DE PROPRIÉTAIRE
+        isShared: true,
+        // Optionnel : On peut stocker le nom de l'ancien chauffeur dans une note ou un champ
+        shareNote: share.sharedNote || `Transféré par ${share.fromUserId?.fullName}` 
+      });
+
+      // 2. On supprime l'invitation RideShare car le transfert est terminé
+      // (La course est maintenant une course "normale" qui t'appartient)
+      await RideShare.findByIdAndDelete(share._id);
+
+      return res.json({ message: "Course acceptée et transférée sur votre compte !" });
     }
 
     res.status(400).json({ message: "Action inconnue" });
