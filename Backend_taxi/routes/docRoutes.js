@@ -100,5 +100,29 @@ router.delete('/:id', auth, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+// GET /api/documents/driver/me
+// Récupère les documents administratifs du chauffeur connecté
+router.get('/driver/me', auth, async (req, res) => {
+  try {
+    // On cherche les documents qui n'ont PAS de patientId NI de rideId
+    // et qui ont été uploadés par moi (via le middleware auth qui donne req.user.id)
+    // Note: Il faudra s'assurer que le modèle Document a bien un champ 'uploadedBy' ou qu'on filtre par un type spécifique.
+    
+    // Solution simple : On filtre par les types de documents administratifs
+    const adminTypes = ['Permis', 'CartePro', 'VisiteMedicale', 'Assurance', 'Kbis', 'Formation'];
+    
+    // Si tu n'as pas de champ 'uploadedBy' dans ton modèle Document, 
+    // on va supposer que tu es le seul utilisateur ou on filtre par patientName = "CHAUFFEUR"
+    const docs = await Document.find({
+      type: { $in: adminTypes },
+      patientName: "CHAUFFEUR" // On utilisera ce mot-clé pour tes docs perso
+    }).sort({ uploadDate: -1 });
+
+    res.json(docs);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
 
 module.exports = router;

@@ -21,7 +21,7 @@ import SignUpScreen from './screens/SignupScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import MainTabs from './screens/MainTabs';
 import ContactScreen from './screens/ContactScreen';
-
+import DocumentsScreen from './screens/DocumentsScreen';
 // Import de l'API
 import api, { getRides } from './services/api';
 
@@ -186,6 +186,12 @@ export default function App() {
                       headerBackTitleVisible: false
                     }} 
                   />
+
+<Stack.Screen 
+          name="Documents" 
+          component={DocumentsScreen} 
+          options={{ title: 'Mes Documents' }} 
+        />
                 </Stack.Group>
               )}
             </Stack.Navigator>

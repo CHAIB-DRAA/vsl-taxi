@@ -8,11 +8,16 @@ import moment from 'moment';
 import 'moment/locale/fr';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as ImagePicker from 'expo-image-picker'; // 👈 IMPORT IMPORTANT
+
+// 👇 On garde ça pour le PDF, mais on a retiré l'import direct de ImagePicker pour la caméra
+// car c'est maintenant géré par le composant.
 
 // Contexte & API
 import { useData } from '../contexts/DataContext';
 import api, { getPatients, updatePatient, deletePatient, getRides } from '../services/api';
+
+// 👇 IMPORT DU NOUVEAU COMPOSANT
+import DocumentScannerButton from '../components/DocumentScannerButton';
 
 export default function PatientsScreen() {
   const { contacts } = useData(); 
@@ -124,27 +129,9 @@ export default function PatientsScreen() {
     finally { setLoadingDetails(false); }
   };
 
-  // --- 📸 AJOUT DE DOCUMENT (CAMÉRA) ---
-  const pickAndUploadImage = async (docType) => {
-    try {
-      // Permission
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (permission.status !== 'granted') {
-        return Alert.alert("Erreur", "Permission caméra refusée.");
-      }
-
-      // Ouvrir Caméra
-      let result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.5, // Compression
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        uploadDocument(result.assets[0].uri, docType);
-      }
-    } catch (err) {
-      Alert.alert("Erreur", "Impossible d'ouvrir la caméra");
-    }
+  // --- 📸 AJOUT DE DOCUMENT (CALLBACK DU COMPOSANT) ---
+  const handleDocumentScanned = async (uri, docType) => {
+    await uploadDocument(uri, docType);
   };
 
   const uploadDocument = async (uri, docType) => {
@@ -307,15 +294,29 @@ export default function PatientsScreen() {
       case 'docs':
         return (
           <View style={{flex:1}}>
-            {/* BOUTONS D'AJOUT */}
-            <View style={styles.addDocsContainer}>
-                {uploading ? <ActivityIndicator color="#FF6B00" /> : (
-                  <>
-                    <TouchableOpacity style={styles.addDocBtn} onPress={() => pickAndUploadImage('PMT')}><Ionicons name="camera" size={18} color="#FFF"/><Text style={styles.addDocText}>PMT</Text></TouchableOpacity>
-                    <TouchableOpacity style={[styles.addDocBtn, {backgroundColor:'#4CAF50'}]} onPress={() => pickAndUploadImage('CarteVitale')}><Ionicons name="card" size={18} color="#FFF"/><Text style={styles.addDocText}>Vitale</Text></TouchableOpacity>
-                    <TouchableOpacity style={[styles.addDocBtn, {backgroundColor:'#2196F3'}]} onPress={() => pickAndUploadImage('Mutuelle')}><Ionicons name="medkit" size={18} color="#FFF"/><Text style={styles.addDocText}>Mutuelle</Text></TouchableOpacity>
-                  </>
-                )}
+            {/* BOUTONS D'AJOUT (VIA COMPOSANT SCANNER) */}
+            <View style={styles.scanGrid}>
+                <DocumentScannerButton 
+                    title="PMT" 
+                    docType="PMT" 
+                    color="#FF6B00" 
+                    onScan={handleDocumentScanned} 
+                    isLoading={uploading}
+                />
+                <DocumentScannerButton 
+                    title="Vitale" 
+                    docType="CarteVitale" 
+                    color="#4CAF50" 
+                    onScan={handleDocumentScanned} 
+                    isLoading={uploading}
+                />
+                <DocumentScannerButton 
+                    title="Mutuelle" 
+                    docType="Mutuelle" 
+                    color="#2196F3" 
+                    onScan={handleDocumentScanned} 
+                    isLoading={uploading}
+                />
             </View>
 
             <FlatList 
@@ -457,10 +458,9 @@ const styles = StyleSheet.create({
   contactAvatarText: { color: '#1976D2', fontWeight: 'bold', fontSize: 18 },
   contactName: { fontSize: 16, fontWeight: '600', color: '#333', flex: 1 },
 
-  // DOCS STYLES
-  addDocsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  addDocBtn: { flex:1, marginHorizontal:4, padding:10, borderRadius:8, backgroundColor:'#FF6B00', flexDirection:'row', justifyContent:'center', alignItems:'center' },
-  addDocText: { color:'#FFF', fontWeight:'bold', marginLeft:5, fontSize:12 },
+  // SCANNER STYLE GRID
+  scanGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  // (Les styles addDocBtn et addDocText ne sont plus nécessaires, remplacés par le composant)
 
   docCardContainer: { flex: 0.5, margin: 6 },
   docCard: { backgroundColor: '#FFF', padding: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 2, minHeight: 110 },

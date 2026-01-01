@@ -6,19 +6,24 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
+// 👇 1. IMPORT DU HOOK DE NAVIGATION (C'est la solution au bug)
+import { useNavigation } from '@react-navigation/native';
+
 // Import de ton API
 import api from '../services/api'; 
 
-export default function ProfileScreen({ navigation }) {
-  // État initial vide (sera rempli par l'API)
+export default function ProfileScreen() {
+  // 👇 2. INITIALISATION DE LA NAVIGATION
+  const navigation = useNavigation(); 
+
+  // État initial vide
   const [user, setUser] = useState({
     fullName: '',
     email: '',
     phone: '',
     avatar: null,
-    rating: 5.0,      // Valeur par défaut si pas en BDD
+    rating: 5.0,
     totalRides: 0,
-    licenseNumber: '' // À ajouter dans ton modèle User si nécessaire
   });
 
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -33,14 +38,10 @@ export default function ProfileScreen({ navigation }) {
 
   const fetchUserProfile = async () => {
     try {
-      // Appel au backend : GET /api/user/profile
       const response = await api.get('/user/profile');
-      
-      // On fusionne avec les valeurs par défaut pour éviter les bugs si des champs manquent
       setUser(prev => ({ ...prev, ...response.data }));
     } catch (err) {
       console.error("Erreur chargement profil:", err);
-      // Alert.alert("Erreur", "Impossible de charger le profil.");
     } finally {
       setLoadingInitial(false);
     }
@@ -59,17 +60,16 @@ export default function ProfileScreen({ navigation }) {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
-      base64: true, // On récupère le base64 pour l'envoyer facilement
+      base64: true,
     });
 
     if (!result.canceled) {
       const newImageUri = result.assets[0].uri;
       const base64Data = `data:image/jpeg;base64,${result.assets[0].base64}`;
       
-      // Mise à jour optimiste (affichage immédiat)
+      // Mise à jour visuelle immédiate
       setUser({ ...user, avatar: newImageUri });
 
-      // Envoi au backend
       try {
         await api.put('/user/profile', { avatar: base64Data });
       } catch (e) {
@@ -82,14 +82,13 @@ export default function ProfileScreen({ navigation }) {
   const handleSaveProfile = async () => {
     setLoadingSave(true);
     try {
-      // Appel API : PUT /api/user/profile
       const res = await api.put('/user/profile', {
         fullName: editedData.fullName,
         phone: editedData.phone,
         email: editedData.email
       });
 
-      setUser(prev => ({ ...prev, ...res.data })); // Mise à jour de l'affichage
+      setUser(prev => ({ ...prev, ...res.data }));
       setEditModalVisible(false);
       Alert.alert("Succès", "Profil mis à jour !");
     } catch (err) {
@@ -177,7 +176,8 @@ export default function ProfileScreen({ navigation }) {
             icon="document-text-outline" 
             title="Mes Documents" 
             subtitle="Permis, Assurance, K-bis..."
-            onPress={() => Alert.alert("À venir", "Gestion des documents admin")}
+            // 👇 3. NAVIGATION VERS L'ÉCRAN DOCUMENTS
+            onPress={() => navigation.navigate('Documents')}
           />
           <MenuOption 
             icon="notifications-outline" 

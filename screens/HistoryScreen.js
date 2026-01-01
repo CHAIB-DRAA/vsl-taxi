@@ -7,12 +7,14 @@ import moment from 'moment';
 import 'moment/locale/fr';
 
 // Modules natifs
-import * as ImagePicker from 'expo-image-picker'; 
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 // API
 import api, { getRides, updateRide } from '../services/api'; 
+
+// 👇 IMPORT DU NOUVEAU COMPOSANT
+import DocumentScannerButton from '../components/DocumentScannerButton'; 
 
 export default function HistoryScreen({ navigation }) {
   // --- ÉTATS GLOBAUX ---
@@ -23,9 +25,9 @@ export default function HistoryScreen({ navigation }) {
 
   // --- ÉTATS DU MODAL & DOCS ---
   const [selectedRide, setSelectedRide] = useState(null);
-  const [patientDocs, setPatientDocs] = useState([]); // Liste intelligente des docs
+  const [patientDocs, setPatientDocs] = useState([]); 
   const [loadingDocs, setLoadingDocs] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState(false); // État global d'upload pour bloquer l'UI
 
   // ============================================================
   // 1. CHARGEMENT ET FILTRES
@@ -36,11 +38,8 @@ export default function HistoryScreen({ navigation }) {
     try {
       const allRides = await getRides();
       
-      // MODIFICATION ICI : On garde UNIQUEMENT les courses avec le statut 'Terminée'
-      const history = allRides.filter(r => 
-        r.status === 'Terminée' 
-      );      
-      // Tri : Plus récent en haut
+      // On garde UNIQUEMENT les courses terminées
+      const history = allRides.filter(r => r.status === 'Terminée');      
       history.sort((a, b) => new Date(b.date) - new Date(a.date));
       setRides(history);
     } catch(e) { 
@@ -48,7 +47,7 @@ export default function HistoryScreen({ navigation }) {
     } finally { 
       setLoading(false); 
     }
-}, []);
+  }, []);
   
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -68,7 +67,7 @@ export default function HistoryScreen({ navigation }) {
     });
   }, [rides, currentDate, searchText]);
 
-  // Calculs Comptables
+  // Calculs Comptables (Stats du mois affiché)
   const stats = useMemo(() => {
     return filteredRides.reduce((acc, curr) => ({ 
       km: acc.km + (curr.realDistance || 0), 
@@ -78,7 +77,7 @@ export default function HistoryScreen({ navigation }) {
   }, [filteredRides]);
 
   // ============================================================
-  // 2. GESTION DES DOCUMENTS (LOGIQUE INTELLIGENTE)
+  // 2. GESTION DES DOCUMENTS
   // ============================================================
 
   // Charge les docs dès qu'on ouvre une course
@@ -91,7 +90,6 @@ export default function HistoryScreen({ navigation }) {
   const fetchSmartDocuments = async () => {
     try {
       setLoadingDocs(true);
-      // Appel à la route intelligente : PMT du jour + Vitale du patient
       const res = await api.get(`/documents/by-ride/${selectedRide._id}`);
       setPatientDocs(res.data);
     } catch (err) {
@@ -101,48 +99,26 @@ export default function HistoryScreen({ navigation }) {
     }
   };
 
-  const pickAndUploadImage = async (docType) => {
-    try {
-      console.log("1. Bouton cliqué");
-
-      // 1. Demander la permission
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      console.log("2. Statut Permission:", permission.status);
-
-      if (permission.status !== 'granted') { 
-        Alert.alert("Bloqué", "La permission Caméra est refusée dans les réglages du téléphone."); 
-        return; 
-      }
-      
-      console.log("3. Lancement Caméra...");
-      
-      // 2. Ouvrir la caméra
-      let result = await ImagePicker.launchCameraAsync({ 
-        mediaTypes: 'Images',
-        quality: 0.5, 
-        allowsEditing: false, // Parfois 'true' fait planter certains téléphones
-      });
-
-      console.log("4. Résultat Caméra:", result.canceled ? "Annulé" : "Photo Prise");
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        uploadDocument(result.assets[0].uri, docType);
-      }
-    } catch (err) {
-      console.error("ERREUR CRITIQUE:", err);
-      Alert.alert("Erreur Technique", err.message);
-    }
+  /**
+   * Cette fonction est appelée par le composant <DocumentScannerButton />
+   * une fois que l'utilisateur a pris la photo et l'a validée.
+   */
+  const handleDocumentScanned = async (uri, docType) => {
+    await uploadDocument(uri, docType);
   };
 
   const uploadDocument = async (uri, docType) => {
     if (!selectedRide) return;
     try {
-      setUploading(true);
+      setUploading(true); // Active le loader global ou local
+      
       const formData = new FormData();
-      formData.append('photo', { uri: uri, name: `scan.jpg`, type: 'image/jpeg' });
+      const fileName = `scan_${docType}_${moment().format('HHmmss')}.jpg`;
+
+      formData.append('photo', { uri: uri, name: fileName, type: 'image/jpeg' });
       formData.append('patientName', selectedRide.patientName);
       formData.append('docType', docType);
-      formData.append('rideId', selectedRide._id); // Lien crucial pour le PMT
+      formData.append('rideId', selectedRide._id);
 
       await api.post('/documents/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -150,7 +126,7 @@ export default function HistoryScreen({ navigation }) {
       });
       
       Alert.alert("Succès", "Document ajouté au dossier !");
-      fetchSmartDocuments(); // Rafraîchissement immédiat de la liste
+      fetchSmartDocuments(); // Rafraîchissement
 
     } catch (error) {
       Alert.alert("Erreur", "Echec de l'envoi.");
@@ -167,7 +143,7 @@ export default function HistoryScreen({ navigation }) {
     if (!selectedRide) return;
     try {
       setUploading(true);
-      const docs = patientDocs; // On utilise la liste déjà chargée
+      const docs = patientDocs;
 
       let imagesHtml = '';
       if (docs.length > 0) {
@@ -176,7 +152,7 @@ export default function HistoryScreen({ navigation }) {
           imagesHtml += `
             <div style="margin-bottom: 20px; border: 1px solid #ccc; padding: 10px; page-break-inside: avoid;">
               <p><strong>${doc.type}</strong> <span style="font-size:12px; color:#666;">(Ajouté le ${moment(doc.uploadDate).format('DD/MM/YYYY')})</span></p>
-              <img src="${doc.imageData}" style="width: 100%; max-height: 600px; object-fit: contain;" />
+              <img src="${doc.imageData}" style="width: 100%; max-height: 800px; object-fit: contain;" />
             </div>
           `;
         });
@@ -186,38 +162,21 @@ export default function HistoryScreen({ navigation }) {
 
       const html = `
         <html>
-          <head>
-            <style>
-              body { font-family: Helvetica, sans-serif; padding: 30px; color: #333; }
-              h1 { color: #FF6B00; border-bottom: 2px solid #FF6B00; padding-bottom: 10px; }
-              .box { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 8px; }
-              .label { font-weight: bold; color: #555; }
-              .value { font-size: 16px; font-weight: bold; }
-            </style>
-          </head>
-          <body>
-            <h1>Fiche de Transport VSL</h1>
+          <body style="font-family: Helvetica, sans-serif; padding: 30px; color: #333;">
+            <h1 style="color: #FF6B00; border-bottom: 2px solid #FF6B00;">Fiche de Transport VSL</h1>
             <p>Date : <strong>${moment(selectedRide.date).format('dddd D MMMM YYYY')}</strong></p>
             
-            <div class="box">
-              <div class="row">
-                <div><span class="label">Patient:</span> <br> <span class="value">${selectedRide.patientName}</span></div>
-                <div><span class="label">Transport:</span> <br> <span class="value">${selectedRide.type}</span></div>
-              </div>
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <p><strong>Patient:</strong> ${selectedRide.patientName}</p>
+                <p><strong>Trajet:</strong> ${selectedRide.startLocation} ➔ ${selectedRide.endLocation}</p>
             </div>
 
-            <div class="box">
-              <h3>Détails Mission</h3>
-              <p><span class="label">Prise en charge:</span> ${selectedRide.startLocation} (${selectedRide.startTime ? moment(selectedRide.startTime).format('HH:mm') : '--'})</p>
-              <p><span class="label">Destination:</span> ${selectedRide.endLocation} (${selectedRide.endTime ? moment(selectedRide.endTime).format('HH:mm') : '--'})</p>
-              <hr style="border: 0; border-top: 1px solid #ddd; margin: 10px 0;">
-              <div class="row">
-                <div><span class="label">Distance Réelle:</span> ${selectedRide.realDistance || 0} km</div>
-                <div><span class="label">Péages:</span> ${selectedRide.tolls || 0} €</div>
-              </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                <div><strong>Distance:</strong> ${selectedRide.realDistance || 0} km</div>
+                <div><strong>Péages:</strong> ${selectedRide.tolls || 0} €</div>
             </div>
 
+            <hr/>
             <div style="margin-top:30px;">
               ${imagesHtml}
             </div>
@@ -295,7 +254,6 @@ export default function HistoryScreen({ navigation }) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Historique</Text>
         
-        {/* Barre Recherche */}
         <View style={styles.searchBar}>
           <Ionicons name="search" size={20} color="#999" />
           <TextInput 
@@ -304,7 +262,6 @@ export default function HistoryScreen({ navigation }) {
           {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText('')}><Ionicons name="close-circle" size={20} color="#CCC" /></TouchableOpacity>}
         </View>
 
-        {/* Sélecteur Mois */}
         <View style={styles.monthSelector}>
             <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.arrowBtn}><Ionicons name="chevron-back" size={24} color="#333" /></TouchableOpacity>
             <Text style={styles.currentMonth}>{currentDate.format('MMMM YYYY')}</Text>
@@ -339,7 +296,7 @@ export default function HistoryScreen({ navigation }) {
 
             <ScrollView contentContainerStyle={styles.modalContent}>
               
-              {/* Alerte Partage */}
+              {/* ALERTE PARTAGE */}
               {selectedRide.isShared && (
                 <View style={styles.sharedAlert}>
                   <Ionicons name="people-circle" size={30} color="#EF6C00" />
@@ -369,7 +326,7 @@ export default function HistoryScreen({ navigation }) {
                 <View style={styles.addressLine}><Ionicons name="flag" size={22} color="#FF6B00" /><Text style={styles.addressText}>{selectedRide.endLocation}</Text></View>
               </View>
 
-              {/* 3. Documents (La partie intelligente) */}
+              {/* 3. Documents (AVEC COMPOSANT SCANNER) */}
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>📸 Dossier Patient</Text>
                 
@@ -384,35 +341,40 @@ export default function HistoryScreen({ navigation }) {
                   </View>
                 )}
 
-                {/* Boutons Scanner */}
-                {uploading ? <ActivityIndicator color="#FF6B00" /> : (
-                  <View style={styles.scanGrid}>
-                      <TouchableOpacity style={styles.scanBtn} onPress={() => pickAndUploadImage('PMT')}>
-                          <View style={styles.scanIconBg}><Ionicons name="add" size={20} color="#FF6B00" /></View><Text style={styles.scanText}>PMT (Ici)</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.scanBtn} onPress={() => pickAndUploadImage('CarteVitale')}>
-                          <View style={styles.scanIconBg}><Ionicons name="add" size={20} color="#4CAF50" /></View><Text style={styles.scanText}>Vitale (Perm.)</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.scanBtn} onPress={() => pickAndUploadImage('Mutuelle')}>
-                          <View style={styles.scanIconBg}><Ionicons name="add" size={20} color="#2196F3" /></View><Text style={styles.scanText}>Mutuelle (Perm.)</Text>
-                      </TouchableOpacity>
-                  </View>
-                )}
+                {/* 👇 GRILLE DES BOUTONS SCANNER REUTILISABLES */}
+                <View style={styles.scanGrid}>
+                  <DocumentScannerButton 
+                    title="PMT" 
+                    docType="PMT" 
+                    color="#FF6B00" 
+                    onScan={handleDocumentScanned} 
+                    isLoading={uploading}
+                  />
+                  <DocumentScannerButton 
+                    title="Vitale" 
+                    docType="CarteVitale" 
+                    color="#4CAF50" 
+                    onScan={handleDocumentScanned} 
+                    isLoading={uploading}
+                  />
+                  <DocumentScannerButton 
+                    title="Mutuelle" 
+                    docType="Mutuelle" 
+                    color="#2196F3" 
+                    onScan={handleDocumentScanned} 
+                    isLoading={uploading}
+                  />
+                </View>
                 
                 <TouchableOpacity style={styles.pdfBtn} onPress={generatePDF}>
                   <Ionicons name="document-text" size={20} color="#FFF" style={{marginRight:10}} />
-                  <Text style={styles.pdfBtnText}>VOIR LE PDF COMPLET</Text>
+                  <Text style={styles.pdfBtnText}>GÉNÉRER PDF</Text>
                 </TouchableOpacity>
               </View>
 
               {/* 4. Facturation */}
               <View style={styles.detailSection}>
-                <Text style={styles.sectionTitle}>⏱ Données Course</Text>
-                <View style={styles.timeRow}>
-                  <View><Text style={styles.timeLabel}>Départ</Text><Text style={styles.timeValue}>{selectedRide.startTime ? moment(selectedRide.startTime).format('HH:mm') : '--:--'}</Text></View>
-                  <Ionicons name="arrow-forward" size={20} color="#999" style={{marginTop:10}} />
-                  <View><Text style={styles.timeLabel}>Arrivée</Text><Text style={styles.timeValue}>{selectedRide.endTime ? moment(selectedRide.endTime).format('HH:mm') : '--:--'}</Text></View>
-                </View>
+                <Text style={styles.sectionTitle}>⏱ Facturation</Text>
                 <View style={styles.statsRow}>
                    <View style={styles.statBox}><Text style={styles.statBoxValue}>{selectedRide.realDistance || 0} km</Text><Text style={styles.statBoxLabel}>Distance</Text></View>
                    <View style={styles.statBox}><Text style={styles.statBoxValue}>{selectedRide.tolls || 0} €</Text><Text style={styles.statBoxLabel}>Péages</Text></View>
@@ -435,6 +397,7 @@ export default function HistoryScreen({ navigation }) {
   );
 }
 
+// Les styles sont inchangés, ils restent les mêmes que précédemment
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
   header: { backgroundColor: '#FFF', padding: 20 },
@@ -474,9 +437,6 @@ const styles = StyleSheet.create({
   bigTypeBadge: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 10 },
   sharedAlert: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: '#FFF3E0', borderRadius: 16, marginBottom: 15, borderWidth:1, borderColor:'#FFE0B2' },
   scanGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
-  scanBtn: { alignItems: 'center', flex: 1 },
-  scanIconBg: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F5F5F5', justifyContent: 'center', alignItems: 'center', marginBottom: 5 },
-  scanText: { fontSize: 11, fontWeight: '600', color: '#333' },
   docRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F9F9F9' },
   docText: { marginLeft: 10, fontSize: 14, color: '#333' },
   noDocText: { fontStyle: 'italic', color: '#999', fontSize: 12 },
