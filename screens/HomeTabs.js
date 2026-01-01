@@ -44,7 +44,8 @@ export default function HomeScreen({ navigation }) {
     }
   }, []);
 
-  useEffect(() => { loadDashboard(); }, [loadDashboard]);
+  useEffect(() => { loadDashboard(); 
+  }, [loadDashboard]);
 
   return (
     <View style={styles.container}>

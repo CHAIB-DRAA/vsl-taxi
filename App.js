@@ -5,7 +5,8 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SecureStore from 'expo-secure-store';
 import { ActivityIndicator, View, Alert } from 'react-native';
-
+import { DataProvider } from './contexts/DataContext'; // <--- IMPORT
+import GlobalInvitationModal from './components/GlobalInvitationModal'; // Import de la Modal
 // --- IMPORTS NOTIFICATIONS ---
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
@@ -163,6 +164,7 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <DataProvider>
       <NavigationContainer>
         <Stack.Navigator>
           {!session ? (
@@ -211,6 +213,9 @@ export default function App() {
           )}
         </Stack.Navigator>
       </NavigationContainer>
+      <GlobalInvitationModal />
+
+      </DataProvider>
     </GestureHandlerRootView>
   );
 }

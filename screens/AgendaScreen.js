@@ -1,5 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, FlatList, ActivityIndicator, StyleSheet,
   Alert, TouchableOpacity, Modal, SafeAreaView, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions
@@ -9,10 +8,14 @@ import { Calendar, LocaleConfig } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
 
-import RideCard from '../components/RideCard'; 
-import api, { getRides, getContacts, updateRide, shareRide, deleteRide, respondToShare } from '../services/api';
+// 👇 IMPORT DE TON NOUVEAU COMPOSANT
+import ScreenWrapper from '../components/ScreenWrapper';
 
-// Config Calendrier (inchangée)
+import RideCard from '../components/RideCard'; 
+import { useData } from '../contexts/DataContext'; 
+import api, { updateRide, shareRide, deleteRide } from '../services/api';
+
+// Config Calendrier
 LocaleConfig.locales['fr'] = {
   monthNames: ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'],
   dayNames: ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'],
@@ -21,102 +24,25 @@ LocaleConfig.locales['fr'] = {
 };
 LocaleConfig.defaultLocale = 'fr';
 
-const { width } = Dimensions.get('window');
-
 export default function AgendaScreen() {
-  const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
-  const [allRides, setAllRides] = useState([]); 
-  const [contacts, setContacts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(true);
+  const { allRides, contacts, loading, loadData, handleGlobalRespond } = useData();
 
-  // --- ÉTATS MODALS ---
+  const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
+  const [showCalendar, setShowCalendar] = useState(true);
+  
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
   const [activeRide, setActiveRide] = useState(null);
-
-  // --- ÉTAT INVITATION (POPUP) ---
-  const [pendingInvitation, setPendingInvitation] = useState(null); // <--- NOUVEAU
-
-  // --- ÉTATS PARTAGE ---
+  
   const [contactToShare, setContactToShare] = useState(null); 
   const [shareNote, setShareNote] = useState(''); 
 
-  // --- ÉTATS DOCUMENTAIRES ---
   const [patientDocs, setPatientDocs] = useState([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
 
-  // --- ÉTATS CLÔTURE ---
   const [finishModal, setFinishModal] = useState(false);
   const [billingData, setBillingData] = useState({ kmReel: '', peage: '' });
 
- // 1. CHARGEMENT (Modifié pour supporter le mode silencieux)
- const loadData = useCallback(async (isSilent = false) => {
-  try {
-    // On affiche le spinner SEULEMENT si ce n'est pas un chargement silencieux
-    if (!isSilent) setLoading(true);
-    
-    const [ridesData, contactsData] = await Promise.all([getRides(), getContacts()]);
-    setAllRides(ridesData || []);
-    setContacts(contactsData || []);
-  } catch (err) {
-    console.error("Erreur Agenda:", err);
-  } finally {
-    if (!isSilent) setLoading(false);
-  }
-}, []);
-
-// MODIFICATION : Chargement initial + Rafraîchissement auto
-useEffect(() => {
-  // 1. Chargement initial (avec spinner)
-  loadData(false);
-
-  // 2. Mise en place du rafraîchissement auto toutes les 10 secondes
-  const interval = setInterval(() => {
-    console.log("🔄 Vérification auto des nouvelles courses...");
-    loadData(true); // true = mode silencieux (pas de spinner)
-  }, 10000); // 10000 ms = 10 secondes
-
-  // 3. Nettoyage quand on quitte l'écran (très important pour éviter les fuites de mémoire)
-  return () => clearInterval(interval);
-}, [loadData]);
-
-  // 🔥 DÉTECTION AUTOMATIQUE DES INVITATIONS 🔥
-  useEffect(() => {
-    // On cherche s'il y a une course partagée EN ATTENTE
-    const invitation = allRides.find(r => r.isShared && (r.statusPartage === 'pending' || r.shareStatus === 'pending'));
-    
-    if (invitation) {
-      // Si on en trouve une, on l'affiche dans la popup
-      setPendingInvitation(invitation);
-    } else {
-      setPendingInvitation(null);
-    }
-  }, [allRides]);
-
-  
-  // Rafraîchir quand on revient sur l'écran (onglet)
-  useFocusEffect(
-    useCallback(() => {
-      loadData(true); // Chargement silencieux en revenant
-    }, [loadData])
-  );
-
-  // 2. DOCUMENTS
-  const fetchRideDocuments = async (ride) => {
-    if (!ride) return;
-    try {
-      setLoadingDocs(true);
-      const res = await api.get(`/documents/by-ride/${ride._id}`);
-      setPatientDocs(res.data);
-      setModals({ options: false, share: false, docs: true });
-    } catch (err) {
-      Alert.alert("Info", "Impossible de récupérer le dossier patient.");
-    } finally {
-      setLoadingDocs(false);
-    }
-  };
-
-  // 3. CALENDRIER
+  // --- CALCULS ---
   const markedDates = useMemo(() => {
     const marks = {};
     allRides.forEach(ride => {
@@ -136,12 +62,13 @@ useEffect(() => {
     ).sort((a, b) => new Date(a.date) - new Date(b.date));
   }, [allRides, selectedDate]);
 
-  // 4. ACTIONS DE COURSE
+
+  // --- ACTIONS ---
   const handleStatusChange = async (ride, action) => {
     try {
       if (action === 'start') {
         await updateRide(ride._id, { startTime: new Date().toISOString() });
-        loadData();
+        loadData(true);
       } else if (action === 'finish') {
         setActiveRide(ride);
         setBillingData({ kmReel: '', peage: '' });
@@ -160,15 +87,23 @@ useEffect(() => {
         status: 'Terminée'
       });
       setFinishModal(false);
-      loadData();
+      loadData(true);
       Alert.alert("Succès", "Course terminée.");
     } catch (err) { Alert.alert("Erreur", "Echec clôture."); }
   };
 
-  // 5. PARTAGE (ENVOI)
-  const selectContactForShare = (contactItem) => {
-    setContactToShare(contactItem); 
-    setShareNote(''); 
+  const fetchRideDocuments = async (ride) => {
+    if (!ride) return;
+    try {
+      setLoadingDocs(true);
+      const res = await api.get(`/documents/by-ride/${ride._id}`);
+      setPatientDocs(res.data);
+      setModals({ options: false, share: false, docs: true });
+    } catch (err) {
+      Alert.alert("Info", "Impossible de récupérer le dossier patient.");
+    } finally {
+      setLoadingDocs(false);
+    }
   };
 
   const finalizeShare = async () => {
@@ -183,7 +118,7 @@ useEffect(() => {
       setModals({ ...modals, share: false });
       setContactToShare(null);
       setShareNote('');
-      loadData(); 
+      loadData(true);
       Alert.alert('Succès', `Course envoyée à ${contactToShare.contactId.fullName}`);
     } catch (err) { 
       const message = err.response?.data?.message || "Erreur de connexion";
@@ -191,44 +126,29 @@ useEffect(() => {
     }
   };
 
-  // 6. RÉPONSE PARTAGE
-  const handleRespondShare = async (ride, action) => {
-    try {
-      setLoading(true);
-      await respondToShare(ride._id, action);
-      
-      // Fermer la popup invitation si elle est ouverte
-      setPendingInvitation(null);
-
-      const msg = action === 'accepted' ? "Course acceptée !" : "Invitation refusée.";
-      
-      // Petit délai pour laisser le temps à la modal de se fermer proprement
-      setTimeout(() => {
-          Alert.alert("Info", msg);
-          loadData(); 
-      }, 300);
-
-    } catch (err) {
-      console.error("Erreur réponse:", err);
-      Alert.alert("Erreur", "Impossible de traiter la réponse.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleDelete = async () => {
-    try { await deleteRide(activeRide._id); setModals({...modals, options:false}); loadData(); }
+    try { 
+        await deleteRide(activeRide._id); 
+        setModals({...modals, options:false}); 
+        loadData(true);
+    }
     catch(e) { Alert.alert('Erreur', 'Suppression impossible'); }
   };
 
+  const selectContactForShare = (contactItem) => {
+    setContactToShare(contactItem); 
+    setShareNote(''); 
+  };
   const closeShareModal = () => {
     setModals({...modals, share: false});
     setContactToShare(null);
     setShareNote('');
-  }
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
+    // 👇 LE WRAPPER GÈRE LA BARRE DU HAUT
+    <ScreenWrapper>
+      
       {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Planning</Text>
@@ -247,7 +167,7 @@ useEffect(() => {
         />
       )}
 
-      {/* LISTE */}
+      {/* LISTE DES COURSES */}
       <View style={styles.listContainer}>
         <View style={styles.listHeader}>
           <Text style={styles.dateTitle}>{moment(selectedDate).format('dddd D MMMM')}</Text>
@@ -264,56 +184,23 @@ useEffect(() => {
                 onStatusChange={handleStatusChange} 
                 onPress={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, options: true })); }}
                 onShare={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, share: true })); }}
-                onRespond={handleRespondShare} 
+                onRespond={(ride, action) => handleGlobalRespond(ride._id, action)} 
               />
             )}
             ListEmptyComponent={<Text style={styles.emptyText}>Aucune course ce jour.</Text>}
             refreshing={loading}
-            onRefresh={loadData}
+            onRefresh={() => loadData(false)}
+            
+            // 👇 C'EST ICI LA CLÉ POUR LES BOUTONS DU BAS 👇
+            // On met un grand paddingBottom pour que la dernière carte remonte au-dessus des boutons Android
+            contentContainerStyle={{ padding: 15, paddingBottom: 120 }}
           />
         )}
       </View>
 
-      {/* ================= MODALS ================= */}
+      {/* ================= MODALS LOCALES ================= */}
 
-      {/* 🔥 NOUVEAU : POPUP D'INVITATION (TOAST/MODAL) */}
-      <Modal visible={!!pendingInvitation} animationType="slide" transparent>
-        <View style={styles.invitationOverlay}>
-           <View style={styles.invitationCard}>
-              <View style={styles.invitationHeader}>
-                 <Ionicons name="notifications" size={24} color="#FFF" />
-                 <Text style={styles.invitationTitle}>Nouvelle Course Reçue</Text>
-              </View>
-              
-              <View style={styles.invitationBody}>
-                 <Text style={styles.invitationText}>
-                    <Text style={{fontWeight:'bold'}}>{pendingInvitation?.sharedByName || "Un collègue"}</Text> vous propose une course :
-                 </Text>
-                 
-                 <View style={styles.invitationDetailBox}>
-                    <Text style={styles.invitationDetailDate}>📅 {moment(pendingInvitation?.date).format('DD/MM/YYYY à HH:mm')}</Text>
-                    <Text style={styles.invitationDetailPatient}>👤 {pendingInvitation?.patientName}</Text>
-                    <Text style={styles.invitationDetailRoute}>📍 {pendingInvitation?.startLocation}</Text>
-                    <Text style={styles.invitationDetailRoute}>🏁 {pendingInvitation?.endLocation}</Text>
-                    {pendingInvitation?.shareNote ? (
-                        <Text style={styles.invitationNote}>📩 "{pendingInvitation?.shareNote}"</Text>
-                    ) : null}
-                 </View>
-
-                 <View style={styles.invitationActions}>
-                    <TouchableOpacity style={styles.btnRefuse} onPress={() => handleRespondShare(pendingInvitation, 'refused')}>
-                        <Text style={styles.btnText}>Refuser</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.btnAccept} onPress={() => handleRespondShare(pendingInvitation, 'accepted')}>
-                        <Text style={styles.btnText}>Accepter</Text>
-                    </TouchableOpacity>
-                 </View>
-              </View>
-           </View>
-        </View>
-      </Modal>
-
-      {/* 1. OPTIONS (Inchangé) */}
+      {/* 1. OPTIONS */}
       <Modal visible={modals.options} animationType="fade" transparent>
         <TouchableOpacity style={styles.modalOverlay} onPress={() => setModals({ ...modals, options: false })} activeOpacity={1}>
           <View style={styles.optionSheet}>
@@ -334,7 +221,7 @@ useEffect(() => {
         </TouchableOpacity>
       </Modal>
 
-      {/* 2. DOCS (Inchangé) */}
+      {/* 2. DOCS */}
       <Modal visible={modals.docs} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.docModalContainer}>
           <View style={styles.modalHeader}>
@@ -355,7 +242,7 @@ useEffect(() => {
         </View>
       </Modal>
 
-      {/* 3. PARTAGE (Inchangé) */}
+      {/* 3. PARTAGE */}
       <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.modalHeader}>
@@ -369,22 +256,46 @@ useEffect(() => {
               contentContainerStyle={{padding: 20}}
               renderItem={({ item }) => (
                 <TouchableOpacity style={styles.contactRow} onPress={() => selectContactForShare(item)}>
-                  <Text style={styles.contactName}>{item.contactId?.fullName || "Chauffeur"}</Text>
+                  <View style={{flexDirection:'row', alignItems:'center'}}>
+                    <View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{item.contactId?.fullName?.charAt(0)}</Text></View>
+                    <Text style={styles.contactName}>{item.contactId?.fullName || "Chauffeur"}</Text>
+                  </View>
                   <Ionicons name="chevron-forward" size={20} color="#CCC" />
                 </TouchableOpacity>
               )}
             />
           ) : (
             <ScrollView contentContainerStyle={{padding: 20}}>
-              <Text style={styles.selectedContactName}>Pour : {contactToShare.contactId?.fullName}</Text>
-              <TextInput style={styles.noteInput} placeholder="Message..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} />
-              <TouchableOpacity style={styles.sendShareBtn} onPress={finalizeShare}><Text style={styles.sendShareText}>ENVOYER</Text></TouchableOpacity>
+              <View style={styles.selectedContactHeader}>
+                 <View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{contactToShare.contactId?.fullName?.charAt(0)}</Text></View>
+                 <Text style={styles.selectedContactName}>Pour : {contactToShare.contactId?.fullName}</Text>
+              </View>
+
+              {activeRide && activeRide.patientPhone ? (
+                 <View style={styles.phoneInfoBox}>
+                    <Ionicons name="call" size={20} color="#4CAF50" />
+                    <Text style={styles.phoneInfoText}>N° patient transmis auto.</Text>
+                 </View>
+              ) : (
+                 <View style={[styles.phoneInfoBox, {backgroundColor: '#FFEBEE'}]}>
+                    <Ionicons name="alert-circle" size={20} color="#D32F2F" />
+                    <Text style={[styles.phoneInfoText, {color: '#D32F2F'}]}>Attention : Pas de n° enregistré.</Text>
+                 </View>
+              )}
+
+              <Text style={styles.noteLabel}>Message (Optionnel) :</Text>
+              <TextInput style={styles.noteInput} placeholder="Code porte, étage..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} />
+              
+              <TouchableOpacity style={styles.sendShareBtn} onPress={finalizeShare}>
+                <Ionicons name="paper-plane" size={20} color="#FFF" style={{marginRight: 8}}/>
+                <Text style={styles.sendShareText}>ENVOYER</Text>
+              </TouchableOpacity>
             </ScrollView>
           )}
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* 4. FIN DE COURSE (Inchangé) */}
+      {/* 4. FIN DE COURSE */}
       <Modal visible={finishModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.finishCard}>
@@ -398,12 +309,12 @@ useEffect(() => {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </ScreenWrapper>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  // Plus besoin de padding ici, ScreenWrapper gère le fond et le haut
   header: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, backgroundColor: '#FFF' },
   headerTitle: { fontSize: 22, fontWeight: 'bold' },
   listContainer: { flex: 1, paddingHorizontal: 15 },
@@ -420,33 +331,16 @@ const styles = StyleSheet.create({
   iconBox: { width: 40, height: 40, borderRadius: 20, justifyContent:'center', alignItems:'center', marginRight: 15 },
   sheetBtnText: { fontSize: 16, fontWeight: '500', color: '#333' },
 
-  // STYLES INVITATION POPUP
-  invitationOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  invitationCard: { width: '100%', backgroundColor: '#FFF', borderRadius: 20, overflow: 'hidden', elevation: 10 },
-  invitationHeader: { backgroundColor: '#FF6B00', padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  invitationTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginLeft: 10 },
-  invitationBody: { padding: 20, alignItems: 'center' },
-  invitationText: { fontSize: 16, color: '#333', marginBottom: 15, textAlign: 'center' },
-  invitationDetailBox: { width: '100%', backgroundColor: '#F5F5F5', padding: 15, borderRadius: 10, marginBottom: 20 },
-  invitationDetailDate: { fontWeight: 'bold', color: '#333', marginBottom: 5 },
-  invitationDetailPatient: { fontSize: 16, color: '#000', marginBottom: 5 },
-  invitationDetailRoute: { fontSize: 13, color: '#666', marginBottom: 2 },
-  invitationNote: { fontStyle: 'italic', color: '#E65100', marginTop: 10, fontWeight: 'bold' },
-  invitationActions: { flexDirection: 'row', width: '100%', justifyContent: 'space-between' },
-  btnRefuse: { flex: 1, backgroundColor: '#D32F2F', padding: 15, borderRadius: 10, alignItems: 'center', marginRight: 10 },
-  btnAccept: { flex: 1, backgroundColor: '#4CAF50', padding: 15, borderRadius: 10, alignItems: 'center', marginLeft: 10 },
-  btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-
-  // Autres styles (Docs, Share, Finish...)
+  // Styles Docs & Share
   docModalContainer: { flex: 1, backgroundColor: '#F2F2F2' },
   docCard: { backgroundColor: '#FFF', borderRadius: 12, marginBottom: 20, padding: 10 },
   docTitle: { fontWeight: 'bold', marginBottom: 5 },
   docImage: { width: '100%', height: 200 },
-  contactRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderColor: '#EEE' },
-  contactName: { fontSize: 16 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#EEE' },
+  contactName: { fontSize: 16, fontWeight: '500' },
   selectedContactName: { fontSize: 18, fontWeight: 'bold', color: '#E65100', marginBottom: 10 },
   noteInput: { backgroundColor: '#F5F5F5', borderRadius: 10, padding: 15, height: 100, marginBottom: 20 },
-  sendShareBtn: { backgroundColor: '#FF6B00', padding: 15, borderRadius: 10, alignItems: 'center' },
+  sendShareBtn: { backgroundColor: '#FF6B00', padding: 15, borderRadius: 10, alignItems: 'center', flexDirection:'row', justifyContent:'center' },
   sendShareText: { color: '#FFF', fontWeight: 'bold' },
   finishCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 15, margin: 20 },
   finishTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
@@ -460,5 +354,4 @@ const styles = StyleSheet.create({
   noteLabel: { fontWeight: 'bold', color: '#555', marginBottom: 10 },
   avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFE0B2', justifyContent:'center', alignItems:'center', marginRight: 15 },
   avatarText: { color: '#EF6C00', fontWeight: 'bold', fontSize: 18 },
-  selectedContactHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, backgroundColor:'#FFF3E0', padding: 10, borderRadius: 10 },
-});
+  selectedContactHeader: { flexDirection: 'row',
