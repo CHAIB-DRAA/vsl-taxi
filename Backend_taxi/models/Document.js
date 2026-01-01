@@ -1,16 +1,17 @@
 const mongoose = require('mongoose');
 
 const DocumentSchema = new mongoose.Schema({
-  type: { type: String, required: true }, // 'PMT', 'CarteVitale', 'Mutuelle'
-  imageData: { type: String, required: true }, // Base64 ou URL
+  type: { type: String, required: true }, 
+  imageData: { type: String, required: true }, 
   uploadDate: { type: Date, default: Date.now },
   
-  // Liens
-  rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' }, // Lien historique
-  patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient' }, // 👈 AJOUT IMPORTANT
+  // Infos flexibles
+  patientName: { type: String }, 
+  rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' }, 
+  patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient' },
   
-  // Pour savoir à qui appartient le doc à la base
-  uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+  // Ce champ servira pour tout le monde (Chauffeur créateur OU Chauffeur propriétaire)
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 });
 
 module.exports = mongoose.model('Document', DocumentSchema);
