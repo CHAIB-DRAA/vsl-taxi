@@ -118,5 +118,18 @@ router.delete('/:id', auth, async (req, res) => {
         res.status(500).json({ message: "Erreur serveur" });
       }
 });
-
+// --- 6. RÉCUPÉRER TOUS LES PMT (Pour le calcul dans l'Agenda) ---
+router.get('/pmts/all', auth, async (req, res) => {
+  try {
+    // On récupère uniquement les documents de type PMT créés par ce chauffeur
+    const pmts = await Document.find({
+      userId: req.user.id,
+      type: 'PMT'
+    }).select('patientName uploadDate maxRides'); // On prend juste ce qu'il faut pour calculer
+    
+    res.json(pmts);
+  } catch (err) {
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
 module.exports = router;

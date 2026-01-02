@@ -17,15 +17,14 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
   const isFinished = !!ride.endTime;
   const isStarted = !!ride.startTime && !ride.endTime;
   
-  // LOGIQUE CRITIQUE : Détecter une invitation en attente
-  const isIncomingShare = ride.isShared && ride.statusPartage === 'pending'; // Supposons que 'statusPartage' vient du back
-  // Si ton back renvoie 'shareStatus' (comme dans mon code précédent), utilise ride.shareStatus
-  // Je mets les deux pour la sécurité :
   const pendingStatus = ride.shareStatus === 'pending' || ride.statusPartage === 'pending';
   const showResponseButtons = ride.isShared && pendingStatus;
 
   const hasNote = ride.isShared && (ride.shareNote || ride.sharedNote) && (ride.shareNote?.length > 0 || ride.sharedNote?.length > 0);
   const noteContent = ride.shareNote || ride.sharedNote;
+
+  // 👇 LOGIQUE PMT : On affiche l'alerte pour VSL et Ambulance si la course n'est pas finie
+  const needsPMT = (ride.type === 'VSL' || ride.type === 'Ambulance') && !isFinished;
   
   // Fonction GPS
   const openGPS = (address) => {
@@ -47,11 +46,11 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
     <TouchableOpacity 
       activeOpacity={0.9}
       onPress={() => !isFinished && onPress && onPress(ride)}
-      disabled={showResponseButtons} // On désactive le clic global si on doit répondre
+      disabled={showResponseButtons} 
       style={[
         styles.card, 
         isFinished && styles.cardFinished,
-        showResponseButtons && styles.cardIncoming, // Style jaune si invitation
+        showResponseButtons && styles.cardIncoming, 
         isStarted && styles.cardActive 
       ]}
     >
@@ -107,6 +106,14 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </TouchableOpacity>
       </View>
 
+      {/* 👇 3.5. ALERTE PMT (AJOUTÉ ICI) */}
+      {needsPMT && (
+        <View style={styles.pmtAlert}>
+          <Ionicons name="document-text" size={16} color="#D32F2F" />
+          <Text style={styles.pmtText}>⚠️ DEMANDER LE BON DE TRANSPORT (PMT)</Text>
+        </View>
+      )}
+
       {/* 4. ITINÉRAIRE */}
       <View style={styles.routeContainer}>
         <TouchableOpacity style={styles.addressRow} onPress={() => openGPS(ride.startLocation)}>
@@ -137,11 +144,10 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </View>
       )}
 
-      {/* 6. RÉPONSE PARTAGE (Accepter / Refuser) */}
+      {/* 6. RÉPONSE PARTAGE */}
       {showResponseButtons && (
         <View style={styles.footer}>
            <Text style={styles.shareLabel}>Répondre :</Text>
-           {/* Adaptation ici : on passe l'objet 'ride' entier */}
            <TouchableOpacity style={[styles.btn, styles.btnAccept]} onPress={() => onRespond(ride, 'accepted')}>
              <Text style={styles.btnText}>Accepter</Text>
            </TouchableOpacity>
@@ -165,7 +171,6 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#FFF', borderRadius: 16, padding: 15, marginBottom: 12, elevation: 3, borderLeftWidth: 4, borderLeftColor: '#DDD' },
   cardFinished: { backgroundColor: '#F2F2F2', opacity: 0.6 },
   cardActive: { borderLeftColor: '#4CAF50', backgroundColor: '#F1F8E9', borderWidth: 1, borderColor: '#C8E6C9' },
-  // Style spécifique pour l'invitation en attente (Orange clair)
   cardIncoming: { borderLeftColor: '#FF9800', backgroundColor: '#FFF3E0', borderWidth: 1, borderColor: '#FFE0B2' },
   
   header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
@@ -180,11 +185,30 @@ const styles = StyleSheet.create({
   noteLabel: { fontSize: 10, color: '#BF360C', fontWeight: 'bold' },
   noteText: { fontSize: 13, color: '#3E2723', fontStyle: 'italic', marginTop: 2 },
 
-  patientRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  patientRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }, // Marge réduite pour laisser place au PMT
   patientName: { fontSize: 18, fontWeight: 'bold', flex: 1 },
   
   callBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#009688', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginLeft: 10 },
   callBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
+
+  // 👇 NOUVEAUX STYLES PMT
+  pmtAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFEBEE', // Rouge très clair
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#FFCDD2'
+  },
+  pmtText: {
+    color: '#D32F2F', // Rouge foncé
+    fontWeight: 'bold',
+    fontSize: 12,
+    marginLeft: 8,
+    letterSpacing: 0.5
+  },
   
   routeContainer: { marginBottom: 15 },
   addressRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },

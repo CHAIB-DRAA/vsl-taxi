@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, ActivityIndicator, StyleSheet,
   Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions
@@ -8,14 +8,12 @@ import { Calendar, LocaleConfig } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
 
-// Import Wrapper
 import ScreenWrapper from '../components/ScreenWrapper';
-
 import RideCard from '../components/RideCard'; 
 import { useData } from '../contexts/DataContext'; 
 import api, { updateRide, shareRide, deleteRide } from '../services/api';
 
-const { height, width } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 // Config Calendrier
 LocaleConfig.locales['fr'] = {
@@ -26,26 +24,104 @@ LocaleConfig.locales['fr'] = {
 };
 LocaleConfig.defaultLocale = 'fr';
 
-// 👇 N'oublie pas de récupérer { navigation } ici
 export default function AgendaScreen({ navigation }) {
   const { allRides, contacts, loading, loadData, handleGlobalRespond } = useData();
 
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
   const [showCalendar, setShowCalendar] = useState(true);
   
+  // États Modals
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
   const [activeRide, setActiveRide] = useState(null);
   
+  // États Partage
   const [contactToShare, setContactToShare] = useState(null); 
   const [shareNote, setShareNote] = useState(''); 
 
+  // États Docs & PMT
   const [patientDocs, setPatientDocs] = useState([]);
+  const [allPMTs, setAllPMTs] = useState([]); // 👈 Stocke tous les PMT pour le calcul
   const [loadingDocs, setLoadingDocs] = useState(false);
 
+  // États Fin de course
   const [finishModal, setFinishModal] = useState(false);
   const [billingData, setBillingData] = useState({ kmReel: '', peage: '' });
 
-  // --- CALCULS ---
+  // --- 1. CHARGEMENT DES PMT ---
+  useEffect(() => {
+    fetchGlobalPMTs();
+  }, [allRides]); // On recharge si les courses changent (pour mettre à jour le décompte)
+
+  const fetchGlobalPMTs = async () => {
+    try {
+      // On appelle la nouvelle route backend
+      const res = await api.get('/documents/pmts/all');
+      setAllPMTs(res.data);
+    } catch (err) {
+      console.log("Erreur chargement PMTs agenda");
+    }
+  };
+
+  // --- 2. CALCUL INTELLIGENT DU PMT ---
+  const getPMTStatusForRide = (ride) => {
+    // Liste des types qui nécessitent un PMT
+    const typesMedicaux = ['VSL', 'Ambulance', 'Taxi', 'Aller', 'Retour', 'Consultation'];
+    
+    // Si la course n'est pas médicale ou déjà finie, pas besoin d'alerte
+    if (!typesMedicaux.includes(ride.type) || ride.endTime) return null;
+
+    // 1. Trouver le dernier PMT pour ce patient
+    const patientPMTs = allPMTs.filter(doc => doc.patientName === ride.patientName);
+    
+    // ROUGE : Aucun PMT trouvé
+    if (patientPMTs.length === 0) {
+        return { color: '#D32F2F', text: 'PMT MANQUANT (A RÉCUPÉRER)', icon: 'alert-circle' };
+    }
+
+    // On prend le plus récent
+    patientPMTs.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
+    const lastPMT = patientPMTs[0];
+    
+    // Données du PMT
+    const pmtDate = new Date(lastPMT.uploadDate);
+    const maxQuota = lastPMT.maxRides || 1; 
+
+    // VERT : Si c'est illimité
+    if (maxQuota >= 1000) {
+        return { color: '#4CAF50', text: 'PMT VALIDE (SÉRIE ILLIMITÉE)', icon: 'checkmark-circle' };
+    }
+
+    // 2. Calculer la consommation DEPUIS la date du PMT
+    // On regarde toutes les courses de l'historique pour ce patient
+    const ridesSincePMT = allRides.filter(r => {
+        return r.patientName === ride.patientName && 
+               new Date(r.date) >= pmtDate && 
+               r.status !== 'Annulée';
+    });
+
+    let consumed = 0;
+    ridesSincePMT.forEach(r => {
+        if (r.isRoundTrip) consumed += 1;   // Aller-Retour = 1
+        else consumed += 0.5;               // Aller Simple = 0.5
+    });
+
+    const remaining = maxQuota - consumed;
+
+    // ROUGE : Épuisé
+    if (remaining <= 0) {
+        return { color: '#D32F2F', text: `PMT ÉPUISÉ (${consumed}/${maxQuota}) - NOUVEAU BON REQUIS`, icon: 'warning' };
+    }
+    // ORANGE : Bientôt fini (Reste 1 ou moins)
+    else if (remaining <= 1) {
+        return { color: '#FF9800', text: `PMT BIENTÔT FINI (Reste ${remaining} AR)`, icon: 'alert-circle' };
+    }
+    // VERT : Disponible
+    else {
+        return { color: '#4CAF50', text: `PMT DISPONIBLE (Reste ${remaining} AR)`, icon: 'document-text' };
+    }
+  };
+
+  // --- 3. CALCULS LISTE ---
   const markedDates = useMemo(() => {
     const marks = {};
     allRides.forEach(ride => {
@@ -113,19 +189,15 @@ export default function AgendaScreen({ navigation }) {
     if (!activeRide) return Alert.alert("Erreur", "Aucune course sélectionnée");
     if (!contactToShare || !contactToShare.contactId) return Alert.alert("Erreur", "Contact invalide");
 
-    const targetUserId = contactToShare.contactId._id;
-    const rideId = activeRide._id;
-
     try {
-      await shareRide(rideId, targetUserId, shareNote);
+      await shareRide(activeRide._id, contactToShare.contactId._id, shareNote);
       setModals({ ...modals, share: false });
       setContactToShare(null);
       setShareNote('');
       loadData(true);
-      Alert.alert('Succès', `Course envoyée à ${contactToShare.contactId.fullName}`);
+      Alert.alert('Succès', `Course envoyée.`);
     } catch (err) { 
-      const message = err.response?.data?.message || "Erreur de connexion";
-      Alert.alert('Échec du partage', message); 
+      Alert.alert('Échec', "Erreur de partage"); 
     }
   };
 
@@ -138,37 +210,20 @@ export default function AgendaScreen({ navigation }) {
     catch(e) { Alert.alert('Erreur', 'Suppression impossible'); }
   };
 
-  const selectContactForShare = (contactItem) => {
-    setContactToShare(contactItem); 
-    setShareNote(''); 
-  };
-  const closeShareModal = () => {
-    setModals({...modals, share: false});
-    setContactToShare(null);
-    setShareNote('');
-  };
+  const selectContactForShare = (contactItem) => { setContactToShare(contactItem); setShareNote(''); };
+  const closeShareModal = () => { setModals({...modals, share: false}); setContactToShare(null); setShareNote(''); };
 
   return (
     <ScreenWrapper>
       
-      {/* HEADER AMÉLIORÉ (Avec Bouton Settings) */}
+      {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Planning</Text>
-        
         <View style={styles.headerRightButtons}>
-            {/* Bouton Settings (Restauré) */}
-            <TouchableOpacity 
-                onPress={() => navigation.navigate('Settings')}
-                style={[styles.iconButton, {marginRight: 10}]}
-            >
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={[styles.iconButton, {marginRight: 10}]}>
               <Ionicons name="settings-outline" size={24} color="#333" />
             </TouchableOpacity>
-
-            {/* Bouton Calendrier Toggle */}
-            <TouchableOpacity 
-                onPress={() => setShowCalendar(!showCalendar)}
-                style={[styles.iconButton, {backgroundColor: '#FFF3E0'}]}
-            >
+            <TouchableOpacity onPress={() => setShowCalendar(!showCalendar)} style={[styles.iconButton, {backgroundColor: '#FFF3E0'}]}>
               <Ionicons name={showCalendar ? "chevron-up" : "calendar-outline"} size={24} color="#FF6B00" />
             </TouchableOpacity>
         </View>
@@ -180,14 +235,7 @@ export default function AgendaScreen({ navigation }) {
           onDayPress={(day) => setSelectedDate(day.dateString)}
           markedDates={markedDates}
           markingType={'multi-dot'}
-          theme={{ 
-              todayTextColor: '#FF6B00', 
-              selectedDayBackgroundColor: '#FF6B00', 
-              arrowColor: '#FF6B00',
-              textDayFontSize: 16, 
-              textMonthFontSize: 18,
-              textDayHeaderFontSize: 14
-          }}
+          theme={{ todayTextColor: '#FF6B00', selectedDayBackgroundColor: '#FF6B00', arrowColor: '#FF6B00' }}
         />
       )}
 
@@ -202,15 +250,32 @@ export default function AgendaScreen({ navigation }) {
           <FlatList
             data={dailyRides}
             keyExtractor={item => item._id}
-            renderItem={({ item }) => (
-              <RideCard 
-                ride={item}
-                onStatusChange={handleStatusChange} 
-                onPress={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, options: true })); }}
-                onShare={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, share: true })); }}
-                onRespond={(ride, action) => handleGlobalRespond(ride._id, action)} 
-              />
-            )}
+            renderItem={({ item }) => {
+              
+              // 👇 RECUPERATION DU STATUT PMT POUR CETTE COURSE
+              const pmtStatus = getPMTStatusForRide(item);
+
+              return (
+                <View style={styles.rideBlock}>
+                  
+                  {/* ALERTE PMT DYNAMIQUE */}
+                  {pmtStatus && (
+                    <View style={[styles.pmtHeader, { backgroundColor: pmtStatus.color }]}>
+                      <Ionicons name={pmtStatus.icon} size={14} color="#FFF" />
+                      <Text style={styles.pmtHeaderText}>{pmtStatus.text}</Text>
+                    </View>
+                  )}
+
+                  <RideCard 
+                    ride={item}
+                    onStatusChange={handleStatusChange} 
+                    onPress={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, options: true })); }}
+                    onShare={(r) => { setActiveRide(r); setModals(prev => ({ ...prev, share: true })); }}
+                    onRespond={(ride, action) => handleGlobalRespond(ride._id, action)} 
+                  />
+                </View>
+              );
+            }}
             ListEmptyComponent={
                 <View style={styles.emptyContainer}>
                     <Ionicons name="car-sport-outline" size={50} color="#DDD" />
@@ -218,9 +283,7 @@ export default function AgendaScreen({ navigation }) {
                 </View>
             }
             refreshing={loading}
-            onRefresh={() => loadData(false)}
-            
-            // 👇 FIX PADDING : 160 pour passer au dessus de la TabBar Flottante
+            onRefresh={() => { loadData(false); fetchGlobalPMTs(); }} // On recharge les PMT aussi
             contentContainerStyle={{ padding: 15, paddingBottom: 160 }}
             showsVerticalScrollIndicator={false}
           />
@@ -319,16 +382,7 @@ export default function AgendaScreen({ navigation }) {
               )}
 
               <Text style={styles.noteLabel}>Message (Optionnel) :</Text>
-              <TextInput 
-                style={styles.noteInput} 
-                placeholder="Code porte, étage..." 
-                multiline 
-                numberOfLines={3} 
-                value={shareNote} 
-                onChangeText={setShareNote} 
-                textAlignVertical="top"
-              />
-              
+              <TextInput style={styles.noteInput} placeholder="Info..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} textAlignVertical="top"/>
               <TouchableOpacity style={styles.sendShareBtn} onPress={finalizeShare}>
                 <Ionicons name="paper-plane" size={20} color="#FFF" style={{marginRight: 8}}/>
                 <Text style={styles.sendShareText}>ENVOYER</Text>
@@ -348,34 +402,11 @@ export default function AgendaScreen({ navigation }) {
                     <Ionicons name="close" size={24} color="#333" />
                 </TouchableOpacity>
             </View>
-            
             <Text style={styles.inputLabel}>Kilométrage réel</Text>
-            <View style={styles.inputWrapper}>
-                <TextInput 
-                    style={styles.input} 
-                    placeholder="Ex: 25" 
-                    keyboardType="numeric" 
-                    value={billingData.kmReel} 
-                    onChangeText={t => setBillingData({...billingData, kmReel: t})}
-                />
-                <Text style={styles.unitText}>km</Text>
-            </View>
-
+            <View style={styles.inputWrapper}><TextInput style={styles.input} placeholder="Ex: 25" keyboardType="numeric" value={billingData.kmReel} onChangeText={t => setBillingData({...billingData, kmReel: t})}/><Text style={styles.unitText}>km</Text></View>
             <Text style={styles.inputLabel}>Péages / Frais</Text>
-            <View style={styles.inputWrapper}>
-                <TextInput 
-                    style={styles.input} 
-                    placeholder="Ex: 5.50" 
-                    keyboardType="numeric" 
-                    value={billingData.peage} 
-                    onChangeText={t => setBillingData({...billingData, peage: t})}
-                />
-                <Text style={styles.unitText}>€</Text>
-            </View>
-            
-            <TouchableOpacity style={styles.confirmBtn} onPress={confirmFinishRide}>
-                <Text style={{color:'#FFF', fontWeight:'bold', fontSize: 16}}>VALIDER LA COURSE</Text>
-            </TouchableOpacity>
+            <View style={styles.inputWrapper}><TextInput style={styles.input} placeholder="Ex: 5.50" keyboardType="numeric" value={billingData.peage} onChangeText={t => setBillingData({...billingData, peage: t})}/><Text style={styles.unitText}>€</Text></View>
+            <TouchableOpacity style={styles.confirmBtn} onPress={confirmFinishRide}><Text style={{color:'#FFF', fontWeight:'bold', fontSize: 16}}>VALIDER LA COURSE</Text></TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -384,22 +415,11 @@ export default function AgendaScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  // HEADER
-  header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center',
-    padding: 20, 
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    elevation: 2 
-  },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', elevation: 2 },
   headerTitle: { fontSize: 26, fontWeight: '800', color: '#1A1A1A' },
   headerRightButtons: { flexDirection: 'row', alignItems: 'center' },
-  iconButton: { padding: 8, borderRadius: 12, backgroundColor: '#F5F5F5' }, // Style bouton uniformisé
+  iconButton: { padding: 8, borderRadius: 12, backgroundColor: '#F5F5F5' },
 
-  // LISTE
   listContainer: { flex: 1, paddingHorizontal: 15, backgroundColor: '#F8F9FA' },
   listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
   dateTitle: { fontSize: 18, fontWeight: '700', textTransform: 'capitalize', color: '#333' },
@@ -407,41 +427,50 @@ const styles = StyleSheet.create({
   countText: { color: '#FFF', fontWeight: 'bold' },
   emptyContainer: { alignItems: 'center', marginTop: 50 },
   emptyText: { textAlign: 'center', color: '#999', marginTop: 10, fontSize: 16 },
-  
-  // MODAL OVERLAY
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  
-  // OPTION SHEET
-  optionSheet: { 
-    backgroundColor: '#FFF', 
-    borderTopLeftRadius: 25, 
-    borderTopRightRadius: 25, 
-    padding: 25,
-    paddingBottom: 40 
+
+  // BLOC COURSE + ALERTE
+  rideBlock: { marginBottom: 12 },
+  pmtHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    marginBottom: -5,
+    zIndex: 1, 
+    alignSelf: 'flex-start',
+    marginLeft: 10,
   },
+  pmtHeaderText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 10,
+    marginLeft: 6,
+    letterSpacing: 0.5,
+  },
+  
+  // MODALS
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  optionSheet: { backgroundColor: '#FFF', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, paddingBottom: 40 },
   sheetHandle: { width: 40, height: 4, backgroundColor: '#DDD', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
   sheetTitle: { textAlign: 'center', fontWeight: 'bold', fontSize: 18, color: '#333', marginBottom: 25 },
   sheetBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderColor: '#F5F5F5' },
   sheetBtnText: { fontSize: 17, fontWeight: '500', color: '#333' },
   iconBox: { width: 44, height: 44, borderRadius: 22, justifyContent:'center', alignItems:'center', marginRight: 15 },
 
-  // DOCS & SHARE
   docModalContainer: { flex: 1, backgroundColor: '#F2F2F2' },
   docCard: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 20, padding: 12, elevation: 2 },
   docTitle: { fontWeight: 'bold', marginBottom: 8, fontSize: 16 },
   docImage: { width: '100%', height: height * 0.35, borderRadius: 8 }, 
-  
   contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1, borderColor: '#EEE' },
   contactName: { fontSize: 17, fontWeight: '600', color: '#333' },
-  
   selectedContactHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, backgroundColor:'#FFF3E0', padding: 12, borderRadius: 12 },
   selectedContactName: { fontSize: 17, fontWeight: 'bold', color: '#E65100', marginLeft: 10 },
-  
   noteInput: { backgroundColor: '#FFF', borderRadius: 12, padding: 15, height: 120, marginBottom: 20, borderWidth: 1, borderColor: '#DDD', fontSize: 16 },
   sendShareBtn: { backgroundColor: '#FF6B00', padding: 18, borderRadius: 14, alignItems: 'center', flexDirection:'row', justifyContent:'center', elevation: 3 },
   sendShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 
-  // FINISH CARD
   finishCard: { backgroundColor: '#FFF', padding: 25, borderTopLeftRadius: 25, borderTopRightRadius: 25 },
   finishHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   finishTitle: { fontSize: 20, fontWeight: 'bold' },
@@ -451,7 +480,6 @@ const styles = StyleSheet.create({
   unitText: { fontSize: 16, color: '#999', fontWeight: 'bold' },
   confirmBtn: { backgroundColor: '#4CAF50', padding: 18, borderRadius: 14, alignItems: 'center', marginTop: 10, elevation: 2 },
 
-  // COMMUNS
   modalHeader: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#F0F0F0' },
   phoneInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', padding: 12, borderRadius: 12, marginBottom: 20 },
   phoneInfoText: { marginLeft: 10, fontSize: 14, color: '#2E7D32', flex: 1, fontWeight: '500' },
