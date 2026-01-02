@@ -5,6 +5,7 @@ const DocumentSchema = new mongoose.Schema({
   imageData: { type: String, required: true }, 
   uploadDate: { type: Date, default: Date.now },
   
+  maxRides: { type: Number, default: 0 },
   // Infos flexibles
   patientName: { type: String }, 
   rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' }, 

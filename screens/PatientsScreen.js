@@ -9,11 +9,10 @@ import 'moment/locale/fr';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
-// 👇 NOUVEAUX IMPORTS POUR L'ANTI-FRAUDE
+// --- OUTILS ANTI-FRAUDE ---
 import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
-// Assure-toi que ce fichier existe (voir conversation précédente), sinon dis-le moi !
 import { extractSecuNumber } from '../services/ocrService'; 
 
 // Contexte & API
@@ -26,16 +25,21 @@ import DocumentScannerButton from '../components/DocumentScannerButton';
 export default function PatientsScreen() {
   const { contacts } = useData(); 
 
-  // --- ÉTATS ---
+  // --- ÉTATS GLOBAUX ---
   const [patients, setPatients] = useState([]);
   const [filteredPatients, setFilteredPatients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
 
-  // Modals
+  // Modals Standards
   const [modalVisible, setModalVisible] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [docSelectionModal, setDocSelectionModal] = useState(false);
+
+  // --- ÉTATS POUR LA SAISIE DU PMT (NOUVEAU) ---
+  const [customPMTModalVisible, setCustomPMTModalVisible] = useState(false);
+  const [tempPMTUri, setTempPMTUri] = useState(null);
+  const [customRideCount, setCustomRideCount] = useState('');
 
   // Sélection pour partage
   const [selectedDocIds, setSelectedDocIds] = useState([]);
@@ -49,17 +53,19 @@ export default function PatientsScreen() {
   const [patientDocs, setPatientDocs] = useState([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   
-  // Upload & Delete États
+  // Upload & Scan États
   const [uploading, setUploading] = useState(false);
 
-  // Visionneuse
+  // Visionneuse Image
   const [viewerVisible, setViewerVisible] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState(null);
 
-  // Formulaire Edition
+  // Formulaire Edition Profil
   const [formData, setFormData] = useState({ fullName: '', address: '', phone: '' });
 
+  // ============================================================
   // 1. CHARGEMENT
+  // ============================================================
   const loadPatients = useCallback(async () => {
     try {
       setLoading(true);
@@ -93,13 +99,13 @@ export default function PatientsScreen() {
     try {
       setLoadingDetails(true);
       
-      // Historique
+      // 1. Historique
       const allRides = await getRides();
       const myRides = allRides.filter(r => r.patientName === patient.fullName);
       myRides.sort((a, b) => new Date(b.date) - new Date(a.date));
       setPatientRides(myRides);
 
-      // Documents
+      // 2. Documents
       let allDocs = [];
       try {
          const res = await api.get(`/documents/patient/${patient._id}`);
@@ -118,7 +124,7 @@ export default function PatientsScreen() {
       const typesVus = {}; 
       allDocs.forEach(doc => {
         if (doc.type === 'PMT') {
-          finalDocs.push(doc);
+          finalDocs.push(doc); // On garde tous les PMT
         } else {
           if (!typesVus[doc.type]) {
             finalDocs.push(doc);
@@ -132,55 +138,115 @@ export default function PatientsScreen() {
     finally { setLoadingDetails(false); }
   };
 
-  // --- 🛡️ FONCTION ANTI-FRAUDE (SCAN NIR) ---
-  const handleAntiFraudScan = async () => {
-    try {
-      // 1. Permission
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) return Alert.alert("Erreur", "Accès caméra requis");
+  // ============================================================
+  // 2. LOGIQUE PMT (MÉTIER VSL) 🚨
+  // ============================================================
 
-      // 2. Scan
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
-        quality: 1,
-      });
+  const checkPMTStatus = () => {
+    const pmts = patientDocs.filter(d => d.type === 'PMT');
+    
+    // CAS : Aucun PMT
+    if (pmts.length === 0) return { status: 'MISSING', message: "Aucun PMT dans le dossier.", color: '#FF9800' };
 
-      if (!result.canceled) {
-        setUploading(true); // Petit loader
-        
-        // 3. Extraction via le service OCR
-        const nir = await extractSecuNumber(result.assets[0].uri);
-        setUploading(false);
+    const lastPMT = pmts[0];
+    const pmtDate = new Date(lastPMT.uploadDate);
+    
+    // On force la conversion en nombre pour éviter les bugs si le serveur renvoie du texte
+    const maxQuota = lastPMT.maxRides ? parseFloat(lastPMT.maxRides) : 1;
 
-        if (nir) {
-          await Clipboard.setStringAsync(nir);
-          Alert.alert(
-            "NIR Trouvé & Copié !",
-            `Numéro : ${nir}\n\nVoulez-vous ouvrir AmeliPro maintenant pour vérifier les droits ?`,
-            [
-              { text: "Non", style: "cancel" },
-              { 
-                text: "Ouvrir AmeliPro", 
-                onPress: () => Linking.openURL('https://professionnels.ameli.fr/') 
-              }
-            ]
-          );
+    // On compte ce qu'on a fait depuis le scan du PMT
+    const ridesSincePMT = patientRides.filter(ride => {
+      const rideDate = new Date(ride.date);
+      // On compte les courses faites APRÈS le scan
+      return rideDate >= pmtDate && ride.status !== 'Annulée';
+    });
+
+    // --- CALCUL MÉTIER ---
+    let consumed = 0;
+    ridesSincePMT.forEach(ride => {
+        if (ride.isRoundTrip) {
+            consumed += 1;   // Aller-Retour = 1 point
         } else {
-          Alert.alert("Échec", "Aucun numéro de sécu lisible. Réessayez avec plus de lumière.");
+            consumed += 0.5; // Aller Simple = 0.5 point
         }
-      }
-    } catch (error) {
-      setUploading(false);
-      Alert.alert("Erreur", "Problème lors du scan.");
+    });
+
+    const remaining = maxQuota - consumed;
+
+    // CAS : Série illimitée (code 1000)
+    if (maxQuota >= 1000) {
+        return { status: 'OK', message: "✅ PMT Série / Longue durée", color: '#4CAF50' };
+    }
+
+    // CAS : Épuisé
+    if (remaining <= 0) {
+      return { 
+        status: 'EXPIRED', 
+        message: `⛔️ PMT ÉPUISÉ (${consumed}/${maxQuota})\nDemandez un nouveau bon !`, 
+        color: '#D32F2F' 
+      };
+    } 
+    // CAS : Bientôt fini
+    else if (remaining <= 1) {
+        return { 
+          status: 'WARNING', 
+          message: `⚠️ Reste ${remaining} Aller(s)-Retour(s)`, 
+          color: '#FF9800' 
+        };
+    }
+    // CAS : OK
+    else {
+      return { 
+        status: 'OK', 
+        message: `✅ PMT Valide (${remaining} restants sur ${maxQuota})`, 
+        color: '#4CAF50' 
+      };
     }
   };
 
-  // --- 📸 AJOUT DE DOCUMENT CLASSIQUE ---
+  // ============================================================
+  // 3. SCAN & UPLOAD AVEC SAISIE
+  // ============================================================
+
   const handleDocumentScanned = async (uri, docType) => {
-    await uploadDocument(uri, docType);
+    if (docType === 'PMT') {
+        // Demande simple
+        Alert.alert(
+            "Nouveau Bon de Transport",
+            "Quelle quantité est écrite sur le bon ?",
+            [
+              { text: "1 Aller-Retour", onPress: () => uploadDocument(uri, docType, 1) },
+              { 
+                text: "Série (Entrer nombre)", 
+                onPress: () => {
+                    setTempPMTUri(uri);
+                    setCustomRideCount(''); 
+                    setCustomPMTModalVisible(true);
+                } 
+              },
+              { text: "Annuler", style: "cancel" }
+            ]
+        );
+    } else {
+        await uploadDocument(uri, docType, 0);
+    }
   };
 
-  const uploadDocument = async (uri, docType) => {
+  // Validation du Modal de saisie
+  const submitCustomPMT = () => {
+      // On remplace la virgule par un point au cas où
+      const count = parseFloat(customRideCount.replace(',', '.'));
+      
+      if (!count || count <= 0) {
+          Alert.alert("Erreur", "Entrez un nombre valide (ex: 20).");
+          return;
+      }
+      
+      setCustomPMTModalVisible(false);
+      uploadDocument(tempPMTUri, 'PMT', count);
+  };
+
+  const uploadDocument = async (uri, docType, maxRides = 0) => {
     if (!selectedPatient) return;
     try {
       setUploading(true);
@@ -189,6 +255,9 @@ export default function PatientsScreen() {
       formData.append('patientName', selectedPatient.fullName);
       formData.append('patientId', selectedPatient._id);
       formData.append('docType', docType);
+      
+      // On envoie le maxRides au serveur
+      if (maxRides > 0) formData.append('maxRides', maxRides);
 
       await api.post('/documents/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -206,22 +275,38 @@ export default function PatientsScreen() {
     }
   };
 
-  // --- 🗑 SUPPRESSION DOCUMENT ---
+  // --- ANTI-FRAUDE VITALE ---
+  const handleAntiFraudScan = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) return Alert.alert("Erreur", "Accès caméra requis");
+      const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 1 });
+      if (!result.canceled) {
+        setUploading(true);
+        const nir = await extractSecuNumber(result.assets[0].uri);
+        setUploading(false);
+        if (nir) {
+          await Clipboard.setStringAsync(nir);
+          Alert.alert("NIR Trouvé !", `Copié : ${nir}`, [{ text: "Ouvrir Ameli", onPress: () => Linking.openURL('https://professionnels.ameli.fr/') }]);
+        } else { Alert.alert("Échec", "Illisible."); }
+      }
+    } catch (error) { setUploading(false); Alert.alert("Erreur", "Problème scan."); }
+  };
+
   const deleteDocument = (docId) => {
-    Alert.alert("Supprimer", "Voulez-vous supprimer ce document définitivement ?", [
+    Alert.alert("Supprimer", "Supprimer définitivement ?", [
         { text: "Annuler", style: "cancel" },
         { text: "Supprimer", style: "destructive", onPress: async () => {
-            try {
-                await api.delete(`/documents/${docId}`);
-                fetchPatientDetails(selectedPatient); 
-            } catch (err) {
-                Alert.alert("Erreur", "Impossible de supprimer");
-            }
+            try { await api.delete(`/documents/${docId}`); fetchPatientDetails(selectedPatient); } 
+            catch (err) { Alert.alert("Erreur", "Impossible de supprimer"); }
         }}
     ]);
   };
 
-  // --- PARTAGE ---
+  // ============================================================
+  // 4. PARTAGE & ACTIONS
+  // ============================================================
+
   const initiateShareProcess = (mode, contact = null) => {
     setShareTarget(mode);
     setTargetContact(contact);
@@ -250,49 +335,33 @@ export default function PatientsScreen() {
         });
     } else { imagesHtml = `<p>Aucun document joint.</p>`; }
 
-    const html = `
-      <html><body style="font-family: Helvetica; padding: 40px;">
-          <h1 style="color: #FF6B00;">Fiche Patient</h1>
-          <h2>${selectedPatient.fullName}</h2>
-          <p>Tél: ${selectedPatient.phone}</p>
-          <h3>Documents</h3>${imagesHtml}
-      </body></html>`;
+    const html = `<html><body style="font-family: Helvetica; padding: 40px;">
+          <h1 style="color: #FF6B00;">Fiche Patient</h1><h2>${selectedPatient.fullName}</h2>
+          <p>Tél: ${selectedPatient.phone}</p><h3>Documents</h3>${imagesHtml}</body></html>`;
     const { uri } = await Print.printToFileAsync({ html });
     return uri;
   };
 
   const handleInternalShare = async () => {
     if (!targetContact) return;
-    setDocSelectionModal(false);
-    setLoading(true);
-    try {
-      await api.post('/share/transfert-patient', { 
-        patientId: selectedPatient._id,
-        targetUserId: targetContact.contactId._id,
-        docIds: selectedDocIds 
-      });
-      Alert.alert("Envoyé !", `Dossier envoyé à ${targetContact.contactId.fullName}.`);
-    } catch (err) { Alert.alert("Erreur", "Echec transfert."); } 
+    setDocSelectionModal(false); setLoading(true);
+    try { await api.post('/share/transfert-patient', { patientId: selectedPatient._id, targetUserId: targetContact.contactId._id, docIds: selectedDocIds });
+      Alert.alert("Envoyé !", `Dossier envoyé.`); } catch (err) { Alert.alert("Erreur", "Echec transfert."); } 
     finally { setLoading(false); }
   };
 
   const handleSystemShare = async () => {
     setDocSelectionModal(false);
-    try {
-      const pdfUri = await generateCustomPDF();
-      if (!pdfUri) return;
-      await Sharing.shareAsync(pdfUri, { UTI: '.pdf', mimeType: 'application/pdf' });
-    } catch (err) { Alert.alert("Erreur", "PDF impossible"); }
+    try { const pdfUri = await generateCustomPDF(); if (!pdfUri) return; await Sharing.shareAsync(pdfUri, { UTI: '.pdf', mimeType: 'application/pdf' }); } catch (err) { Alert.alert("Erreur", "Impossible"); }
   };
 
-  const handleSave = async () => {
-    try { await updatePatient(selectedPatient._id, formData); setModalVisible(false); loadPatients(); } catch (err) { Alert.alert("Erreur", "Mise à jour impossible"); }
-  };
-  const handleDelete = () => {
-    Alert.alert("Attention", "Supprimer ?", [{ text: "Non", style: "cancel" }, { text: "Oui", style: "destructive", onPress: async () => { try { await deletePatient(selectedPatient._id); setModalVisible(false); loadPatients(); } catch (err) {} } }]);
-  };
+  const handleSave = async () => { try { await updatePatient(selectedPatient._id, formData); setModalVisible(false); loadPatients(); } catch (err) { Alert.alert("Erreur", "Mise à jour impossible"); } };
+  const handleDelete = () => { Alert.alert("Attention", "Supprimer ?", [{ text: "Non", style: "cancel" }, { text: "Oui", style: "destructive", onPress: async () => { try { await deletePatient(selectedPatient._id); setModalVisible(false); loadPatients(); } catch (err) {} } }]); };
 
-  // RENDU ITEMS
+  // ============================================================
+  // 5. RENDU (UI)
+  // ============================================================
+
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => openPatientModal(item)}>
       <View style={styles.avatar}><Text style={styles.avatarText}>{item.fullName.charAt(0).toUpperCase()}</Text></View>
@@ -324,20 +393,27 @@ export default function PatientsScreen() {
 
     switch (activeTab) {
       case 'profil':
+        const pmtStatus = checkPMTStatus();
         return (
           <ScrollView style={styles.tabContent}>
-             {/* 👇 BOUTON ANTI-FRAUDE AJOUTÉ ICI 👇 */}
+             
+             {/* ALERTE PMT */}
+             <View style={[styles.alertBox, { borderColor: pmtStatus.color, backgroundColor: pmtStatus.status === 'EXPIRED' ? '#FFEBEE' : '#E8F5E9' }]}>
+                <Ionicons 
+                    name={pmtStatus.status === 'EXPIRED' || pmtStatus.status === 'MISSING' ? "warning" : "checkmark-circle"} 
+                    size={30} 
+                    color={pmtStatus.status === 'MISSING' ? '#FF9800' : pmtStatus.color} 
+                />
+                <Text style={[styles.alertText, { color: pmtStatus.status === 'MISSING' ? '#EF6C00' : pmtStatus.color }]}>
+                    {pmtStatus.message}
+                </Text>
+             </View>
+
              <TouchableOpacity style={styles.antiFraudBtn} onPress={handleAntiFraudScan} disabled={uploading}>
-                <View style={styles.antiFraudIcon}>
-                    <Ionicons name="shield-checkmark" size={24} color="#FFF" />
-                </View>
-                <View>
-                    <Text style={styles.antiFraudTitle}>Vérifier Droits (Anti-Fraude)</Text>
-                    <Text style={styles.antiFraudSub}>Scanner Vitale → Copier NIR → AmeliPro</Text>
-                </View>
+                <View style={styles.antiFraudIcon}><Ionicons name="shield-checkmark" size={24} color="#FFF" /></View>
+                <View><Text style={styles.antiFraudTitle}>Vérifier Droits (Anti-Fraude)</Text><Text style={styles.antiFraudSub}>Scanner Vitale → Copier NIR → AmeliPro</Text></View>
                 {uploading && <ActivityIndicator color="#FFF" style={{marginLeft: 10}}/>}
              </TouchableOpacity>
-             {/* 👆 FIN AJOUT 👆 */}
 
              <View style={styles.inputGroup}><Text style={styles.label}>Nom</Text><TextInput style={styles.input} value={formData.fullName} onChangeText={t => setFormData({...formData, fullName: t})} /></View>
              <View style={styles.inputGroup}><Text style={styles.label}>Tél</Text><TextInput style={styles.input} value={formData.phone} keyboardType="phone-pad" onChangeText={t => setFormData({...formData, phone: t})} /></View>
@@ -355,6 +431,7 @@ export default function PatientsScreen() {
         return (
           <View style={{flex:1}}>
             <View style={styles.scanGrid}>
+                {/* Ces boutons appellent handleDocumentScanned qui gère le PMT */}
                 <DocumentScannerButton title="PMT" docType="PMT" color="#FF6B00" onScan={handleDocumentScanned} isLoading={uploading}/>
                 <DocumentScannerButton title="Vitale" docType="CarteVitale" color="#4CAF50" onScan={handleDocumentScanned} isLoading={uploading}/>
                 <DocumentScannerButton title="Mutuelle" docType="Mutuelle" color="#2196F3" onScan={handleDocumentScanned} isLoading={uploading}/>
@@ -369,6 +446,12 @@ export default function PatientsScreen() {
                         <Ionicons name={item.type === 'PMT' ? 'document-text' : 'card'} size={32} color={item.type === 'PMT' ? '#5C6BC0' : '#4CAF50'} />
                         <Text style={styles.docTitle}>{item.type}</Text>
                         <Text style={styles.docDate}>{moment(item.uploadDate).format('DD/MM/YY')}</Text>
+                        {/* Affichage Quantité */}
+                        {item.type === 'PMT' && item.maxRides > 0 && (
+                            <Text style={{fontSize:10, color: item.maxRides >= 1000 ? '#4CAF50' : '#FF6B00', fontWeight:'bold', textAlign:'center'}}>
+                                {item.maxRides >= 1000 ? 'Illimité' : `${item.maxRides} AR`}
+                            </Text>
+                        )}
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.deleteDocBadge} onPress={() => deleteDocument(item._id)}>
                         <Ionicons name="trash" size={14} color="#FFF" />
@@ -383,8 +466,14 @@ export default function PatientsScreen() {
             <FlatList data={patientRides} keyExtractor={item => item._id} renderItem={({item}) => (
                 <View style={styles.historyCard}>
                     <Text style={{fontWeight:'bold', width: 40}}>{moment(item.date).format('DD/MM')}</Text>
-                    <View style={{flex:1, marginLeft:10}}><Text style={{fontWeight:'bold', color:'#333'}}>{item.type}</Text><Text style={{fontSize:12, color:'#666'}} numberOfLines={1}>{item.startLocation}</Text></View>
-                    <Ionicons name={item.status === 'Terminée' ? "checkmark-circle" : "time"} size={18} color={item.status === 'Terminée' ? "#4CAF50" : "#FF9800"} />
+                    <View style={{flex:1, marginLeft:10}}>
+                        <Text style={{fontWeight:'bold', color:'#333'}}>{item.type}</Text>
+                        <Text style={{fontSize:12, color:'#666'}} numberOfLines={1}>{item.startLocation}</Text>
+                    </View>
+                    <View style={{alignItems:'flex-end'}}>
+                        <Ionicons name={item.status === 'Terminée' ? "checkmark-circle" : "time"} size={18} color={item.status === 'Terminée' ? "#4CAF50" : "#FF9800"} />
+                        <Text style={{fontSize:10, color:'#999'}}>{item.isRoundTrip ? "Aller-Retour" : "Aller Simple"}</Text>
+                    </View>
                 </View>
             )} />
         );
@@ -422,7 +511,40 @@ export default function PatientsScreen() {
         </View>
       </Modal>
 
-      {/* MODALS PARTAGE */}
+      {/* MODAL SAISIE NOMBRE PMT */}
+      <Modal visible={customPMTModalVisible} transparent={true} animationType="fade">
+        <View style={styles.inputModalOverlay}>
+            <View style={styles.inputModalCard}>
+                <Text style={styles.inputModalTitle}>Quantité prescrite</Text>
+                <Text style={styles.inputModalSub}>Nombre d'Allers-Retours indiqué ?</Text>
+                
+                <TextInput 
+                    style={styles.bigNumberInput}
+                    value={customRideCount}
+                    onChangeText={setCustomRideCount}
+                    placeholder="Ex: 20"
+                    keyboardType="numeric"
+                    autoFocus={true}
+                />
+                
+                <Text style={{fontSize: 12, color:'#666', marginBottom: 20, textAlign:'center'}}>
+                    Entrez le nombre exact écrit sur le papier.{"\n"}
+                    (Ex: Pour "20 Allers-Retours", tapez 20).
+                </Text>
+
+                <View style={{flexDirection:'row', gap: 10}}>
+                    <TouchableOpacity style={[styles.modalBtn, {backgroundColor:'#999'}]} onPress={() => setCustomPMTModalVisible(false)}>
+                        <Text style={{color:'#FFF'}}>Annuler</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.modalBtn, {backgroundColor:'#FF6B00'}]} onPress={submitCustomPMT}>
+                        <Text style={{color:'#FFF', fontWeight:'bold'}}>Valider</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </View>
+      </Modal>
+
+      {/* MODALS AUXILIAIRES */}
       <Modal visible={shareModalVisible} animationType="slide" presentationStyle="formSheet">
         <View style={styles.modalContainer}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>Destinataire</Text><TouchableOpacity onPress={() => setShareModalVisible(false)}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity></View>
@@ -482,7 +604,10 @@ const styles = StyleSheet.create({
   contentContainer: { flex: 1, padding: 20 },
   tabContent: { flex: 1 },
 
-  // STYLES BOUTON ANTI-FRAUDE (NOUVEAU)
+  // STYLES ALERT PMT
+  alertBox: { flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 10, borderWidth: 1, marginBottom: 20 },
+  alertText: { marginLeft: 10, fontSize: 14, fontWeight: 'bold', flex: 1 },
+
   antiFraudBtn: { 
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#43A047', 
     padding: 15, borderRadius: 12, marginBottom: 20, elevation: 3 
@@ -507,9 +632,7 @@ const styles = StyleSheet.create({
   contactAvatarText: { color: '#1976D2', fontWeight: 'bold', fontSize: 18 },
   contactName: { fontSize: 16, fontWeight: '600', color: '#333', flex: 1 },
 
-  // SCANNER STYLE GRID
   scanGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-
   docCardContainer: { flex: 0.5, margin: 6 },
   docCard: { backgroundColor: '#FFF', padding: 15, borderRadius: 12, alignItems: 'center', justifyContent: 'center', elevation: 2, minHeight: 110 },
   deleteDocBadge: { position:'absolute', top:-5, right:-5, backgroundColor:'#D32F2F', width:24, height:24, borderRadius:12, justifyContent:'center', alignItems:'center', elevation:3 },
@@ -531,4 +654,12 @@ const styles = StyleSheet.create({
   viewerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
   fullImage: { width: '100%', height: '80%' },
   viewerClose: { position: 'absolute', top: 50, right: 20, zIndex: 10 },
+
+  // STYLES MODAL SAISIE
+  inputModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  inputModalCard: { backgroundColor: '#FFF', padding: 25, borderRadius: 15, width: '80%', alignItems: 'center' },
+  inputModalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 5 },
+  inputModalSub: { color: '#666', marginBottom: 15 },
+  bigNumberInput: { fontSize: 30, fontWeight: 'bold', borderBottomWidth: 2, borderBottomColor: '#FF6B00', width: 100, textAlign: 'center', marginBottom: 10, color: '#333' },
+  modalBtn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, minWidth: 100, alignItems: 'center' },
 });
