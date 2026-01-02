@@ -7,9 +7,10 @@ import { Ionicons } from '@expo/vector-icons';
 import moment from 'moment';
 import 'moment/locale/fr';
 
-// Modules natifs pour PDF
+// Modules natifs
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as ImagePicker from 'expo-image-picker'; // 👈 IMPORT AJOUTÉ
 
 // API
 import api, { getRides, updateRide } from '../services/api'; 
@@ -30,118 +31,70 @@ export default function HistoryScreen({ navigation }) {
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // --- ÉTATS ÉDITION (Modifier la course) ---
+  // --- ÉTATS ÉDITION ---
   const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState({ 
-    realDistance: '', 
-    tolls: '',
-    endTime: '' // Pour modifier l'heure d'arrivée
-  });
+  const [editData, setEditData] = useState({ realDistance: '', tolls: '', endTime: '' });
 
   // ============================================================
-  // 1. CHARGEMENT ET ACTIONS
+  // 1. CHARGEMENT
   // ============================================================
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
       const allRides = await getRides();
-      // On garde uniquement les courses TERMINÉES
       const history = allRides.filter(r => r.status === 'Terminée');      
       history.sort((a, b) => new Date(b.date) - new Date(a.date));
       setRides(history);
-    } catch(e) { 
-      console.error("Erreur historique:", e); 
-    } finally { 
-      setLoading(false); 
-    }
+    } catch(e) { console.error("Erreur historique:", e); } 
+    finally { setLoading(false); }
   }, []);
   
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // --- SUPPRIMER UNE COURSE ---
   const handleDeleteRide = () => {
-    Alert.alert(
-      "Supprimer la course",
-      "Cette action est irréversible. Voulez-vous continuer ?",
-      [
+    Alert.alert("Supprimer", "Irréversible. Continuer ?", [
         { text: "Annuler", style: "cancel" },
-        { 
-          text: "Supprimer", 
-          style: "destructive", 
-          onPress: async () => {
-            try {
-              await api.delete(`/rides/${selectedRide._id}`);
-              setSelectedRide(null); 
-              loadHistory(); 
-              Alert.alert("Succès", "Course supprimée.");
-            } catch (err) {
-              Alert.alert("Erreur", "Impossible de supprimer.");
-            }
-          }
-        }
-      ]
-    );
+        { text: "Supprimer", style: "destructive", onPress: async () => {
+            try { await api.delete(`/rides/${selectedRide._id}`); setSelectedRide(null); loadHistory(); } 
+            catch (err) { Alert.alert("Erreur", "Impossible de supprimer."); }
+        }}
+    ]);
   };
 
-  // --- MODE ÉDITION ---
+  // --- EDITION ---
   const toggleEditMode = () => {
     if (!isEditing) {
-      // 1. On active l'édition et on charge les données actuelles
       setEditData({
-        // Si realDistance n'existe pas encore, on prend 'distance'
         realDistance: String(selectedRide.realDistance || selectedRide.distance || 0),
         tolls: String(selectedRide.tolls || 0),
-        // On charge l'heure de fin si elle existe (format HH:mm)
         endTime: selectedRide.endTime ? moment(selectedRide.endTime).format('HH:mm') : ''
       });
       setIsEditing(true);
     } else {
-      setIsEditing(false); // Annuler
+      setIsEditing(false);
     }
   };
 
   const saveEdit = async () => {
     try {
       setUploading(true);
-      const updates = {
-        realDistance: parseFloat(editData.realDistance) || 0,
-        tolls: parseFloat(editData.tolls) || 0
-      };
-
-      // 🕒 Mise à jour de l'heure de fin (endTime)
+      const updates = { realDistance: parseFloat(editData.realDistance) || 0, tolls: parseFloat(editData.tolls) || 0 };
       if (editData.endTime && editData.endTime.includes(':')) {
-        const [hours, minutes] = editData.endTime.split(':');
-        // On part de la date de la course
-        const baseDate = moment(selectedRide.date);
-        
-        // On construit la nouvelle date de fin
-        const newEndTime = baseDate
-                              .hour(parseInt(hours))
-                              .minute(parseInt(minutes))
-                              .toISOString();
-        
-        updates.endTime = newEndTime; // C'est ici qu'on met à jour le bon champ JSON
+        const [h, m] = editData.endTime.split(':');
+        updates.endTime = moment(selectedRide.date).hour(parseInt(h)).minute(parseInt(m)).toISOString();
       }
-
       await updateRide(selectedRide._id, updates);
       
-      // Mise à jour locale (pour affichage immédiat sans recharger)
       const updatedRide = { ...selectedRide, ...updates };
       setSelectedRide(updatedRide);
       setRides(prev => prev.map(r => r._id === updatedRide._id ? updatedRide : r));
-
-      setIsEditing(false);
-      setUploading(false);
-      Alert.alert("Succès", "Course modifiée.");
-    } catch (err) {
-      setUploading(false);
-      Alert.alert("Erreur", "Mise à jour échouée (Vérifiez le format Heure).");
-    }
+      setIsEditing(false); setUploading(false); Alert.alert("Succès", "Modifié.");
+    } catch (err) { setUploading(false); Alert.alert("Erreur", "Echec mise à jour."); }
   };
 
   // ============================================================
-  // 2. LOGIQUE MÉTIER
+  // 2. LOGIQUE DOCUMENTS & GALERIE (MODIFIÉE)
   // ============================================================
 
   const filteredRides = useMemo(() => {
@@ -158,27 +111,45 @@ export default function HistoryScreen({ navigation }) {
   }, [rides, currentDate, searchText]);
 
   const stats = useMemo(() => {
-    return filteredRides.reduce((acc, curr) => ({ 
-      km: acc.km + (curr.realDistance || curr.distance || 0), 
-      peage: acc.peage + (curr.tolls || 0), 
-      count: acc.count + 1 
-    }), { km: 0, peage: 0, count: 0 });
+    return filteredRides.reduce((acc, curr) => ({ km: acc.km + (curr.realDistance || curr.distance || 0), peage: acc.peage + (curr.tolls || 0), count: acc.count + 1 }), { km: 0, peage: 0, count: 0 });
   }, [filteredRides]);
 
-  useEffect(() => {
-    if (selectedRide) fetchSmartDocuments();
-  }, [selectedRide]);
+  useEffect(() => { if (selectedRide) fetchSmartDocuments(); }, [selectedRide]);
 
   const fetchSmartDocuments = async () => {
-    try {
-      setLoadingDocs(true);
-      const res = await api.get(`/documents/by-ride/${selectedRide._id}`);
-      setPatientDocs(res.data);
-    } catch (err) { console.error(err); } finally { setLoadingDocs(false); }
+    try { setLoadingDocs(true); const res = await api.get(`/documents/by-ride/${selectedRide._id}`); setPatientDocs(res.data); } catch (err) { console.error(err); } finally { setLoadingDocs(false); }
   };
 
+  // Gestion Caméra (via DocumentScannerButton)
   const handleDocumentScanned = async (uri, docType) => {
     await uploadDocument(uri, docType);
+  };
+
+  // 👇 NOUVELLE FONCTION : Gestion Galerie
+  const pickFromGallery = async (docType) => {
+    try {
+      // Demander la permission (optionnel sur les versions récentes mais conseillé)
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permissionResult.granted === false) {
+        Alert.alert("Permission requise", "L'accès à la galerie est nécessaire.");
+        return;
+      }
+
+      // Ouvrir la galerie
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, // Permet de recadrer
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        // On envoie l'image sélectionnée
+        await uploadDocument(result.assets[0].uri, docType);
+      }
+    } catch (error) {
+      console.log(error);
+      Alert.alert("Erreur", "Impossible d'ouvrir la galerie");
+    }
   };
 
   const uploadDocument = async (uri, docType) => {
@@ -186,7 +157,9 @@ export default function HistoryScreen({ navigation }) {
     try {
       setUploading(true); 
       const formData = new FormData();
-      const fileName = `scan_${docType}_${moment().format('HHmmss')}.jpg`;
+      const fileName = `doc_${docType}_${moment().format('HHmmss')}.jpg`;
+      
+      // Note: Pour React Native, l'objet fichier doit avoir uri, name et type
       formData.append('photo', { uri: uri, name: fileName, type: 'image/jpeg' });
       formData.append('patientName', selectedRide.patientName);
       formData.append('docType', docType);
@@ -208,18 +181,8 @@ export default function HistoryScreen({ navigation }) {
       setUploading(true);
       const docs = patientDocs;
       let imagesHtml = docs.length > 0 ? `<h3>Pièces Jointes (${docs.length})</h3>` : `<p><em>Aucun document.</em></p>`;
-      docs.forEach(doc => {
-        imagesHtml += `<div style="margin-bottom: 20px; border: 1px solid #ccc; padding: 10px; page-break-inside: avoid;"><p><strong>${doc.type}</strong></p><img src="${doc.imageData}" style="width: 100%; max-height: 800px; object-fit: contain;" /></div>`;
-      });
-      const html = `<html><body style="font-family: Helvetica; padding: 30px;">
-            <h1 style="color: #FF6B00;">Fiche Transport</h1>
-            <p>Date : <strong>${moment(selectedRide.date).format('DD/MM/YYYY')}</strong></p>
-            <div style="background: #f5f5f5; padding: 15px; margin-bottom: 20px;">
-                <p><strong>Patient:</strong> ${selectedRide.patientName}</p>
-                <p><strong>Trajet:</strong> ${selectedRide.startLocation} ➔ ${selectedRide.endLocation}</p>
-            </div>
-            <div><strong>Distance:</strong> ${selectedRide.realDistance || 0} km | <strong>Péages:</strong> ${selectedRide.tolls || 0} €</div>
-            <hr/><div style="margin-top:30px;">${imagesHtml}</div></body></html>`;
+      docs.forEach(doc => { imagesHtml += `<div style="margin-bottom: 20px; border: 1px solid #ccc; padding: 10px; page-break-inside: avoid;"><p><strong>${doc.type}</strong></p><img src="${doc.imageData}" style="width: 100%; max-height: 800px; object-fit: contain;" /></div>`; });
+      const html = `<html><body style="font-family: Helvetica; padding: 30px;"><h1 style="color: #FF6B00;">Fiche Transport</h1><p>Date : <strong>${moment(selectedRide.date).format('DD/MM/YYYY')}</strong></p><div style="background: #f5f5f5; padding: 15px; margin-bottom: 20px;"><p><strong>Patient:</strong> ${selectedRide.patientName}</p><p><strong>Trajet:</strong> ${selectedRide.startLocation} ➔ ${selectedRide.endLocation}</p></div><div><strong>Distance:</strong> ${selectedRide.realDistance || 0} km | <strong>Péages:</strong> ${selectedRide.tolls || 0} €</div><hr/><div style="margin-top:30px;">${imagesHtml}</div></body></html>`;
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
     } catch (err) { Alert.alert("Erreur PDF", "Impossible de générer le fichier."); } finally { setUploading(false); }
@@ -228,11 +191,10 @@ export default function HistoryScreen({ navigation }) {
   const toggleBillingStatus = async (ride) => {
      try {
       const newStatus = ride.statuFacturation === 'Facturé' ? 'Non facturé' : 'Facturé';
-      const updatedRides = rides.map(r => r._id === ride._id ? { ...r, statuFacturation: newStatus } : r);
-      setRides(updatedRides);
+      setRides(rides.map(r => r._id === ride._id ? { ...r, statuFacturation: newStatus } : r));
       if (selectedRide && selectedRide._id === ride._id) setSelectedRide({ ...selectedRide, statuFacturation: newStatus });
       await updateRide(ride._id, { statuFacturation: newStatus });
-    } catch (err) { Alert.alert("Erreur", "Impossible de changer le statut."); loadHistory(); }
+    } catch (err) { loadHistory(); }
   };
 
   const changeMonth = (dir) => setCurrentDate(prev => moment(prev).add(dir, 'months'));
@@ -289,90 +251,37 @@ export default function HistoryScreen({ navigation }) {
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={() => setSelectedRide(null)}><Ionicons name="close-circle" size={30} color="#999" /></TouchableOpacity>
               <Text style={styles.modalTitle}>Détails Course</Text>
-              
               <View style={{flexDirection: 'row', gap: 15}}>
-                {/* Bouton Edit */}
-                {!isEditing ? (
-                   <TouchableOpacity onPress={toggleEditMode}><Ionicons name="pencil" size={24} color="#2196F3" /></TouchableOpacity>
-                ) : (
-                   <TouchableOpacity onPress={saveEdit}><Ionicons name="checkmark-circle" size={28} color="#4CAF50" /></TouchableOpacity>
-                )}
-                {/* Bouton Delete */}
+                {!isEditing ? ( <TouchableOpacity onPress={toggleEditMode}><Ionicons name="pencil" size={24} color="#2196F3" /></TouchableOpacity> ) : ( <TouchableOpacity onPress={saveEdit}><Ionicons name="checkmark-circle" size={28} color="#4CAF50" /></TouchableOpacity> )}
                 <TouchableOpacity onPress={handleDeleteRide}><Ionicons name="trash" size={24} color="#D32F2F" /></TouchableOpacity>
               </View>
             </View>
 
             <ScrollView contentContainerStyle={styles.modalContent}>
+              {selectedRide.isShared && <View style={styles.sharedAlert}><Text style={{color: '#E65100', fontWeight: 'bold'}}>Partagée par {selectedRide.sharedByName}</Text></View>}
               
-              {selectedRide.isShared && (
-                <View style={styles.sharedAlert}><Text style={{color: '#E65100', fontWeight: 'bold'}}>Partagée par {selectedRide.sharedByName}</Text></View>
-              )}
-
-              {/* Patient */}
               <View style={styles.detailSection}>
                  <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center'}}>
                    <View><Text style={styles.detailLabel}>Patient</Text><Text style={styles.detailValueBig}>{selectedRide.patientName}</Text></View>
-                   <View style={[styles.bigTypeBadge, { backgroundColor: selectedRide.type === 'Ambulance' ? '#FFEBEE' : '#E3F2FD' }]}>
-                      <Text style={{color: selectedRide.type === 'Ambulance' ? '#D32F2F' : '#1976D2', fontWeight:'bold'}}>{selectedRide.type}</Text>
-                   </View>
+                   <View style={[styles.bigTypeBadge, { backgroundColor: selectedRide.type === 'Ambulance' ? '#FFEBEE' : '#E3F2FD' }]}><Text style={{color: selectedRide.type === 'Ambulance' ? '#D32F2F' : '#1976D2', fontWeight:'bold'}}>{selectedRide.type}</Text></View>
                 </View>
               </View>
 
-              {/* 🕒 HORAIRES (CORRIGÉS AVEC startTime / endTime) */}
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>🕒 Horaires {isEditing && "(Édition)"}</Text>
-                
                 <View style={styles.timeRow}>
-                  {/* Départ (startTime ou date) */}
                   <View style={{ alignItems: 'center' }}>
-                    <Text style={styles.timeValue}>
-                      {moment(selectedRide.startTime || selectedRide.date).format('HH:mm')}
-                    </Text>
+                    <Text style={styles.timeValue}>{moment(selectedRide.startTime || selectedRide.date).format('HH:mm')}</Text>
                     <Text style={styles.timeLabel}>Départ</Text>
                   </View>
-
                   <Ionicons name="arrow-forward" size={24} color="#CCC" />
-
-                  {/* Arrivée (endTime) */}
                   <View style={{ alignItems: 'center' }}>
-                    {isEditing ? (
-                      <TextInput 
-                        style={styles.editInputTime}
-                        value={editData.endTime}
-                        onChangeText={t => setEditData({...editData, endTime: t})}
-                        placeholder="HH:MM"
-                        keyboardType="numbers-and-punctuation"
-                      />
-                    ) : (
-                      <Text style={styles.timeValue}>
-                        {(() => {
-                            if (selectedRide.endTime) return moment(selectedRide.endTime).format('HH:mm');
-                            // Fallback ancien champ
-                            if (selectedRide.arrivalDate) return moment(selectedRide.arrivalDate).format('HH:mm');
-                            return '--:--';
-                        })()}
-                      </Text>
-                    )}
+                    {isEditing ? ( <TextInput style={styles.editInputTime} value={editData.endTime} onChangeText={t => setEditData({...editData, endTime: t})} placeholder="HH:MM" keyboardType="numbers-and-punctuation"/> ) : ( <Text style={styles.timeValue}>{selectedRide.endTime ? moment(selectedRide.endTime).format('HH:mm') : (selectedRide.arrivalDate ? moment(selectedRide.arrivalDate).format('HH:mm') : '--:--')}</Text> )}
                     <Text style={styles.timeLabel}>Arrivée</Text>
                   </View>
-                  
-                  {/* Durée (Calculée) */}
-                  {!isEditing && (selectedRide.endTime || selectedRide.arrivalDate) && (
-                    <View style={{ alignItems: 'center', backgroundColor:'#F5F5F5', padding:5, borderRadius:5 }}>
-                      <Text style={[styles.timeValue, {fontSize:16, color:'#555'}]}>
-                        {(() => {
-                            const start = moment(selectedRide.startTime || selectedRide.date);
-                            const end = moment(selectedRide.endTime || selectedRide.arrivalDate);
-                            return end.diff(start, 'minutes');
-                        })()}
-                      </Text>
-                      <Text style={styles.timeLabel}>min</Text>
-                    </View>
-                  )}
                 </View>
               </View>
 
-              {/* Itinéraire */}
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>📍 Itinéraire</Text>
                 <View style={styles.addressLine}><Ionicons name="navigate-circle" size={22} color="#4CAF50" /><Text style={styles.addressText}>{selectedRide.startLocation}</Text></View>
@@ -380,49 +289,45 @@ export default function HistoryScreen({ navigation }) {
                 <View style={styles.addressLine}><Ionicons name="flag" size={22} color="#FF6B00" /><Text style={styles.addressText}>{selectedRide.endLocation}</Text></View>
               </View>
 
-              {/* Facturation */}
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>⏱ Facturation {isEditing && "(Édition)"}</Text>
                 <View style={styles.statsRow}>
-                   {/* Distance */}
                    <View style={styles.statBox}>
-                     {isEditing ? (
-                        <TextInput style={styles.editInput} value={editData.realDistance} onChangeText={t => setEditData({...editData, realDistance: t})} keyboardType="numeric"/>
-                     ) : <Text style={styles.statBoxValue}>{selectedRide.realDistance || selectedRide.distance || 0}</Text>}
+                     {isEditing ? ( <TextInput style={styles.editInput} value={editData.realDistance} onChangeText={t => setEditData({...editData, realDistance: t})} keyboardType="numeric"/> ) : <Text style={styles.statBoxValue}>{selectedRide.realDistance || selectedRide.distance || 0}</Text>}
                      <Text style={styles.statBoxLabel}>km réels</Text>
                    </View>
-                   {/* Péage */}
                    <View style={styles.statBox}>
-                     {isEditing ? (
-                        <TextInput style={styles.editInput} value={editData.tolls} onChangeText={t => setEditData({...editData, tolls: t})} keyboardType="numeric"/>
-                     ) : <Text style={styles.statBoxValue}>{selectedRide.tolls || 0}</Text>}
+                     {isEditing ? ( <TextInput style={styles.editInput} value={editData.tolls} onChangeText={t => setEditData({...editData, tolls: t})} keyboardType="numeric"/> ) : <Text style={styles.statBoxValue}>{selectedRide.tolls || 0}</Text>}
                      <Text style={styles.statBoxLabel}>€ Péages</Text>
                    </View>
                 </View>
-                {isEditing ? (
-                   <TouchableOpacity style={[styles.billingBtn, {backgroundColor: '#2196F3'}]} onPress={saveEdit}><Text style={styles.billingBtnText}>ENREGISTRER</Text></TouchableOpacity>
-                ) : (
-                   <TouchableOpacity style={[styles.billingBtn, selectedRide.statuFacturation === 'Facturé' ? styles.billingBtnGreen : styles.billingBtnRed]} onPress={() => toggleBillingStatus(selectedRide)}>
-                      <Text style={styles.billingBtnText}>{selectedRide.statuFacturation === 'Facturé' ? "FACTURÉ (OK)" : "MARQUER FACTURÉ"}</Text>
-                   </TouchableOpacity>
-                )}
+                {isEditing ? ( <TouchableOpacity style={[styles.billingBtn, {backgroundColor: '#2196F3'}]} onPress={saveEdit}><Text style={styles.billingBtnText}>ENREGISTRER</Text></TouchableOpacity> ) : ( <TouchableOpacity style={[styles.billingBtn, selectedRide.statuFacturation === 'Facturé' ? styles.billingBtnGreen : styles.billingBtnRed]} onPress={() => toggleBillingStatus(selectedRide)}><Text style={styles.billingBtnText}>{selectedRide.statuFacturation === 'Facturé' ? "FACTURÉ (OK)" : "MARQUER FACTURÉ"}</Text></TouchableOpacity> )}
               </View>
 
-              {/* Documents */}
               <View style={styles.detailSection}>
                 <Text style={styles.sectionTitle}>📸 Dossier</Text>
                 {loadingDocs ? <ActivityIndicator size="small" color="#999" /> : (
                   <View style={{marginBottom:15}}>
-                    {patientDocs.length > 0 ? patientDocs.map((doc, idx) => (
-                      <View key={idx} style={styles.docRow}><Ionicons name="document-text" size={18} color="#FF6B00" /><Text style={styles.docText}>{doc.type} ({moment(doc.uploadDate).format('DD/MM')})</Text></View>
-                    )) : <Text style={styles.noDocText}>Aucun document.</Text>}
+                    {patientDocs.length > 0 ? patientDocs.map((doc, idx) => ( <View key={idx} style={styles.docRow}><Ionicons name="document-text" size={18} color="#FF6B00" /><Text style={styles.docText}>{doc.type} ({moment(doc.uploadDate).format('DD/MM')})</Text></View> )) : <Text style={styles.noDocText}>Aucun document.</Text>}
                   </View>
                 )}
+                
+                {/* 👇 MODIFICATION ICI : GRILLE AVEC OPTION IMPORT */}
                 <View style={styles.scanGrid}>
-                  <DocumentScannerButton title="PMT" docType="PMT" color="#FF6B00" onScan={handleDocumentScanned} isLoading={uploading}/>
-                  <DocumentScannerButton title="Vitale" docType="CarteVitale" color="#4CAF50" onScan={handleDocumentScanned} isLoading={uploading}/>
-                  <DocumentScannerButton title="Mutuelle" docType="Mutuelle" color="#2196F3" onScan={handleDocumentScanned} isLoading={uploading}/>
+                  <View style={styles.scanColumn}>
+                    <DocumentScannerButton title="PMT" docType="PMT" color="#FF6B00" onScan={handleDocumentScanned} isLoading={uploading}/>
+                    <TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('PMT')}><Ionicons name="image" size={14} color="#666"/><Text style={styles.importText}>Galerie</Text></TouchableOpacity>
+                  </View>
+                  <View style={styles.scanColumn}>
+                    <DocumentScannerButton title="Vitale" docType="CarteVitale" color="#4CAF50" onScan={handleDocumentScanned} isLoading={uploading}/>
+                    <TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('CarteVitale')}><Ionicons name="image" size={14} color="#666"/><Text style={styles.importText}>Galerie</Text></TouchableOpacity>
+                  </View>
+                  <View style={styles.scanColumn}>
+                    <DocumentScannerButton title="Mutuelle" docType="Mutuelle" color="#2196F3" onScan={handleDocumentScanned} isLoading={uploading}/>
+                    <TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('Mutuelle')}><Ionicons name="image" size={14} color="#666"/><Text style={styles.importText}>Galerie</Text></TouchableOpacity>
+                  </View>
                 </View>
+
                 <TouchableOpacity style={styles.pdfBtn} onPress={generatePDF}><Ionicons name="document-text" size={20} color="#FFF" style={{marginRight:10}} /><Text style={styles.pdfBtnText}>GÉNÉRER PDF</Text></TouchableOpacity>
               </View>
 
@@ -472,19 +377,22 @@ const styles = StyleSheet.create({
   detailValueBig: { fontSize: 22, fontWeight: 'bold', color: '#333' },
   bigTypeBadge: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 10 },
   sharedAlert: { flexDirection: 'row', alignItems: 'center', padding: 15, backgroundColor: '#FFF3E0', borderRadius: 16, marginBottom: 15, borderWidth:1, borderColor:'#FFE0B2' },
+  
+  // SCANNER & IMPORT
   scanGrid: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
+  scanColumn: { alignItems: 'center', width: '30%' }, // Colonne pour aligner Scan + Import
+  importBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 8, padding: 5 },
+  importText: { fontSize: 10, color: '#666', marginLeft: 4 },
+
   docRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F9F9F9' },
   docText: { marginLeft: 10, fontSize: 14, color: '#333' },
   noDocText: { fontStyle: 'italic', color: '#999', fontSize: 12 },
   pdfBtn: { backgroundColor: '#333', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 15, borderRadius: 12, marginTop: 15 },
   pdfBtnText: { color: '#FFF', fontWeight: 'bold', marginLeft: 10 },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 15, color: '#333', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 10 },
-  
-  // STYLES HORAIRES
   timeRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom:15, alignItems:'center' },
   timeValue: { fontSize: 22, fontWeight: 'bold', color: '#333' },
   timeLabel: { fontSize: 10, color: '#888', textAlign:'center', textTransform:'uppercase' },
-
   statsRow: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor:'#F9F9F9', padding:10, borderRadius:10 },
   statBox: { alignItems:'center', minWidth: 80 },
   statBoxValue: { fontSize: 18, fontWeight: 'bold', color:'#333' },
@@ -496,8 +404,6 @@ const styles = StyleSheet.create({
   billingBtnGreen: { backgroundColor: '#388E3C' },
   billingBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   emptyText: { textAlign: 'center', marginTop: 10, color: '#999' },
-  
-  // STYLE EDITION
   editInput: { borderBottomWidth: 2, borderBottomColor: '#2196F3', fontSize: 18, fontWeight: 'bold', textAlign: 'center', minWidth: 60, padding: 5, color: '#2196F3' },
   editInputTime: { borderBottomWidth: 2, borderBottomColor: '#2196F3', fontSize: 22, fontWeight: 'bold', textAlign: 'center', minWidth: 80, padding: 5, color: '#2196F3' }
 });

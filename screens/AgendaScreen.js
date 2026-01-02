@@ -1,21 +1,24 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, ActivityIndicator, StyleSheet,
-  Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions
+  Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions, Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
 
+// Import Wrapper & Composants
 import ScreenWrapper from '../components/ScreenWrapper';
 import RideCard from '../components/RideCard'; 
+
+// Contexte & API
 import { useData } from '../contexts/DataContext'; 
 import api, { updateRide, shareRide, deleteRide } from '../services/api';
 
 const { height } = Dimensions.get('window');
 
-// Config Calendrier
+// Config Calendrier FR
 LocaleConfig.locales['fr'] = {
   monthNames: ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'],
   dayNames: ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'],
@@ -40,59 +43,48 @@ export default function AgendaScreen({ navigation }) {
 
   // États Docs & PMT
   const [patientDocs, setPatientDocs] = useState([]);
-  const [allPMTs, setAllPMTs] = useState([]); // 👈 Stocke tous les PMT pour le calcul
+  const [allPMTs, setAllPMTs] = useState([]); 
   const [loadingDocs, setLoadingDocs] = useState(false);
 
-  // États Fin de course
+  // États Fin de course & Facturation
   const [finishModal, setFinishModal] = useState(false);
   const [billingData, setBillingData] = useState({ kmReel: '', peage: '' });
 
   // --- 1. CHARGEMENT DES PMT ---
   useEffect(() => {
     fetchGlobalPMTs();
-  }, [allRides]); // On recharge si les courses changent (pour mettre à jour le décompte)
+  }, [allRides]); 
 
   const fetchGlobalPMTs = async () => {
     try {
-      // On appelle la nouvelle route backend
       const res = await api.get('/documents/pmts/all');
       setAllPMTs(res.data);
     } catch (err) {
-      console.log("Erreur chargement PMTs agenda");
+      console.log("Info: Chargement PMT silencieux");
     }
   };
 
   // --- 2. CALCUL INTELLIGENT DU PMT ---
   const getPMTStatusForRide = (ride) => {
-    // Liste des types qui nécessitent un PMT
     const typesMedicaux = ['VSL', 'Ambulance', 'Taxi', 'Aller', 'Retour', 'Consultation'];
-    
-    // Si la course n'est pas médicale ou déjà finie, pas besoin d'alerte
     if (!typesMedicaux.includes(ride.type) || ride.endTime) return null;
 
-    // 1. Trouver le dernier PMT pour ce patient
     const patientPMTs = allPMTs.filter(doc => doc.patientName === ride.patientName);
     
-    // ROUGE : Aucun PMT trouvé
     if (patientPMTs.length === 0) {
         return { color: '#D32F2F', text: 'PMT MANQUANT (A RÉCUPÉRER)', icon: 'alert-circle' };
     }
 
-    // On prend le plus récent
     patientPMTs.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
     const lastPMT = patientPMTs[0];
     
-    // Données du PMT
     const pmtDate = new Date(lastPMT.uploadDate);
     const maxQuota = lastPMT.maxRides || 1; 
 
-    // VERT : Si c'est illimité
     if (maxQuota >= 1000) {
         return { color: '#4CAF50', text: 'PMT VALIDE (SÉRIE ILLIMITÉE)', icon: 'checkmark-circle' };
     }
 
-    // 2. Calculer la consommation DEPUIS la date du PMT
-    // On regarde toutes les courses de l'historique pour ce patient
     const ridesSincePMT = allRides.filter(r => {
         return r.patientName === ride.patientName && 
                new Date(r.date) >= pmtDate && 
@@ -101,48 +93,49 @@ export default function AgendaScreen({ navigation }) {
 
     let consumed = 0;
     ridesSincePMT.forEach(r => {
-        if (r.isRoundTrip) consumed += 1;   // Aller-Retour = 1
-        else consumed += 0.5;               // Aller Simple = 0.5
+        if (r.isRoundTrip) consumed += 1;
+        else consumed += 0.5;
     });
 
     const remaining = maxQuota - consumed;
 
-    // ROUGE : Épuisé
     if (remaining <= 0) {
         return { color: '#D32F2F', text: `PMT ÉPUISÉ (${consumed}/${maxQuota}) - NOUVEAU BON REQUIS`, icon: 'warning' };
     }
-    // ORANGE : Bientôt fini (Reste 1 ou moins)
     else if (remaining <= 1) {
         return { color: '#FF9800', text: `PMT BIENTÔT FINI (Reste ${remaining} AR)`, icon: 'alert-circle' };
     }
-    // VERT : Disponible
     else {
         return { color: '#4CAF50', text: `PMT DISPONIBLE (Reste ${remaining} AR)`, icon: 'document-text' };
     }
   };
 
-  // --- 3. CALCULS LISTE ---
-  const markedDates = useMemo(() => {
-    const marks = {};
-    allRides.forEach(ride => {
-      const day = moment(ride.date).format('YYYY-MM-DD');
-      if (!marks[day]) marks[day] = { dots: [] };
-      const dotColor = ride.isShared ? '#FF9800' : '#4CAF50';
-      if (!marks[day].dots.find(d => d.color === dotColor)) marks[day].dots.push({ key: ride._id, color: dotColor });
+  // --- 3. MAPPY & ACTIONS (CORRIGÉ AVEC LE HASH #) ---
+
+  const openMappyRoute = () => {
+    if (!activeRide) return;
+
+    // Sécurité si adresses vides
+    const startAddr = activeRide.startLocation || "";
+    const endAddr = activeRide.endLocation || "";
+
+    if (!startAddr || !endAddr) {
+        return Alert.alert("Erreur", "Adresses manquantes pour le calcul.");
+    }
+
+    // Encodage propre des adresses pour les URL (espaces -> %20, etc.)
+    const start = encodeURIComponent(startAddr);
+    const end = encodeURIComponent(endAddr);
+
+    // ✅ NOUVEAU FORMAT CORRIGÉ (avec # et /car)
+    // Exemple : https://fr.mappy.com/itineraire#/voiture/Depart/Arrivee/car
+    const url = `https://fr.mappy.com/itineraire#/voiture/${start}/${end}/car`;
+
+    Linking.openURL(url).catch(err => {
+      Alert.alert("Erreur", "Impossible d'ouvrir le navigateur.");
     });
-    marks[selectedDate] = { ...marks[selectedDate], selected: true, selectedColor: '#FF6B00' };
-    return marks;
-  }, [allRides, selectedDate]);
+  };
 
-  const dailyRides = useMemo(() => {
-    return allRides.filter(r => 
-      moment(r.date).format('YYYY-MM-DD') === selectedDate &&
-      (!r.isShared || r.statusPartage !== 'refused') 
-    ).sort((a, b) => new Date(a.date) - new Date(b.date));
-  }, [allRides, selectedDate]);
-
-
-  // --- ACTIONS ---
   const handleStatusChange = async (ride, action) => {
     try {
       if (action === 'start') {
@@ -171,6 +164,26 @@ export default function AgendaScreen({ navigation }) {
     } catch (err) { Alert.alert("Erreur", "Echec clôture."); }
   };
 
+  // --- 4. AUTRES FONCTIONS ---
+  const markedDates = useMemo(() => {
+    const marks = {};
+    allRides.forEach(ride => {
+      const day = moment(ride.date).format('YYYY-MM-DD');
+      if (!marks[day]) marks[day] = { dots: [] };
+      const dotColor = ride.isShared ? '#FF9800' : '#4CAF50';
+      if (!marks[day].dots.find(d => d.color === dotColor)) marks[day].dots.push({ key: ride._id, color: dotColor });
+    });
+    marks[selectedDate] = { ...marks[selectedDate], selected: true, selectedColor: '#FF6B00' };
+    return marks;
+  }, [allRides, selectedDate]);
+
+  const dailyRides = useMemo(() => {
+    return allRides.filter(r => 
+      moment(r.date).format('YYYY-MM-DD') === selectedDate &&
+      (!r.isShared || r.statusPartage !== 'refused') 
+    ).sort((a, b) => new Date(a.date) - new Date(b.date));
+  }, [allRides, selectedDate]);
+
   const fetchRideDocuments = async (ride) => {
     if (!ride) return;
     try {
@@ -178,41 +191,29 @@ export default function AgendaScreen({ navigation }) {
       const res = await api.get(`/documents/by-ride/${ride._id}`);
       setPatientDocs(res.data);
       setModals({ options: false, share: false, docs: true });
-    } catch (err) {
-      Alert.alert("Info", "Impossible de récupérer le dossier patient.");
-    } finally {
-      setLoadingDocs(false);
-    }
+    } catch (err) { Alert.alert("Info", "Erreur récupération dossier."); } 
+    finally { setLoadingDocs(false); }
   };
 
   const finalizeShare = async () => {
-    if (!activeRide) return Alert.alert("Erreur", "Aucune course sélectionnée");
-    if (!contactToShare || !contactToShare.contactId) return Alert.alert("Erreur", "Contact invalide");
-
+    if (!activeRide || !contactToShare) return;
     try {
       await shareRide(activeRide._id, contactToShare.contactId._id, shareNote);
       setModals({ ...modals, share: false });
-      setContactToShare(null);
-      setShareNote('');
-      loadData(true);
-      Alert.alert('Succès', `Course envoyée.`);
-    } catch (err) { 
-      Alert.alert('Échec', "Erreur de partage"); 
-    }
+      setContactToShare(null); setShareNote('');
+      loadData(true); Alert.alert('Succès', `Course envoyée.`);
+    } catch (err) { Alert.alert('Échec', "Erreur partage."); }
   };
 
   const handleDelete = async () => {
-    try { 
-        await deleteRide(activeRide._id); 
-        setModals({...modals, options:false}); 
-        loadData(true);
-    }
+    try { await deleteRide(activeRide._id); setModals({...modals, options:false}); loadData(true); }
     catch(e) { Alert.alert('Erreur', 'Suppression impossible'); }
   };
 
   const selectContactForShare = (contactItem) => { setContactToShare(contactItem); setShareNote(''); };
   const closeShareModal = () => { setModals({...modals, share: false}); setContactToShare(null); setShareNote(''); };
 
+  // ================= RENDER =================
   return (
     <ScreenWrapper>
       
@@ -251,21 +252,16 @@ export default function AgendaScreen({ navigation }) {
             data={dailyRides}
             keyExtractor={item => item._id}
             renderItem={({ item }) => {
-              
-              // 👇 RECUPERATION DU STATUT PMT POUR CETTE COURSE
               const pmtStatus = getPMTStatusForRide(item);
-
               return (
                 <View style={styles.rideBlock}>
-                  
-                  {/* ALERTE PMT DYNAMIQUE */}
+                  {/* ALERTE PMT */}
                   {pmtStatus && (
                     <View style={[styles.pmtHeader, { backgroundColor: pmtStatus.color }]}>
                       <Ionicons name={pmtStatus.icon} size={14} color="#FFF" />
                       <Text style={styles.pmtHeaderText}>{pmtStatus.text}</Text>
                     </View>
                   )}
-
                   <RideCard 
                     ride={item}
                     onStatusChange={handleStatusChange} 
@@ -283,7 +279,7 @@ export default function AgendaScreen({ navigation }) {
                 </View>
             }
             refreshing={loading}
-            onRefresh={() => { loadData(false); fetchGlobalPMTs(); }} // On recharge les PMT aussi
+            onRefresh={() => { loadData(false); fetchGlobalPMTs(); }} 
             contentContainerStyle={{ padding: 15, paddingBottom: 160 }}
             showsVerticalScrollIndicator={false}
           />
@@ -368,19 +364,6 @@ export default function AgendaScreen({ navigation }) {
                  <View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{contactToShare.contactId?.fullName?.charAt(0)}</Text></View>
                  <Text style={styles.selectedContactName}>Pour : {contactToShare.contactId?.fullName}</Text>
               </View>
-
-              {activeRide && activeRide.patientPhone ? (
-                 <View style={styles.phoneInfoBox}>
-                    <Ionicons name="call" size={20} color="#4CAF50" />
-                    <Text style={styles.phoneInfoText}>N° patient transmis auto.</Text>
-                 </View>
-              ) : (
-                 <View style={[styles.phoneInfoBox, {backgroundColor: '#FFEBEE'}]}>
-                    <Ionicons name="alert-circle" size={20} color="#D32F2F" />
-                    <Text style={[styles.phoneInfoText, {color: '#D32F2F'}]}>Attention : Pas de n° enregistré.</Text>
-                 </View>
-              )}
-
               <Text style={styles.noteLabel}>Message (Optionnel) :</Text>
               <TextInput style={styles.noteInput} placeholder="Info..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} textAlignVertical="top"/>
               <TouchableOpacity style={styles.sendShareBtn} onPress={finalizeShare}>
@@ -392,7 +375,7 @@ export default function AgendaScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* 4. FIN DE COURSE */}
+      {/* 4. FIN DE COURSE (AVEC BOUTON MAPPY CORRIGÉ) */}
       <Modal visible={finishModal} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.finishCard}>
@@ -402,7 +385,17 @@ export default function AgendaScreen({ navigation }) {
                     <Ionicons name="close" size={24} color="#333" />
                 </TouchableOpacity>
             </View>
-            <Text style={styles.inputLabel}>Kilométrage réel</Text>
+
+            {/* BOUTON MAPPY AVEC BON FORMAT URL */}
+            <TouchableOpacity style={styles.mappyBtn} onPress={openMappyRoute}>
+                <View style={{flexDirection:'row', alignItems:'center'}}>
+                    <Ionicons name="map" size={20} color="#FFF" style={{marginRight:8}} />
+                    <Text style={{color:'#FFF', fontWeight:'bold'}}>VÉRIFIER KM (MAPPY)</Text>
+                </View>
+                <Ionicons name="open-outline" size={18} color="#FFF" />
+            </TouchableOpacity>
+
+            <Text style={styles.inputLabel}>Kilométrage réel (CPAM)</Text>
             <View style={styles.inputWrapper}><TextInput style={styles.input} placeholder="Ex: 25" keyboardType="numeric" value={billingData.kmReel} onChangeText={t => setBillingData({...billingData, kmReel: t})}/><Text style={styles.unitText}>km</Text></View>
             <Text style={styles.inputLabel}>Péages / Frais</Text>
             <View style={styles.inputWrapper}><TextInput style={styles.input} placeholder="Ex: 5.50" keyboardType="numeric" value={billingData.peage} onChangeText={t => setBillingData({...billingData, peage: t})}/><Text style={styles.unitText}>€</Text></View>
@@ -471,9 +464,11 @@ const styles = StyleSheet.create({
   sendShareBtn: { backgroundColor: '#FF6B00', padding: 18, borderRadius: 14, alignItems: 'center', flexDirection:'row', justifyContent:'center', elevation: 3 },
   sendShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 
+  // FINISH CARD & MAPPY
   finishCard: { backgroundColor: '#FFF', padding: 25, borderTopLeftRadius: 25, borderTopRightRadius: 25 },
   finishHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   finishTitle: { fontSize: 20, fontWeight: 'bold' },
+  mappyBtn: { backgroundColor: '#009688', padding: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#00796B', elevation: 2 },
   inputLabel: { fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 8 },
   inputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#DDD', borderRadius: 12, paddingHorizontal: 15, marginBottom: 20, height: 55, backgroundColor: '#FAFAFA' },
   input: { flex: 1, fontSize: 18, fontWeight: 'bold', color: '#333' },
