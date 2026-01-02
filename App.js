@@ -27,7 +27,7 @@ import HistoryScreen from './screens/HistoryScreen';
 import PatientsScreen from './screens/PatientsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AddRideScreen from './screens/CreateRideScreen'; 
-
+import FacturationScreen from './screens/FacturationScreen';
 // Import de l'API
 import api, { getRides } from './services/api';
 
@@ -227,6 +227,9 @@ export default function App() {
                     component={DocumentsScreen} 
                     options={{ title: 'Mes Documents', headerTintColor: '#FF6B00' }} 
                   />
+
+
+<Stack.Screen name="Facturation" component={FacturationScreen} options={{ title: 'Facturation Auto' }} />
                 </Stack.Group>
               )}
             </Stack.Navigator>

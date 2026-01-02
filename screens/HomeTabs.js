@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, 
-  Dimensions, ActivityIndicator, Alert 
+  ActivityIndicator, Alert 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import moment from 'moment';
@@ -15,16 +15,35 @@ import { extractSecuNumber } from '../services/ocrService'; // Ton service OCR
 
 import { getRides } from '../services/api';
 
+// CONFIGURATION TARIFS (CPAM)
+const TARIFS = {
+  TAXI: { priseEnCharge: 2.60, prixKm: 1.80 },
+  VSL: { forfait: 14.50, prixKm: 1.05 },
+  AMBULANCE: { forfait: 65.00, prixKm: 2.50 }
+};
+
+const calculateRidePrice = (ride) => {
+  if (!ride.realDistance) return 0;
+  const dist = parseFloat(ride.realDistance);
+  const tolls = parseFloat(ride.tolls || 0);
+  let basePrice = 0;
+
+  switch (ride.type) {
+    case 'Ambulance': basePrice = TARIFS.AMBULANCE.forfait + (dist * TARIFS.AMBULANCE.prixKm); break;
+    case 'VSL': basePrice = TARIFS.VSL.forfait + (dist * TARIFS.VSL.prixKm); break;
+    default: basePrice = TARIFS.TAXI.priseEnCharge + (dist * TARIFS.TAXI.prixKm);
+  }
+  return basePrice + tolls;
+};
+
 export default function HomeScreen({ navigation }) {
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(false);
-  
-  // État pour le loader du scan
-  const [scanning, setScanning] = useState(false);
+  const [scanning, setScanning] = useState(false); // Loader spécifique scan
 
   const [stats, setStats] = useState({
     todayCount: 0,
-    weekEarnings: 0,
+    monthEarnings: 0,
     nextRide: null
   });
 
@@ -34,16 +53,26 @@ export default function HomeScreen({ navigation }) {
       const data = await getRides();
       
       const today = moment().format('YYYY-MM-DD');
-      const todayRides = data.filter(r => moment(r.date).format('YYYY-MM-DD') === today);
+      const currentMonth = moment().format('MM-YYYY');
       const now = moment();
+
+      const todayRides = data.filter(r => moment(r.date).format('YYYY-MM-DD') === today);
+      
       const upcoming = todayRides
         .filter(r => moment(r.date).isAfter(now))
         .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
 
+      const finishedRidesThisMonth = data.filter(r => 
+        r.status === 'Terminée' && 
+        moment(r.date).format('MM-YYYY') === currentMonth
+      );
+
+      const totalEarnings = finishedRidesThisMonth.reduce((acc, ride) => acc + calculateRidePrice(ride), 0);
+
       setRides(todayRides);
       setStats({
         todayCount: todayRides.length,
-        weekEarnings: todayRides.length * 45, // Estimation
+        monthEarnings: Math.round(totalEarnings),
         nextRide: upcoming
       });
 
@@ -56,45 +85,70 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
-  // 👇 2. FONCTION DE SCAN (Copier-Coller du PatientsScreen)
+  // 👇 2. NOUVELLE FONCTION DE SCAN (Compatible Emulateur)
   const handleAntiFraudScan = async () => {
-    try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) return Alert.alert("Erreur", "Accès caméra requis");
-
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true, // Cadre restreint pour aider l'OCR
-        quality: 1,
-      });
-
-      if (!result.canceled) {
-        setScanning(true); 
-        
-        // Extraction
-        const nir = await extractSecuNumber(result.assets[0].uri);
-        setScanning(false);
-
-        if (nir) {
-          await Clipboard.setStringAsync(nir);
-          Alert.alert(
-            "NIR Copié !",
-            `Numéro : ${nir}\n\nOuverture d'AmeliPro pour vérification...`,
-            [
-              { text: "Annuler", style: "cancel" },
-              { 
-                text: "Ouvrir AmeliPro", 
-                onPress: () => Linking.openURL('https://professionnels.ameli.fr/') 
-              }
-            ]
-          );
-        } else {
-          Alert.alert("Échec", "Aucun numéro lisible. Réessayez.");
-        }
-      }
-    } catch (error) {
+    
+    // Fonction interne pour traiter l'image (évite de répéter le code)
+    const processImage = async (uri) => {
+      setScanning(true);
+      // Appel à ton service OCR intelligent
+      const nir = await extractSecuNumber(uri);
       setScanning(false);
-      Alert.alert("Erreur", "Problème lors du scan.");
-    }
+
+      if (nir) {
+        await Clipboard.setStringAsync(nir);
+        Alert.alert(
+          "NIR Copié !",
+          `Numéro : ${nir}\n\nOuverture d'AmeliPro pour vérification...`,
+          [
+            { text: "Annuler", style: "cancel" },
+            { 
+              text: "Ouvrir AmeliPro", 
+              onPress: () => Linking.openURL('https://professionnels.ameli.fr/') 
+            }
+          ]
+        );
+      } else {
+        Alert.alert("Échec", "Aucun numéro de sécu lisible. Essayez une image plus nette.");
+      }
+    };
+
+    // Menu de choix
+    Alert.alert(
+      "Vérification Droits",
+      "Choisir la méthode de scan :",
+      [
+        {
+          text: "📷 Caméra",
+          onPress: async () => {
+            const permission = await ImagePicker.requestCameraPermissionsAsync();
+            if (!permission.granted) return Alert.alert("Erreur", "Accès caméra requis");
+            
+            const result = await ImagePicker.launchCameraAsync({
+              allowsEditing: true, // Important pour recadrer sur le numéro
+              quality: 1,
+            });
+            
+            if (!result.canceled) await processImage(result.assets[0].uri);
+          }
+        },
+        {
+          text: "🖼️ Galerie (Pour Test)",
+          onPress: async () => {
+            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!permission.granted) return Alert.alert("Erreur", "Accès galerie requis");
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+              allowsEditing: true, // Important pour recadrer sur le numéro
+              quality: 1,
+            });
+
+            if (!result.canceled) await processImage(result.assets[0].uri);
+          }
+        },
+        { text: "Annuler", style: "cancel" }
+      ]
+    );
   };
 
   return (
@@ -122,14 +176,14 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.statSub}>Courses</Text>
             </View>
             <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Estim. Gains</Text>
-              <Text style={styles.statValue}>{stats.weekEarnings}€</Text>
-              <Text style={styles.statSub}>Net (approx)</Text>
+              <Text style={styles.statLabel}>CA du Mois</Text>
+              <Text style={styles.statValue}>{stats.monthEarnings} €</Text>
+              <Text style={styles.statSub}>Estimé (CPAM)</Text>
             </View>
           </View>
         </View>
 
-        {/* 👇 3. NOUVELLE SECTION OUTILS (Scan Rapide) */}
+        {/* 👇 3. SECTION OUTILS (Scan) */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Outils Chauffeur</Text>
           <TouchableOpacity 
@@ -146,9 +200,15 @@ export default function HomeScreen({ navigation }) {
             </View>
             <Ionicons name="chevron-forward" size={24} color="#CCC" />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('Facturation')}>
+   <View style={[styles.iconBox, { backgroundColor: '#F3E5F5' }]}>
+      <Ionicons name="document-attach" size={24} color="#8E24AA" />
+   </View>
+   <Text style={styles.actionText}>Dossier PDF</Text>
+</TouchableOpacity>
         </View>
 
-        {/* SECTION PROCHAINE COURSE */}
+        {/* PROCHAINE COURSE */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Prochain Départ</Text>
           {stats.nextRide ? (
@@ -161,7 +221,6 @@ export default function HomeScreen({ navigation }) {
                 </View>
               </View>
               <Text style={styles.patientName}>{stats.nextRide.patientName}</Text>
-              
               <View style={styles.routeRow}>
                 <Ionicons name="location" size={16} color="#4CAF50" />
                 <Text style={styles.routeText} numberOfLines={1}>{stats.nextRide.startLocation}</Text>
@@ -171,10 +230,9 @@ export default function HomeScreen({ navigation }) {
                 <Ionicons name="flag" size={16} color="#FF6B00" />
                 <Text style={styles.routeText} numberOfLines={1}>{stats.nextRide.endLocation}</Text>
               </View>
-
               <TouchableOpacity 
                 style={styles.goBtn}
-                onPress={() => navigation.navigate('History')} // Redirige vers History pour voir détails
+                onPress={() => navigation.navigate('History')}
               >
                 <Text style={styles.goBtnText}>Voir détails</Text>
                 <Ionicons name="arrow-forward" size={16} color="#FFF" />
@@ -188,7 +246,7 @@ export default function HomeScreen({ navigation }) {
           )}
         </View>
 
-        {/* MENU RAPIDE */}
+        {/* ACCÈS RAPIDE */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Accès Rapide</Text>
           <View style={styles.quickActions}>
@@ -198,17 +256,15 @@ export default function HomeScreen({ navigation }) {
               </View>
               <Text style={styles.actionText}>Nouvelle</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('Contact')}>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('Patients')}>
               <View style={[styles.iconBox, { backgroundColor: '#E8F5E9' }]}>
                 <Ionicons name="people" size={24} color="#2E7D32" />
               </View>
               <Text style={styles.actionText}>Patients</Text>
             </TouchableOpacity>
-
             <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('History')}>
               <View style={[styles.iconBox, { backgroundColor: '#FFF3E0' }]}>
-                <Ionicons name="stats-chart" size={24} color="#EF6C00" />
+                <Ionicons name="calendar" size={24} color="#EF6C00" />
               </View>
               <Text style={styles.actionText}>Historique</Text>
             </TouchableOpacity>
@@ -239,10 +295,10 @@ const styles = StyleSheet.create({
   statLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginBottom: 5 },
   statValue: { color: '#FFF', fontSize: 24, fontWeight: 'bold' },
   statSub: { color: 'rgba(255,255,255,0.6)', fontSize: 10 },
-  section: { padding: 20, paddingBottom: 0 }, // Ajustement padding
+  section: { padding: 20, paddingBottom: 0 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 15 },
   
-  // STYLE DU NOUVEAU BOUTON OUTIL
+  // STYLE OUTIL
   toolCard: { 
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', 
     padding: 15, borderRadius: 15, elevation: 2, marginBottom: 10 
@@ -264,7 +320,7 @@ const styles = StyleSheet.create({
   goBtnText: { color: '#FFF', fontWeight: 'bold', marginRight: 5 },
   emptyCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 30, alignItems: 'center', borderStyle: 'dashed', borderWidth: 2, borderColor: '#EEE' },
   emptyText: { color: '#999', marginTop: 10 },
-  quickActions: { flexDirection: 'row', justifyContent: 'space-between', paddingBottom: 30 }, // Padding en bas pour scroll
+  quickActions: { flexDirection: 'row', justifyContent: 'space-between', paddingBottom: 30 },
   actionBtn: { width: '30%', backgroundColor: '#FFF', padding: 15, borderRadius: 15, alignItems: 'center', elevation: 2 },
   iconBox: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   actionText: { fontWeight: '600', color: '#555', fontSize: 12 }
