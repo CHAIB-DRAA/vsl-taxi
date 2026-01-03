@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, StyleSheet, 
   ScrollView, Alert, Switch, KeyboardAvoidingView, Platform, Modal, FlatList, ActivityIndicator, Dimensions
@@ -13,13 +13,24 @@ import AddressAutocomplete from '../components/AddressAutocomplete';
 import { createRide, getPatients, createPatient } from '../services/api';
 import ScreenWrapper from '../components/ScreenWrapper';
 
+// 👇 IMPORT AJOUTÉ POUR L'HISTORIQUE
+import { useData } from '../contexts/DataContext'; 
+
+// 👇 LISTE MISE À JOUR
 const TOULOUSE_HOSPITALS = [
   "Purpan", "Rangueil", "Oncopole", 
   "Clinique Pasteur", "Cèdres", "Rive Gauche",
-  "Médipôle", "St-Exupéry"
+  "Médipôle", "St-Exupéry",
+  "Clinique Estella",       // Ajouté
+  "Hôpital Larrey",         // Ajouté
+  "Clinique Croix du Sud",  // Ajouté
+  "Clinique de l'Union"     // Ajouté
 ];
 
 export default function CreateRideScreen({ navigation }) {
+  // 👇 RÉCUPÉRATION DE L'HISTORIQUE
+  const { allRides } = useData();
+
   // --- STATES ---
   const [patientName, setPatientName] = useState('');
   const [patientPhone, setPatientPhone] = useState(''); 
@@ -55,6 +66,26 @@ export default function CreateRideScreen({ navigation }) {
       setAllPatients(data || []);
     } catch (err) { console.log("Erreur chargement patients"); }
   };
+
+  // 👇 NOUVELLE FONCTION : SUGGESTIONS INTELLIGENTES
+  const recentDestinations = useMemo(() => {
+    if (!patientName || patientName.length < 2) return [];
+
+    // 1. Filtrer l'historique pour ce patient
+    const history = allRides.filter(r => 
+      r.patientName && 
+      r.patientName.toLowerCase().trim() === patientName.toLowerCase().trim()
+    );
+
+    // 2. Trier par date (plus récent d'abord)
+    history.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // 3. Extraire les destinations uniques
+    const uniqueLocs = [...new Set(history.map(r => r.endLocation))].filter(l => l);
+
+    // 4. Retourner les 3 premières
+    return uniqueLocs.slice(0, 3);
+  }, [patientName, allRides]);
 
   const handleNameChange = (text) => {
     setPatientName(text);
@@ -178,7 +209,7 @@ export default function CreateRideScreen({ navigation }) {
               <TextInput 
                 style={styles.inputField}
                 placeholder="Nom du patient..."
-                placeholderTextColor="#999" // FORCE LA COULEUR DU PLACEHOLDER
+                placeholderTextColor="#999" 
                 value={patientName}
                 onChangeText={handleNameChange}
               />
@@ -229,6 +260,21 @@ export default function CreateRideScreen({ navigation }) {
           <View style={[styles.sectionContainer, { zIndex: 1000, elevation: 1000 }]}>
             <Text style={styles.sectionTitle}>3. ITINÉRAIRE</Text>
             
+            {/* 👇 SUGGESTIONS DESTINATIONS RÉCENTES 👇 */}
+            {recentDestinations.length > 0 && (
+              <View style={styles.recentContainer}>
+                <Text style={styles.recentLabel}>Habitudes :</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {recentDestinations.map((loc, idx) => (
+                    <TouchableOpacity key={idx} style={styles.recentChip} onPress={() => setEndLocation(loc)}>
+                      <Ionicons name="reload-circle" size={14} color="#1565C0" style={{marginRight:4}}/>
+                      <Text style={styles.recentChipText}>{loc}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
             {/* Chips Hôpitaux */}
             <View style={styles.hospitalRow}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -243,58 +289,46 @@ export default function CreateRideScreen({ navigation }) {
             {/* BLOC PRINCIPAL STACKED */}
             <View style={styles.stackedInputContainer}>
               
-              {/* Ligne visuelle */}
               <View style={styles.timelineContainer}>
                  <View style={styles.timelineDotStart} />
                  <View style={styles.timelineLine} />
                  <View style={styles.timelineSquareEnd} />
               </View>
 
-              {/* Les deux inputs */}
               <View style={styles.inputsColumn}>
-                 {/* DEPART : Z-Index 50 */}
+                 {/* DEPART */}
                  <View style={[styles.inputRow, { zIndex: 50, elevation: 50 }]}>
                     <Text style={styles.inputLabelSmall}>DE</Text>
                     <View style={{flex:1, paddingRight: 40}}> 
                         <AddressAutocomplete 
                             placeholder="Lieu de prise en charge" 
-                            placeholderTextColor="#999" // FORCE LA COULEUR
+                            placeholderTextColor="#999" 
                             value={startLocation} 
                             onSelect={setStartLocation} 
-                            // 👇 FIX CRITIQUE : FORCE LA COULEUR DU TEXTE SAISI EN NOIR
                             style={{ color: '#000000' }}
-                            textInputProps={{ 
-                                style: { color: '#000000' },
-                                placeholderTextColor: "#999"
-                            }}
+                            textInputProps={{ style: { color: '#000000' }, placeholderTextColor: "#999" }}
                         />
                     </View>
                  </View>
 
-                 {/* Séparateur */}
                  <View style={styles.separator} />
 
-                 {/* ARRIVÉE : Z-Index 40 */}
+                 {/* ARRIVÉE */}
                  <View style={[styles.inputRow, { zIndex: 40, elevation: 40 }]}>
                     <Text style={styles.inputLabelSmall}>À</Text>
                     <View style={{flex:1, paddingRight: 40}}>
                         <AddressAutocomplete 
                             placeholder="Lieu de destination" 
-                            placeholderTextColor="#999" // FORCE LA COULEUR
+                            placeholderTextColor="#999" 
                             value={endLocation} 
                             onSelect={setEndLocation} 
-                            // 👇 FIX CRITIQUE : FORCE LA COULEUR DU TEXTE SAISI EN NOIR
                             style={{ color: '#000000' }}
-                            textInputProps={{ 
-                                style: { color: '#000000' },
-                                placeholderTextColor: "#999"
-                            }}
+                            textInputProps={{ style: { color: '#000000' }, placeholderTextColor: "#999" }}
                         />
                     </View>
                  </View>
               </View>
 
-              {/* BOUTON SWAP : Z-Index 100 pour être tout au dessus */}
               <TouchableOpacity style={styles.centeredSwapBtn} onPress={swapAddresses} activeOpacity={0.8}>
                   <Ionicons name="swap-vertical" size={20} color="#FF6B00" />
               </TouchableOpacity>
@@ -395,7 +429,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 12, fontWeight: '800', color: '#B0BEC5', letterSpacing: 1 },
   linkText: { color: '#FF6B00', fontWeight: 'bold', fontSize: 14 },
 
-  // INPUTS PATIENT (FOND CLAIR POUR LISIBILITÉ)
+  // INPUTS PATIENT
   inputBox: { 
     flexDirection: 'row', 
     alignItems: 'center', 
@@ -406,7 +440,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEE'
   },
-  inputField: { flex: 1, fontSize: 16, color: '#000', fontWeight: '600' }, // Force texte noir
+  inputField: { flex: 1, fontSize: 16, color: '#000', fontWeight: '600' },
   helperText: { marginTop: 8, color: '#2E7D32', fontSize: 12, fontWeight: '700' },
 
   suggestionsDropdown: { 
@@ -429,6 +463,12 @@ const styles = StyleSheet.create({
   hospitalChip: { backgroundColor: '#F0F4C3', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8 },
   hospitalText: { color: '#827717', fontWeight: '700', fontSize: 12 },
 
+  // 👇 STYLES SUGGESTIONS
+  recentContainer: { marginBottom: 10 },
+  recentLabel: { fontSize: 12, color: '#1565C0', marginBottom: 5, fontWeight: 'bold', fontStyle: 'italic' },
+  recentChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E3F2FD', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#90CAF9' },
+  recentChipText: { color: '#1565C0', fontSize: 12, fontWeight: 'bold' },
+
   // --- STACKED INPUT CONTAINER ---
   stackedInputContainer: {
     backgroundColor: '#FFFFFF', 
@@ -438,38 +478,21 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderWidth: 1, borderColor: '#E0E0E0',
   },
-  
   timelineContainer: { position: 'absolute', left: 15, top: 25, bottom: 25, width: 20, alignItems: 'center', justifyContent: 'space-between' },
   timelineDotStart: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#4CAF50' },
   timelineLine: { width: 2, flex: 1, backgroundColor: '#DDD', marginVertical: 4 },
   timelineSquareEnd: { width: 10, height: 10, backgroundColor: '#212121' },
 
   inputsColumn: { marginLeft: 25 },
-  
-  inputRow: { 
-    height: 55, 
-    justifyContent: 'center', 
-    flexDirection:'row', 
-    alignItems:'center',
-    backgroundColor: 'transparent' 
-  },
+  inputRow: { height: 55, justifyContent: 'center', flexDirection:'row', alignItems:'center', backgroundColor: 'transparent' },
   inputLabelSmall: { fontSize: 10, fontWeight: 'bold', color:'#999', width: 25, marginRight: 5 },
   separator: { height: 1, backgroundColor: '#E0E0E0', width: '100%' },
 
-  // --- BOUTON SWAP ---
   centeredSwapBtn: { 
-    position: 'absolute', 
-    right: 15, 
-    top: '50%', 
-    marginTop: -20, 
-    backgroundColor: '#FFF', 
-    width: 40, height: 40, borderRadius: 20,
+    position: 'absolute', right: 15, top: '50%', marginTop: -20, 
+    backgroundColor: '#FFF', width: 40, height: 40, borderRadius: 20,
     justifyContent: 'center', alignItems: 'center',
-    
-    zIndex: 9999, 
-    elevation: 20, 
-    
-    borderWidth: 1, borderColor: '#E0E0E0',
+    zIndex: 9999, elevation: 20, borderWidth: 1, borderColor: '#E0E0E0',
     shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 3, shadowOffset: { width: 0, height: 2 }
   },
 
@@ -492,7 +515,7 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 25 },
   modalCard: { backgroundColor: '#FFF', borderRadius: 24, padding: 25 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-  modalField: { backgroundColor: '#F5F5F5', height: 50, borderRadius: 10, paddingHorizontal: 15, marginBottom: 12, fontSize: 16, color: '#000' }, // Force texte noir
+  modalField: { backgroundColor: '#F5F5F5', height: 50, borderRadius: 10, paddingHorizontal: 15, marginBottom: 12, fontSize: 16, color: '#000' },
   modalBtns: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   cancelBtn: { padding: 15, flex: 1, alignItems: 'center' },
   saveBtn: { backgroundColor: '#FF6B00', padding: 15, flex: 1, alignItems: 'center', borderRadius: 10 },

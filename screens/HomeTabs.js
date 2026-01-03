@@ -133,7 +133,7 @@ export default function HomeScreen({ navigation }) {
           }
         },
         {
-          text: "🖼️ Galerie (Pour Test)",
+          text: "🖼️ Galerie ",
           onPress: async () => {
             const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!permission.granted) return Alert.alert("Erreur", "Accès galerie requis");
@@ -200,12 +200,7 @@ export default function HomeScreen({ navigation }) {
             </View>
             <Ionicons name="chevron-forward" size={24} color="#CCC" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('Facturation')}>
-   <View style={[styles.iconBox, { backgroundColor: '#F3E5F5' }]}>
-      <Ionicons name="document-attach" size={24} color="#8E24AA" />
-   </View>
-   <Text style={styles.actionText}>Dossier PDF</Text>
-</TouchableOpacity>
+          
         </View>
 
         {/* PROCHAINE COURSE */}

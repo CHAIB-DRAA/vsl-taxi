@@ -14,19 +14,22 @@ const typeColors = {
 };
 
 export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
-  const isFinished = !!ride.endTime;
-  const isStarted = !!ride.startTime && !ride.endTime;
+  // Détection des états
+  const isFinished = ride.status === 'Terminée' || !!ride.endTime;
+  const isStarted = !!ride.startTime && !isFinished;
   
+  // Gestion invitation partage
   const pendingStatus = ride.shareStatus === 'pending' || ride.statusPartage === 'pending';
   const showResponseButtons = ride.isShared && pendingStatus;
 
+  // Notes de partage
   const hasNote = ride.isShared && (ride.shareNote || ride.sharedNote) && (ride.shareNote?.length > 0 || ride.sharedNote?.length > 0);
   const noteContent = ride.shareNote || ride.sharedNote;
 
-  // 👇 LOGIQUE PMT : On affiche l'alerte pour VSL et Ambulance si la course n'est pas finie
+  // ⚠️ LOGIQUE PMT : Affiche l'alerte pour VSL/Ambulance non terminés
   const needsPMT = (ride.type === 'VSL' || ride.type === 'Ambulance') && !isFinished;
   
-  // Fonction GPS
+  // Fonction GPS (Waze)
   const openGPS = (address) => {
     if (!address) return;
     const encoded = encodeURIComponent(address);
@@ -44,9 +47,11 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
 
   return (
     <TouchableOpacity 
-      activeOpacity={0.9}
-      onPress={() => !isFinished && onPress && onPress(ride)}
-      disabled={showResponseButtons} 
+      activeOpacity={0.7}
+      // 👇 MODIFICATION CRUCIALE ICI : 
+      // J'ai retiré "!isFinished &&" pour que tu puisses cliquer même si c'est fini
+      onPress={() => onPress && onPress(ride)}
+      disabled={showResponseButtons} // On désactive le clic global seulement si on doit Accepter/Refuser
       style={[
         styles.card, 
         isFinished && styles.cardFinished,
@@ -54,23 +59,23 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         isStarted && styles.cardActive 
       ]}
     >
-      {/* 1. HEADER */}
+      {/* 1. HEADER (Heure + Badge Type) */}
       <View style={styles.header}>
         <View style={styles.timeContainer}>
-          <Ionicons name="time-outline" size={16} color="#333" />
-          <Text style={styles.timeText}>
+          <Ionicons name="time-outline" size={16} color={isFinished ? "#888" : "#333"} />
+          <Text style={[styles.timeText, isFinished && { color: '#888', textDecorationLine: 'none' }]}>
             {ride.startTime 
               ? moment(ride.startTime).format('HH:mm') 
               : moment(ride.date).format('HH:mm')}
           </Text>
         </View>
 
-        <View style={[styles.badge, { backgroundColor: typeColors[ride.type] || typeColors.Autre }]}>
+        <View style={[styles.badge, { backgroundColor: isFinished ? '#999' : (typeColors[ride.type] || typeColors.Autre) }]}>
           <Text style={styles.badgeText}>{ride.type}</Text>
         </View>
       </View>
 
-      {/* 2. INFO PARTAGE */}
+      {/* 2. INFO PARTAGE (Si applicable) */}
       {ride.isShared && (
         <View style={{marginBottom: 10}}>
           <View style={styles.sharedBadge}>
@@ -91,13 +96,16 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </View>
       )}
 
-      {/* 3. PATIENT & BOUTON APPEL */}
+      {/* 3. PATIENT & APPEL */}
       <View style={styles.patientRow}>
-        <Text style={styles.patientName} numberOfLines={1}>{ride.patientName}</Text>
+        <Text style={[styles.patientName, isFinished && { color: '#888' }]} numberOfLines={1}>
+          {ride.patientName}
+        </Text>
         
         <TouchableOpacity 
-          style={[styles.callBtn, !ride.patientPhone && { backgroundColor: '#CCC' }]} 
+          style={[styles.callBtn, (!ride.patientPhone || isFinished) && { backgroundColor: '#CCC' }]} 
           onPress={callPatient}
+          disabled={isFinished} // Optionnel : on empêche d'appeler si c'est fini ? (tu peux retirer cette ligne)
         >
           <Ionicons name="call" size={16} color="#FFF" />
           <Text style={styles.callBtnText}>
@@ -106,28 +114,34 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </TouchableOpacity>
       </View>
 
-      {/* 👇 3.5. ALERTE PMT (AJOUTÉ ICI) */}
+      {/* 3.5. ALERTE PMT (Uniquement si pas fini) */}
       {needsPMT && (
         <View style={styles.pmtAlert}>
           <Ionicons name="document-text" size={16} color="#D32F2F" />
-          <Text style={styles.pmtText}>⚠️ DEMANDER LE BON DE TRANSPORT (PMT)</Text>
+          <Text style={styles.pmtText}>⚠️ DEMANDER LE BON DE TRANSPORT</Text>
         </View>
       )}
 
-      {/* 4. ITINÉRAIRE */}
+      {/* 4. ITINÉRAIRE (Waze) */}
       <View style={styles.routeContainer}>
         <TouchableOpacity style={styles.addressRow} onPress={() => openGPS(ride.startLocation)}>
           <Ionicons name="navigate-circle" size={18} color={isFinished ? "#999" : "#4CAF50"} />
-          <Text style={styles.addressText} numberOfLines={1}>{ride.startLocation}</Text>
+          <Text style={[styles.addressText, isFinished && { color: '#999' }]} numberOfLines={1}>
+            {ride.startLocation}
+          </Text>
         </TouchableOpacity>
+        
         <View style={styles.routeLine} />
+        
         <TouchableOpacity style={styles.addressRow} onPress={() => openGPS(ride.endLocation)}>
           <Ionicons name="flag" size={18} color={isFinished ? "#999" : "#FF6B00"} />
-          <Text style={styles.addressText} numberOfLines={1}>{ride.endLocation}</Text>
+          <Text style={[styles.addressText, isFinished && { color: '#999' }]} numberOfLines={1}>
+            {ride.endLocation}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* 5. ACTIONS (Démarrer / Terminer) */}
+      {/* 5. ACTIONS (Démarrer / Terminer) - Caché si fini */}
       {!showResponseButtons && !isFinished && onStatusChange && (
         <View style={styles.actionZone}>
           {!isStarted ? (
@@ -137,14 +151,14 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[styles.statusBtn, styles.btnFinish]} onPress={() => onStatusChange(ride, 'finish')}>
-              <Ionicons name="stop" size={20} color="#FFF" />
+              <Ionicons name="checkbox" size={20} color="#FFF" />
               <Text style={styles.statusBtnText}>TERMINER</Text>
             </TouchableOpacity>
           )}
         </View>
       )}
 
-      {/* 6. RÉPONSE PARTAGE */}
+      {/* 6. RÉPONSE PARTAGE (Si invitation) */}
       {showResponseButtons && (
         <View style={styles.footer}>
            <Text style={styles.shareLabel}>Répondre :</Text>
@@ -157,10 +171,13 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </View>
       )}
       
-      {/* 7. INFO FIN */}
-      {!showResponseButtons && (ride.isShared || isFinished) && (
+      {/* 7. INDICATEUR FIN */}
+      {isFinished && (
          <View style={styles.footerInfo}>
-            {isFinished && <Text style={{color:'#888', fontStyle:'italic', fontSize:12}}>Terminée à {moment(ride.endTime).format('HH:mm')}</Text>}
+            <Ionicons name="checkmark-circle" size={14} color="#888" />
+            <Text style={{color:'#888', fontStyle:'italic', fontSize:12, marginLeft:5}}>
+                Terminée {ride.endTime ? `à ${moment(ride.endTime).format('HH:mm')}` : ''}
+            </Text>
          </View>
       )}
     </TouchableOpacity>
@@ -169,13 +186,14 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
 
 const styles = StyleSheet.create({
   card: { backgroundColor: '#FFF', borderRadius: 16, padding: 15, marginBottom: 12, elevation: 3, borderLeftWidth: 4, borderLeftColor: '#DDD' },
-  cardFinished: { backgroundColor: '#F2F2F2', opacity: 0.6 },
+  // Style "Fini" : Fond gris mais pas trop transparent pour garder la lisibilité
+  cardFinished: { backgroundColor: '#F9F9F9', borderColor: '#E0E0E0', borderWidth: 1, borderLeftColor: '#999', elevation: 0 },
   cardActive: { borderLeftColor: '#4CAF50', backgroundColor: '#F1F8E9', borderWidth: 1, borderColor: '#C8E6C9' },
   cardIncoming: { borderLeftColor: '#FF9800', backgroundColor: '#FFF3E0', borderWidth: 1, borderColor: '#FFE0B2' },
   
   header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   timeContainer: { flexDirection: 'row', alignItems: 'center' },
-  timeText: { fontSize: 20, fontWeight: 'bold', marginLeft: 5 },
+  timeText: { fontSize: 20, fontWeight: 'bold', marginLeft: 5, color: '#333' },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   badgeText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
   
@@ -185,17 +203,17 @@ const styles = StyleSheet.create({
   noteLabel: { fontSize: 10, color: '#BF360C', fontWeight: 'bold' },
   noteText: { fontSize: 13, color: '#3E2723', fontStyle: 'italic', marginTop: 2 },
 
-  patientRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }, // Marge réduite pour laisser place au PMT
-  patientName: { fontSize: 18, fontWeight: 'bold', flex: 1 },
+  patientRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  patientName: { fontSize: 18, fontWeight: 'bold', flex: 1, color: '#000' },
   
   callBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#009688', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginLeft: 10 },
   callBtnText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
 
-  // 👇 NOUVEAUX STYLES PMT
+  // STYLES PMT
   pmtAlert: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFEBEE', // Rouge très clair
+    backgroundColor: '#FFEBEE',
     padding: 8,
     borderRadius: 8,
     marginBottom: 15,
@@ -203,11 +221,10 @@ const styles = StyleSheet.create({
     borderColor: '#FFCDD2'
   },
   pmtText: {
-    color: '#D32F2F', // Rouge foncé
+    color: '#D32F2F',
     fontWeight: 'bold',
     fontSize: 12,
-    marginLeft: 8,
-    letterSpacing: 0.5
+    marginLeft: 8
   },
   
   routeContainer: { marginBottom: 15 },
@@ -227,5 +244,6 @@ const styles = StyleSheet.create({
   btnAccept: { backgroundColor: '#4CAF50', elevation: 2 },
   btnDecline: { backgroundColor: '#D32F2F', elevation: 2 },
   btnText: { color: '#FFF', fontWeight: 'bold' },
-  footerInfo: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 5 }
+  
+  footerInfo: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 5, alignItems: 'center' }
 });
