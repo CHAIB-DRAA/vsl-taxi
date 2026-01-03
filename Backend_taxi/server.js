@@ -10,6 +10,8 @@ const contactRoutes = require('./routes/contactRoutes');
 const docRoutes = require('./routes/docRoutes');
 const patientRoutes = require('./routes/patientRoutes');
 const shareRoutes = require('./routes/shareRoutes'); // 👈 1. IMPORT AJOUTÉ
+const dispatchRoutes = require('./routes/dispatch'); // 👈 Import Dispatch
+const groupRoutes = require('./routes/groups');      // 👈 Import Groups
 // Chargement des variables d'environnement
 dotenv.config();
 
@@ -32,7 +34,8 @@ app.use('/api/documents', docRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/share', shareRoutes); // 👈 2. ROUTE ACTIVÉE ICI
-
+app.use('/dispatch', dispatchRoutes);
+app.use('/groups', groupRoutes);
 // Route de test (Ping)
 app.get('/ping', (req, res) => {
     res.status(200).send('Pong! Server is alive 🤖');
