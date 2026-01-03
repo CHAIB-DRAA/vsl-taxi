@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const authMiddleware = require('../middleware/auth');
+const authMiddleware = require('./middleware/auth');
 
 // Import des routes
 const rideRoutes = require('./routes/rideRoutes');
