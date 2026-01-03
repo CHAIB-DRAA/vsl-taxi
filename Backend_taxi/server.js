@@ -34,8 +34,8 @@ app.use('/api/documents', docRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/share', shareRoutes); // 👈 2. ROUTE ACTIVÉE ICI
-app.use('/dispatch', dispatchRoutes);
-app.use('/groups', groupRoutes);
+app.use('/api/dispatch', dispatchRoutes);
+app.use('/api/groups', groupRoutes);
 // Route de test (Ping)
 app.get('/ping', (req, res) => {
     res.status(200).send('Pong! Server is alive 🤖');
