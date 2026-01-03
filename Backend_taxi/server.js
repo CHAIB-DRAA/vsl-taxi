@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const authMiddleware = require('../middleware/auth');
 
 // Import des routes
 const rideRoutes = require('./routes/rideRoutes');
@@ -34,8 +35,8 @@ app.use('/api/documents', docRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/share', shareRoutes); // 👈 2. ROUTE ACTIVÉE ICI
-app.use('/api/dispatch', dispatchRoutes);
-app.use('/api/groups', groupRoutes);
+app.use('/api/dispatch',authMiddleware, dispatchRoutes);
+app.use('/api/groups', authMiddleware,groupRoutes);
 // Route de test (Ping)
 app.get('/ping', (req, res) => {
     res.status(200).send('Pong! Server is alive 🤖');
