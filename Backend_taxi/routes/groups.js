@@ -1,32 +1,41 @@
 const express = require('express');
 const router = express.Router();
 const Group = require('../models/Group');
-
-// 👇 1. IMPORT DU MIDDLEWARE (Attention au chemin relative '../')
 const authMiddleware = require('../middleware/auth'); 
 
-// 👇 2. ACTIVATION DE LA SÉCURITÉ POUR TOUTES LES ROUTES DU FICHIER
 router.use(authMiddleware); 
-// À partir d'ici, 'req.user' existe obligatoirement !
 
 // 1. CRÉER UN GROUPE
 router.post('/', async (req, res) => {
+  console.log("👥 Tentative de création de groupe...");
+  console.log("📦 Données reçues:", req.body);
+  console.log("👤 Utilisateur connecté:", req.user);
+
   try {
     const { name, members } = req.body;
     
-    // Plus besoin de vérifier si req.user existe, le middleware l'a fait
+    // 👇 CORRECTION ICI (Le piège du userId vs id)
+    const myOwnerId = req.user.id || req.user.userId;
+
+    if (!myOwnerId) {
+        console.error("❌ Erreur: Impossible de trouver l'ID du créateur dans le token.");
+        return res.status(401).json({ error: "Identité introuvable." });
+    }
+
     const newGroup = new Group({
       name,
       members, 
-      ownerId: req.user.userId 
+      ownerId: myOwnerId // ✅ On utilise la variable sécurisée
     });
 
     const savedGroup = await newGroup.save();
+    console.log("✅ Groupe créé en BDD avec l'ID:", savedGroup._id);
+
     const populatedGroup = await Group.findById(savedGroup._id).populate('members');
     
     res.status(201).json(populatedGroup);
   } catch (err) {
-    console.error("Erreur création groupe:", err); 
+    console.error("🔥 Erreur création groupe (Mongoose):", err); 
     res.status(500).json({ error: err.message });
   }
 });
@@ -34,7 +43,10 @@ router.post('/', async (req, res) => {
 // 2. RÉCUPÉRER MES GROUPES
 router.get('/', async (req, res) => {
   try {
-    const groups = await Group.find({ ownerId: req.user.userId }).populate('members');
+    // 👇 CORRECTION ICI AUSSI
+    const myOwnerId = req.user.id || req.user.userId;
+
+    const groups = await Group.find({ ownerId: myOwnerId }).populate('members');
     res.json(groups);
   } catch (err) {
     console.error("Erreur récupération groupes:", err);
