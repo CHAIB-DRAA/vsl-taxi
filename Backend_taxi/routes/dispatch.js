@@ -3,16 +3,22 @@ const router = express.Router();
 const Dispatch = require('../models/Dispatch');
 const Ride = require('../models/Ride');
 
-// 1. ENVOYER UNE COURSE (Créer une offre)
+// 👇 1. IMPORT DU MIDDLEWARE (Vérifie bien le nom du fichier : auth ou authMiddleware ?)
+const authMiddleware = require('../middleware/auth'); 
+
+// 👇 2. SÉCURISATION DU ROUTEUR
+router.use(authMiddleware);
+
+// 1. ENVOYER UNE COURSE
 router.post('/send', async (req, res) => {
   try {
     const { rideId, targetGroupId, targetUserId } = req.body;
-    // On marque la course originale comme "En cours de dispatch"
+    
     await Ride.findByIdAndUpdate(rideId, { status: 'Dispatchée' });
 
     const newDispatch = new Dispatch({
       rideId,
-      senderId: req.user.userId, // Suppose que tu as l'ID via le token
+      senderId: req.user.userId, // req.user existe maintenant !
       targetGroupId,
       targetUserId
     });
@@ -24,16 +30,13 @@ router.post('/send', async (req, res) => {
   }
 });
 
-// 2. RÉCUPÉRER LES OFFRES POUR MOI (Ce que le collègue appelle)
+// 2. RÉCUPÉRER LES OFFRES
 router.get('/my-offers', async (req, res) => {
   try {
     const myUserId = req.user.userId;
-    // Ici, logique simplifiée : on cherche ce qui m'est adressé
-    // Dans un vrai système de groupe, il faudrait vérifier si je suis membre du groupe
     const offers = await Dispatch.find({
         $or: [
             { targetUserId: myUserId }, 
-            // { targetGroupId: { $in: myUserGroups } } // À activer si tu gères les groupes en BDD
         ],
         status: 'pending'
     }).populate('rideId').populate('senderId', 'fullName phone');
@@ -46,10 +49,6 @@ router.get('/my-offers', async (req, res) => {
 
 // 3. ACCEPTER UNE OFFRE
 router.post('/accept/:dispatchId', async (req, res) => {
-    // Logique : Passer le dispatch en 'accepted', 
-    // Copier la course dans le compte du collègue, 
-    // Supprimer/Archiver chez l'envoyeur.
-    // ... (Code complexe pour plus tard)
     res.json({ message: "Course acceptée !" });
 });
 
