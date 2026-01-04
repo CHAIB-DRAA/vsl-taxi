@@ -10,61 +10,82 @@ const { width } = Dimensions.get('window');
 
 export default function IncomingOfferToast({ onRideAccepted }) {
   const [offer, setOffer] = useState(null);
-  const slideAnim = useRef(new Animated.Value(-200)).current; // Position cachée (haut)
+  const [ignoredIds, setIgnoredIds] = useState([]); 
+  
+  const offerRef = useRef(offer);
+  const ignoredIdsRef = useRef(ignoredIds);
+  const slideAnim = useRef(new Animated.Value(-200)).current; 
 
-  // Vérifier les offres toutes les 10 secondes
+  useEffect(() => { offerRef.current = offer; }, [offer]);
+  useEffect(() => { ignoredIdsRef.current = ignoredIds; }, [ignoredIds]);
+
+  // POLLING (Vérification serveur)
   useEffect(() => {
+    let isMounted = true; 
+
     const checkOffers = async () => {
       try {
         const res = await api.get('/dispatch/my-offers');
-        if (res.data && res.data.length > 0) {
-          // On prend la plus récente
-          const newOffer = res.data[0];
-          
-          // Si c'est une nouvelle offre qu'on n'affiche pas déjà
-          if (!offer || offer._id !== newOffer._id) {
-            setOffer(newOffer);
-            slideDown();
+        const currentIgnoredIds = ignoredIdsRef.current;
+        const currentOffer = offerRef.current;
+        const validOffers = res.data.filter(o => !currentIgnoredIds.includes(o._id));
+
+        if (validOffers.length > 0) {
+          const newOffer = validOffers[0];
+          if (!currentOffer || currentOffer._id !== newOffer._id) {
+            if (isMounted) {
+                setOffer(newOffer);
+                slideDown();
+            }
           }
         } else {
-            // Si plus d'offre (ex: prise par qqn d'autre), on cache
-            if(offer) slideUp();
+            if (currentOffer) {
+                slideUp(() => { if (isMounted) setOffer(null); });
+            }
         }
-      } catch (e) {
-        // console.log("Polling silencieux...");
-      }
+      } catch (e) { }
     };
 
-    const interval = setInterval(checkOffers, 10000); // Check toutes les 10s
-    checkOffers(); // Check immédiat
+    checkOffers();
+    const interval = setInterval(checkOffers, 10000); 
+    return () => { isMounted = false; clearInterval(interval); };
+  }, []); 
 
-    return () => clearInterval(interval);
-  }, [offer]);
+  // ANIMATIONS
+  const slideDown = () => { Animated.spring(slideAnim, { toValue: 50, useNativeDriver: true }).start(); };
+  const slideUp = (callback) => { Animated.timing(slideAnim, { toValue: -200, duration: 300, useNativeDriver: true }).start(callback); };
 
-  // Animations
-  const slideDown = () => {
-    Animated.spring(slideAnim, { toValue: 50, useNativeDriver: true }).start();
-  };
-  const slideUp = () => {
-    Animated.timing(slideAnim, { toValue: -200, duration: 300, useNativeDriver: true }).start(() => setOffer(null));
-  };
+  // --- ACTIONS ---
 
-  // Actions
-  const handleAccept = async () => {
+ // Dans IncomingOfferToast.js -> handleAccept
+
+ const handleAccept = async () => {
+    if (!offer) return;
     try {
-      await api.post(`/dispatch/accept/${offer._id}`);
-      Alert.alert("Bravo ! 🏁", "Course ajoutée à votre agenda.");
-      slideUp();
-      if (onRideAccepted) onRideAccepted(); // Rafraîchir l'agenda
+      const response = await api.post(`/dispatch/accept/${offer._id}`);
+      
+      // On détermine la date de la course
+      const rideDate = response.data.ride ? response.data.ride.date : offer.rideId.date;
+
+      Alert.alert("✅ Course Acceptée !");
+      
+      setIgnoredIds(prev => [...prev, offer._id]);
+      slideUp(() => setOffer(null));
+      
+      if (onRideAccepted) {
+          // 👇 CHANGEMENT ICI : On envoie la date au parent
+          onRideAccepted(rideDate); 
+      }
+
     } catch (e) {
-      Alert.alert("Oups", "Trop tard, course déjà prise !");
-      slideUp();
+      // ... gestion erreur ...
     }
   };
 
   const handleRefuse = () => {
-    // Juste masquer pour l'instant (ou appeler une API de refus)
-    slideUp();
+    if (!offer) return;
+    setIgnoredIds(prev => [...prev, offer._id]);
+    slideUp(() => setOffer(null));
   };
 
   if (!offer) return null;
@@ -74,64 +95,60 @@ export default function IncomingOfferToast({ onRideAccepted }) {
 
   return (
     <Animated.View style={[styles.toastContainer, { transform: [{ translateY: slideAnim }] }]}>
-      
-      {/* En-tête : Qui envoie ? */}
-      <View style={styles.header}>
+      <View style={[styles.header, isGroupOffer ? {backgroundColor: '#E65100'} : {backgroundColor: '#1565C0'}]}>
         <View style={styles.badgeContainer}>
-            <Ionicons name={isGroupOffer ? "people" : "person"} size={16} color="#FFF" />
-            <Text style={styles.badgeText}>{isGroupOffer ? `GROUPE : ${groupName}` : "OFFRE PRIVÉE"}</Text>
+            <Ionicons name={isGroupOffer ? "people" : "person"} size={16} color={isGroupOffer ? "#E65100" : "#1565C0"} />
+            <Text style={[styles.badgeText, isGroupOffer ? {color: '#E65100'} : {color: '#1565C0'}]}>{isGroupOffer ? "GROUPE" : "PRIVÉ"}</Text>
         </View>
-        <Text style={styles.sender}>De: {offer.senderId.fullName}</Text>
+        <Text style={styles.sender}>{isGroupOffer ? groupName : offer.senderId?.fullName || "Inconnu"}</Text>
       </View>
 
-      {/* Détails Course */}
       <View style={styles.content}>
-        <Text style={styles.time}>📅 {moment(offer.rideId.date).format('DD/MM à HH:mm')}</Text>
-        <Text style={styles.route} numberOfLines={1}>📍 {offer.rideId.startLocation}</Text>
-        <Text style={styles.route} numberOfLines={1}>🏁 {offer.rideId.endLocation}</Text>
-        <Text style={styles.type}>🚑 {offer.rideId.type}</Text>
+        {isGroupOffer && <Text style={styles.senderSub}>De: {offer.senderId?.fullName}</Text>}
+        <View style={styles.row}>
+            <Ionicons name="calendar" size={16} color="#666" />
+            <Text style={styles.time}> {moment(offer.rideId.date).format('DD/MM')} à <Text style={{fontWeight:'bold', color:'#000'}}>{moment(offer.rideId.date).format('HH:mm')}</Text></Text>
+        </View>
+        <View style={styles.routeContainer}>
+            <Text style={styles.route} numberOfLines={1}>📍 {offer.rideId.startLocation}</Text>
+            <Ionicons name="arrow-down" size={12} color="#999" style={{marginLeft: 5}}/>
+            <Text style={styles.route} numberOfLines={1}>🏁 {offer.rideId.endLocation}</Text>
+        </View>
+        <View style={styles.typeTag}><Text style={styles.typeText}>{offer.rideId.type}</Text></View>
       </View>
 
-      {/* Boutons Actions */}
       <View style={styles.actions}>
         <TouchableOpacity style={[styles.btn, styles.refuseBtn]} onPress={handleRefuse}>
-            <Ionicons name="close" size={20} color="#D32F2F" />
+            <Ionicons name="close-circle" size={20} color="#D32F2F" />
             <Text style={styles.refuseText}>REFUSER</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={[styles.btn, styles.acceptBtn]} onPress={handleAccept}>
-            <Ionicons name="checkmark" size={20} color="#FFF" />
+            <Ionicons name="checkmark-circle" size={20} color="#FFF" />
             <Text style={styles.acceptText}>ACCEPTER</Text>
         </TouchableOpacity>
       </View>
-
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  toastContainer: {
-    position: 'absolute', top: 0, left: 10, right: 10,
-    backgroundColor: '#FFF', borderRadius: 16,
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 10, elevation: 10,
-    zIndex: 9999, overflow: 'hidden'
-  },
-  header: {
-    backgroundColor: '#333', padding: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'
-  },
-  badgeContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FF9800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  badgeText: { color: '#FFF', fontWeight: 'bold', fontSize: 10, marginLeft: 5 },
-  sender: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
-  
-  content: { padding: 15 },
-  time: { fontSize: 16, fontWeight: 'bold', color: '#6200EE', marginBottom: 5 },
-  route: { fontSize: 13, color: '#333', marginBottom: 2 },
-  type: { fontSize: 12, color: '#666', marginTop: 5, fontStyle: 'italic' },
-
-  actions: { flexDirection: 'row', borderTopWidth: 1, borderColor: '#EEE' },
+  toastContainer: { position: 'absolute', top: 50, left: 15, right: 15, backgroundColor: '#FFF', borderRadius: 12, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 8, elevation: 10, zIndex: 9999, overflow: 'hidden', borderWidth: 1, borderColor: '#EEE' },
+  header: { padding: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  badgeContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  badgeText: { fontWeight: 'bold', fontSize: 10, marginLeft: 4 },
+  sender: { color: '#FFF', fontWeight: 'bold', fontSize: 13, flex: 1, textAlign: 'right' },
+  senderSub: { fontSize: 11, color: '#888', marginBottom: 5, fontStyle: 'italic' },
+  content: { padding: 15, paddingBottom: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  time: { fontSize: 15, color: '#333', marginLeft: 5 },
+  routeContainer: { paddingLeft: 5, borderLeftWidth: 2, borderLeftColor: '#DDD', marginLeft: 7, paddingVertical: 5 },
+  route: { fontSize: 14, color: '#333', marginVertical: 2, fontWeight: '500' },
+  typeTag: { position: 'absolute', top: 15, right: 15, backgroundColor: '#F5F5F5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5 },
+  typeText: { fontSize: 10, color: '#666', fontWeight: 'bold', textTransform: 'uppercase' },
+  actions: { flexDirection: 'row', borderTopWidth: 1, borderColor: '#F0F0F0' },
   btn: { flex: 1, padding: 15, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
-  refuseBtn: { backgroundColor: '#FFEBEE' },
-  refuseText: { color: '#D32F2F', fontWeight: 'bold', marginLeft: 5 },
+  refuseBtn: { backgroundColor: '#FFF' },
+  refuseText: { color: '#D32F2F', fontWeight: 'bold', marginLeft: 8, fontSize: 13 },
   acceptBtn: { backgroundColor: '#4CAF50' },
-  acceptText: { color: '#FFF', fontWeight: 'bold', marginLeft: 5 }
+  acceptText: { color: '#FFF', fontWeight: 'bold', marginLeft: 8, fontSize: 13 }
 });

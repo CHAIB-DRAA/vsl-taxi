@@ -424,8 +424,19 @@ export default function AgendaScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
       <IncomingOfferToast 
-        onRideAccepted={() => loadData(true)} // Pour recharger l'agenda si on accepte
-    />
+          onRideAccepted={(dateOfNewRide) => {
+              console.log("🚀 Nouvelle course reçue pour le :", dateOfNewRide);
+              
+              // 1. On rafraîchit les données
+              loadData(true); 
+
+              // 2. 👇 MAGIE : On force le calendrier à aller sur la date de la course
+              if (dateOfNewRide) {
+                  const formattedDate = moment(dateOfNewRide).format('YYYY-MM-DD');
+                  setSelectedDate(formattedDate);
+              }
+          }} 
+      />
     </ScreenWrapper>
   );
 }

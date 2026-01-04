@@ -2,87 +2,118 @@ const express = require('express');
 const router = express.Router();
 const Dispatch = require('../models/Dispatch');
 const Ride = require('../models/Ride');
-const Group = require('../models/Group'); // 👈 C'EST L'IMPORT QUI MANQUAIT !
-
-// 👇 1. IMPORT DU MIDDLEWARE
+const Group = require('../models/Group');
 const authMiddleware = require('../middleware/auth'); 
 
-// 👇 2. PROTECTION DES ROUTES
+// Protection des routes
 router.use(authMiddleware);
 
-// 1. ENVOYER UNE COURSE
+// 1. ENVOYER UNE COURSE (Créer l'offre)
 router.post('/send', async (req, res) => {
-  console.log("📩 Tentative d'envoi de dispatch...");
-  
+  console.log("📩 Envoi Dispatch...");
   try {
     const { rideId, targetGroupId, targetUserId } = req.body;
-
-    // Vérification de sécurité
-    if (!rideId) return res.status(400).json({ error: "L'ID de la course est requis." });
-
-    // Mise à jour de la course
-    const updatedRide = await Ride.findByIdAndUpdate(rideId, { status: 'Dispatchée' });
-    if (!updatedRide) return res.status(404).json({ error: "Course introuvable." });
-
-    // On récupère l'ID utilisateur de façon sécurisée
     const myUserId = req.user.id || req.user.userId;
 
-    if (!myUserId) {
-        return res.status(401).json({ error: "Impossible d'identifier l'expéditeur." });
-    }
+    if (!rideId) return res.status(400).json({ error: "ID course manquant" });
 
-    // Création du dispatch
+    // On change le statut pour que l'envoyeur sache qu'elle est en cours de transfert
+    await Ride.findByIdAndUpdate(rideId, { status: 'Dispatchée' });
+
     const newDispatch = new Dispatch({
       rideId,
-      senderId: myUserId, 
+      senderId: myUserId,
       targetGroupId,
-      targetUserId
+      targetUserId,
+      status: 'pending'
     });
     
     await newDispatch.save();
-    console.log("✅ Dispatch créé avec succès !");
-    
+    console.log("✅ Offre créée !");
     res.status(201).json({ message: "Offre envoyée !" });
   } catch (err) {
-    console.error("🔥 CRASH SERVEUR DISPATCH:", err);
+    console.error("🔥 Erreur Send:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. RÉCUPÉRER LES OFFRES (POUR MOI OU MES GROUPES)
+// 2. RÉCUPÉRER LES OFFRES
 router.get('/my-offers', async (req, res) => {
   try {
     const myUserId = req.user.id || req.user.userId;
 
-    // 1. Trouver les ID de tous les groupes dont je suis membre
-    // (Grâce à l'import de Group ligne 5, ça ne plantera plus ici)
+    // A. Groupes
     const myGroups = await Group.find({ members: myUserId }).select('_id');
-    const myGroupIds = myGroups.map(g => g._id.toString());
+    const myGroupIds = myGroups.map(g => g._id);
 
-    // 2. Trouver les Dispatchs pour MOI ou pour MES GROUPES
+    // B. Offres
     const offers = await Dispatch.find({
         $or: [
-            { targetUserId: myUserId },            // Offre directe
-            { targetGroupId: { $in: myGroupIds } } // Offre groupe
+            { targetUserId: myUserId },
+            { targetGroupId: { $in: myGroupIds } }
         ],
-        status: 'pending' // Seulement celles en attente
+        status: 'pending'
     })
     .populate('rideId')
     .populate('senderId', 'fullName phone')
-    .populate('targetGroupId', 'name'); // On veut le nom du groupe
+    .populate('targetGroupId', 'name');
 
-    res.json(offers);
+    // C. Filtre de sécurité (Si la course a été supprimée entre temps)
+    const validOffers = offers.filter(o => o.rideId !== null);
+
+    res.json(validOffers);
   } catch (err) {
-    console.error("🔥 Erreur my-offers:", err);
+    console.error("🔥 Erreur My-Offers:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 3. ACCEPTER UNE OFFRE
+// 3. ACCEPTER UNE OFFRE (TRANSFERT DE PROPRIÉTÉ) 🔄
 router.post('/accept/:dispatchId', async (req, res) => {
-    // Pour l'instant on fait simple
-    // Plus tard : Il faudra copier la course dans ton compte
-    res.json({ message: "Course acceptée !" });
+    console.log("🤝 Tentative de transfert...");
+    try {
+        const myUserId = req.user.id || req.user.userId;
+        const { dispatchId } = req.params;
+
+        // 1. Récupérer le Dispatch
+        const dispatch = await Dispatch.findById(dispatchId);
+
+        if (!dispatch) return res.status(404).json({ error: "Offre introuvable" });
+        if (dispatch.status !== 'pending') return res.status(400).json({ error: "Offre déjà prise" });
+
+        const rideId = dispatch.rideId;
+
+        // 2. TRANSFERT MAGIQUE ✨
+        // On cherche la course originale et on remplace le userId par le TIEN
+        const updatedRide = await Ride.findByIdAndUpdate(
+            rideId, 
+            { 
+                userId: myUserId,        // 👈 C'est toi le nouveau chef !
+                status: 'Confirmée',     // On remet le statut "normal"
+                isShared: true,          // Petit marqueur visuel
+                // Optionnel : on peut ajouter une note automatique
+                // $push: { logs: `Transféré le ${new Date()}` } 
+            },
+            { new: true } // Pour récupérer la version modifiée
+        );
+
+        if (!updatedRide) {
+            return res.status(404).json({ error: "La course n'existe plus." });
+        }
+
+        // 3. Fermer l'offre de dispatch
+        // Comme ça, les autres membres du groupe ne la verront plus !
+        dispatch.status = 'accepted';
+        await dispatch.save();
+
+        console.log(`✅ Course transférée de ${dispatch.senderId} vers ${myUserId}`);
+
+        res.json({ message: "Course transférée dans votre agenda !", ride: updatedRide });
+
+    } catch (err) {
+        console.error("🔥 Erreur Accept (Transfert):", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 module.exports = router;
