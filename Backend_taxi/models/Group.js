@@ -1,15 +1,11 @@
 const mongoose = require('mongoose');
 
-const dispatchSchema = mongoose.Schema({
-  rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride', required: true },
-  senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  
-  // 👇 C'EST ICI LA CORRECTION ! (C'était sûrement String avant)
-  targetGroupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', default: null },
-  
-  targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-  status: { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
+const groupSchema = mongoose.Schema({
+  name: { type: String, required: true },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   createdAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model('Dispatch', dispatchSchema);
+// 👇 LA CORRECTION EST ICI : On vérifie si le modèle existe avant de le créer
+module.exports = mongoose.models.Group || mongoose.model('Group', groupSchema);

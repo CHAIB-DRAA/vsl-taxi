@@ -1,15 +1,16 @@
 const mongoose = require('mongoose');
 
-const DispatchSchema = new mongoose.Schema({
+const dispatchSchema = mongoose.Schema({
   rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride', required: true },
   senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   
-  // Soit un groupe, soit un utilisateur spécifique
-  targetGroupId: { type: String, default: null }, 
+  // Target peut être un Groupe OU un User
+  targetGroupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', default: null },
   targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-
-  status: { type: String, enum: ['pending', 'accepted', 'expired'], default: 'pending' },
-  createdAt: { type: Date, default: Date.now, expires: 86400 } // S'autodétruit après 24h
+  
+  status: { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
+  createdAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model('Dispatch', DispatchSchema);
+// 👇 SÉCURITÉ : On vérifie si le modèle existe déjà pour éviter l'erreur "OverwriteModelError"
+module.exports = mongoose.models.Dispatch || mongoose.model('Dispatch', dispatchSchema);
