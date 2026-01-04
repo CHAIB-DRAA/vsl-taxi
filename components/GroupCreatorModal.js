@@ -20,13 +20,16 @@ export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGr
     if (!groupName.trim()) return Alert.alert("Erreur", "Donnez un nom au groupe.");
     if (selectedContactIds.length === 0) return Alert.alert("Erreur", "Sélectionnez au moins un collègue.");
 
-    const newGroup = {
-      id: Date.now().toString(),
+    // 👇 CORRECTION : On ne génère PAS d'ID ici.
+    const newGroupData = {
       name: groupName,
+      // On envoie les contacts entiers, AgendaScreen triera les IDs
       members: contacts.filter(c => selectedContactIds.includes(c._id))
     };
 
-    onSaveGroup(newGroup);
+    onSaveGroup(newGroupData); // On passe le relais à AgendaScreen
+    
+    // Reset
     setGroupName('');
     setSelectedContactIds([]);
     onClose();

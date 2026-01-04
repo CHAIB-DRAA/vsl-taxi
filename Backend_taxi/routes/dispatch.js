@@ -52,24 +52,33 @@ router.post('/send', async (req, res) => {
   }
 });
 
-// 2. RÉCUPÉRER LES OFFRES
 router.get('/my-offers', async (req, res) => {
-  try {
-    // 👇 CORRECTION ICI AUSSI
-    const myUserId = req.user.id || req.user.userId;
-    
-    const offers = await Dispatch.find({
-        targetUserId: myUserId, 
-        status: 'pending'
-    })
-    .populate('rideId')
-    .populate('senderId', 'fullName phone');
+    try {
+      const myUserId = req.user.id || req.user.userId;
+  
+      // 1. Trouver les ID de tous les groupes dont je suis membre
+      const myGroups = await Group.find({ members: myUserId }).select('_id');
+      const myGroupIds = myGroups.map(g => g._id.toString());
+  
+      // 2. Trouver les Dispatchs pour MOI ou pour MES GROUPES
+      const offers = await Dispatch.find({
+          $or: [
+              { targetUserId: myUserId },          // Offre directe
+              { targetGroupId: { $in: myGroupIds } } // Offre groupe
+          ],
+          status: 'pending' // Seulement celles en attente
+      })
+      .populate('rideId')
+      .populate('senderId', 'fullName phone')
+      .populate('targetGroupId', 'name'); // Pour afficher le nom du groupe
+  
+      res.json(offers);
+    } catch (err) {
+      console.error("🔥 Erreur my-offers:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+  
 
-    res.json(offers);
-  } catch (err) {
-    console.error("🔥 Erreur récupération offres:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 module.exports = router;
