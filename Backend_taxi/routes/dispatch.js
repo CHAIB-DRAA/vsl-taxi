@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Dispatch = require('../models/Dispatch');
 const Ride = require('../models/Ride');
+const Group = require('../models/Group'); // 👈 C'EST L'IMPORT QUI MANQUAIT !
 
 // 👇 1. IMPORT DU MIDDLEWARE
 const authMiddleware = require('../middleware/auth'); 
@@ -13,9 +14,6 @@ router.use(authMiddleware);
 router.post('/send', async (req, res) => {
   console.log("📩 Tentative d'envoi de dispatch...");
   
-  // 🔍 DEBUG : On vérifie l'utilisateur connecté
-  console.log("👤 User connecté:", req.user);
-
   try {
     const { rideId, targetGroupId, targetUserId } = req.body;
 
@@ -26,8 +24,7 @@ router.post('/send', async (req, res) => {
     const updatedRide = await Ride.findByIdAndUpdate(rideId, { status: 'Dispatchée' });
     if (!updatedRide) return res.status(404).json({ error: "Course introuvable." });
 
-    // 👇 LA CORRECTION EST ICI 👇
-    // On prend 'id' OU 'userId' pour être sûr que ça marche quel que soit le token
+    // On récupère l'ID utilisateur de façon sécurisée
     const myUserId = req.user.id || req.user.userId;
 
     if (!myUserId) {
@@ -37,7 +34,7 @@ router.post('/send', async (req, res) => {
     // Création du dispatch
     const newDispatch = new Dispatch({
       rideId,
-      senderId: myUserId, // ✅ On utilise la variable sécurisée
+      senderId: myUserId, 
       targetGroupId,
       targetUserId
     });
@@ -52,33 +49,40 @@ router.post('/send', async (req, res) => {
   }
 });
 
+// 2. RÉCUPÉRER LES OFFRES (POUR MOI OU MES GROUPES)
 router.get('/my-offers', async (req, res) => {
-    try {
-      const myUserId = req.user.id || req.user.userId;
-  
-      // 1. Trouver les ID de tous les groupes dont je suis membre
-      const myGroups = await Group.find({ members: myUserId }).select('_id');
-      const myGroupIds = myGroups.map(g => g._id.toString());
-  
-      // 2. Trouver les Dispatchs pour MOI ou pour MES GROUPES
-      const offers = await Dispatch.find({
-          $or: [
-              { targetUserId: myUserId },          // Offre directe
-              { targetGroupId: { $in: myGroupIds } } // Offre groupe
-          ],
-          status: 'pending' // Seulement celles en attente
-      })
-      .populate('rideId')
-      .populate('senderId', 'fullName phone')
-      .populate('targetGroupId', 'name'); // Pour afficher le nom du groupe
-  
-      res.json(offers);
-    } catch (err) {
-      console.error("🔥 Erreur my-offers:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-  
+  try {
+    const myUserId = req.user.id || req.user.userId;
 
+    // 1. Trouver les ID de tous les groupes dont je suis membre
+    // (Grâce à l'import de Group ligne 5, ça ne plantera plus ici)
+    const myGroups = await Group.find({ members: myUserId }).select('_id');
+    const myGroupIds = myGroups.map(g => g._id.toString());
+
+    // 2. Trouver les Dispatchs pour MOI ou pour MES GROUPES
+    const offers = await Dispatch.find({
+        $or: [
+            { targetUserId: myUserId },            // Offre directe
+            { targetGroupId: { $in: myGroupIds } } // Offre groupe
+        ],
+        status: 'pending' // Seulement celles en attente
+    })
+    .populate('rideId')
+    .populate('senderId', 'fullName phone')
+    .populate('targetGroupId', 'name'); // On veut le nom du groupe
+
+    res.json(offers);
+  } catch (err) {
+    console.error("🔥 Erreur my-offers:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. ACCEPTER UNE OFFRE
+router.post('/accept/:dispatchId', async (req, res) => {
+    // Pour l'instant on fait simple
+    // Plus tard : Il faudra copier la course dans ton compte
+    res.json({ message: "Course acceptée !" });
+});
 
 module.exports = router;
