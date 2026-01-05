@@ -7,28 +7,25 @@ import { Ionicons } from '@expo/vector-icons';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
+
+// --- COMPOSANTS IMPORTÉS ---
 import IncomingOfferToast from '../components/IncomingOfferToast';
-// --- SERVICES ---
-import { syncDailyRidesToCalendar, addRideToCalendar } from '../services/calendarService';
-import api, { updateRide, shareRide, deleteRide } from '../services/api';
-
-// --- MODULES SPÉCIFIQUES ---
-import DateTimePicker from '@react-native-community/datetimepicker'; 
-import * as ImagePicker from 'expo-image-picker'; 
-
-// --- COMPOSANTS ---
 import ScreenWrapper from '../components/ScreenWrapper';
 import RideCard from '../components/RideCard'; 
 import DocumentScannerButton from '../components/DocumentScannerButton'; 
 import RideOptionsModal from '../components/RideOptionsModal';
 import OffersNotification from '../components/OffersNotification'; 
-
-// 👇 COMPOSANTS DISPATCH & GROUPES
 import DispatchModal from '../components/DispatchModal'; 
 import GroupCreatorModal from '../components/GroupCreatorModal'; 
 
-// --- CONTEXTE ---
+// --- SERVICES & CONTEXTE ---
+import { syncDailyRidesToCalendar, addRideToCalendar } from '../services/calendarService';
+import api, { updateRide, shareRide, deleteRide } from '../services/api';
 import { useData } from '../contexts/DataContext'; 
+
+// --- MODULES EXTERNES ---
+import DateTimePicker from '@react-native-community/datetimepicker'; 
+import * as ImagePicker from 'expo-image-picker'; 
 
 const { height } = Dimensions.get('window');
 
@@ -50,39 +47,37 @@ export default function AgendaScreen({ navigation }) {
   const [showCalendar, setShowCalendar] = useState(true);
   const [activeRide, setActiveRide] = useState(null); 
   
-  // 3. MODALS (Classiques)
+  // 3. MODALS
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
   const [finishModal, setFinishModal] = useState(false); 
   const [returnModal, setReturnModal] = useState(false); 
-
-  // 👇 4. NOUVEAUX ÉTATS (DISPATCH & GROUPES)
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [showGroupCreator, setShowGroupCreator] = useState(false);
-  const [myGroups, setMyGroups] = useState([]); // Liste des groupes
+  
+  // 4. DONNÉES LOCALES
+  const [myGroups, setMyGroups] = useState([]); 
+  const [patientDocs, setPatientDocs] = useState([]);
+  const [allPMTs, setAllPMTs] = useState([]); 
 
-  // 5. VALIDATION BT & DOCUMENT
+  // 5. VALIDATION & SCAN
   const [btValidationModal, setBtValidationModal] = useState(false);
   const [prescriptionDate, setPrescriptionDate] = useState(new Date());
   const [showPrescriptionPicker, setShowPrescriptionPicker] = useState(false);
   const [tempScanUri, setTempScanUri] = useState(null); 
-  const [patientDocs, setPatientDocs] = useState([]);
-  const [allPMTs, setAllPMTs] = useState([]); 
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // 6. RETOUR
+  // 6. FORMULAIRES (Retour, Partage, Clôture)
   const [returnData, setReturnData] = useState({ date: '', time: '', startLocation: '', endLocation: '', type: 'Retour' });
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [tempReturnDate, setTempReturnDate] = useState(new Date());
-
-  // 7. PARTAGE & CLÔTURE
   const [shareNote, setShareNote] = useState(''); 
   const [billingData, setBillingData] = useState({ kmReel: '', peage: '' });
 
-  // --- INITIALISATION (Chargement Groupes & PMT) ---
+  // --- INITIALISATION ---
   useEffect(() => { 
     fetchGlobalPMTs();
-    fetchGroups(); // 👈 On charge les groupes au démarrage
+    fetchGroups();
   }, [allRides]); 
 
   const fetchGlobalPMTs = async () => { try { const res = await api.get('/documents/pmts/all'); setAllPMTs(res.data); } catch (err) {} };
@@ -91,41 +86,43 @@ export default function AgendaScreen({ navigation }) {
     try {
         const res = await api.get('/groups');
         setMyGroups(res.data);
+    } catch (e) { console.log("Info: Pas encore de groupes"); }
+  };
+
+  // --- GESTION CALENDRIER (Nouvelle Fonction Robuste) ---
+  const handleSyncDay = async () => {
+    try {
+        console.log("📅 Lancement synchro...");
+        await syncDailyRidesToCalendar(dailyRides);
+        // Le service gère déjà les Alertes de succès/erreur
     } catch (e) {
-        console.log("Erreur chargement groupes (peut-être vide)");
+        console.error("Erreur Sync:", e);
+        Alert.alert("Erreur", "La synchronisation a échoué. Vérifiez les permissions.");
     }
   };
 
-  // 👇 FONCTION CRUCIALE : CRÉATION DE GROUPE API 👇
+  // --- CRÉATION DE GROUPE ---
   const handleCreateGroup = async (groupDataFromModal) => {
     try {
-      // 1. Préparation Payload (Transformation des objets en IDs)
       const payload = {
         name: groupDataFromModal.name,
         members: groupDataFromModal.members.map(m => m._id) 
       };
-
-      // 2. Appel Serveur
       const res = await api.post('/groups', payload);
-      
-      // 3. Mise à jour locale
       setMyGroups(prev => [...prev, res.data]);
-      
       Alert.alert("Succès", "Groupe créé et sauvegardé ! ✅");
     } catch (e) {
       console.error("Erreur création groupe:", e);
       Alert.alert("Erreur", "Impossible de créer le groupe sur le serveur.");
     }
   };
-  // 👆 ------------------------------------------- 👆
 
-  // --- LOGIQUE BT STATUS ---
+  // --- STATUS BT ---
   const getPMTStatusForRide = (ride) => {
     const typesMedicaux = ['VSL', 'Ambulance', 'Taxi', 'Aller', 'Retour', 'Consultation'];
     if (!typesMedicaux.includes(ride.type) || ride.endTime) return null;
 
     const patientPMTs = allPMTs.filter(doc => doc.patientName === ride.patientName);
-    
     if (patientPMTs.length === 0) return { color: '#D32F2F', text: 'BT MANQUANT', icon: 'alert-circle' };
     
     patientPMTs.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
@@ -142,13 +139,13 @@ export default function AgendaScreen({ navigation }) {
     return { color: '#4CAF50', text: `BT OK (Reste ${remaining})`, icon: 'document-text' };
   };
 
+  // --- DOCUMENTS ---
   const fetchRideDocuments = async (ride) => {
     if (!ride) return;
     try { setLoadingDocs(true); const res = await api.get(`/documents/by-ride/${ride._id}`); setPatientDocs(res.data); setModals({ ...modals, options: false, docs: true }); } 
     catch (e) { Alert.alert("Info", "Erreur dossier."); } finally { setLoadingDocs(false); }
   };
 
-  // --- LOGIQUE DOCUMENT & SCAN ---
   const handleDocumentScanned = async (uri, docType) => {
     if (docType === 'PMT') {
       setTempScanUri(uri);
@@ -179,11 +176,7 @@ export default function AgendaScreen({ navigation }) {
     const prescDate = moment(prescriptionDate).startOf('day');
 
     if (prescDate.isAfter(rideDate)) {
-      Alert.alert(
-        "❌ RISQUE DE REJET CPAM",
-        "La date de prescription est POSTÉRIEURE à la date de la course.\nÊtes-vous sûr ?",
-        [{ text: "Annuler", style: "cancel" }, { text: "Forcer l'envoi", style: 'destructive', onPress: () => finalizeUploadBT() }]
-      );
+      Alert.alert("❌ RISQUE DE REJET CPAM", "La date de prescription est POSTÉRIEURE à la date de la course.\nÊtes-vous sûr ?", [{ text: "Annuler", style: "cancel" }, { text: "Forcer l'envoi", style: 'destructive', onPress: () => finalizeUploadBT() }]);
       return;
     }
     finalizeUploadBT();
@@ -200,7 +193,7 @@ export default function AgendaScreen({ navigation }) {
     catch (e) { Alert.alert("Erreur", "Echec envoi doc."); } finally { setUploading(false); }
   };
 
-  // --- ACTIONS COURSE ---
+  // --- ACTIONS (RETOUR, PARTAGE, MAPPY) ---
   const prepareReturnRide = () => { if (!activeRide) return; setReturnData({ date: moment(activeRide.date).format('YYYY-MM-DD'), time: '', startLocation: activeRide.endLocation, endLocation: activeRide.startLocation, type: 'Retour' }); setTempReturnDate(new Date()); setModals({ ...modals, options: false }); setReturnModal(true); };
   const onReturnTimeChange = (event, selectedDate) => { if (Platform.OS === 'android') setShowTimePicker(false); if (selectedDate) { setTempReturnDate(selectedDate); setReturnData(prev => ({ ...prev, time: moment(selectedDate).format('HH:mm') })); } };
   
@@ -222,15 +215,12 @@ export default function AgendaScreen({ navigation }) {
     Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Erreur", "WhatsApp absent."));
   };
 
-  // 👇 LA FONCTION MANQUANTE QUI CAUSAIT L'ERREUR 👇
   const openMappyRoute = () => {
     if (!activeRide) return;
     const s = encodeURIComponent(activeRide.startLocation || "");
     const e = encodeURIComponent(activeRide.endLocation || "");
-    Linking.openURL(`https://fr.mappy.com/itineraire#/voiture/${s}/${e}/car`)
-      .catch(() => Alert.alert("Erreur", "Impossible d'ouvrir Mappy"));
+    Linking.openURL(`https://fr.mappy.com/itineraire#/voiture/${s}/${e}/car`).catch(() => Alert.alert("Erreur", "Impossible d'ouvrir Mappy"));
   };
-  // 👆 ------------------------------------------- 👆
 
   const handleStatusChange = async (r, a) => { try { if (a === 'start') { await updateRide(r._id, { startTime: new Date().toISOString() }); loadData(true); } else if (a === 'finish') { setActiveRide(r); setBillingData({ kmReel: '', peage: '' }); setFinishModal(true); } } catch (e) { Alert.alert('Erreur', "Impossible."); } };
   const confirmFinishRide = async () => { if (!billingData.kmReel) return Alert.alert("Erreur", "KM requis."); try { await updateRide(activeRide._id, { endTime: new Date().toISOString(), realDistance: parseFloat(billingData.kmReel), tolls: parseFloat(billingData.peage) || 0, status: 'Terminée' }); setFinishModal(false); loadData(true); Alert.alert("Succès", "Terminée."); } catch (e) { Alert.alert("Erreur", "Echec."); } };
@@ -267,8 +257,9 @@ export default function AgendaScreen({ navigation }) {
         <View style={styles.listHeader}>
             <Text style={styles.dateTitle}>{moment(selectedDate).format('dddd D MMMM')}</Text>
             <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                {/* 👇 BOUTON SYNC UTILISANT LA NOUVELLE FONCTION 👇 */}
                 {dailyRides.length > 0 && (
-                  <TouchableOpacity onPress={() => syncDailyRidesToCalendar(dailyRides)} style={styles.syncBtn}>
+                  <TouchableOpacity onPress={handleSyncDay} style={styles.syncBtn}>
                     <Ionicons name="logo-google" size={16} color="#FFF" style={{marginRight: 4}} />
                     <Text style={styles.syncBtnText}>Sync</Text>
                   </TouchableOpacity>
@@ -309,7 +300,8 @@ export default function AgendaScreen({ navigation }) {
         )}
       </View>
 
-      {/* 👇 MODAL OPTIONS & DISPATCH 👇 */}
+      {/* --- TOUS LES MODALS --- */}
+      
       <RideOptionsModal 
         visible={modals.options}
         ride={activeRide}
@@ -319,11 +311,9 @@ export default function AgendaScreen({ navigation }) {
         onOpenDocs={() => fetchRideDocuments(activeRide)}
         onShare={() => setModals({ options: false, share: true })}
         onDelete={handleDelete}
-        // Action DISPATCH
         onDispatch={() => { setModals({ ...modals, options: false }); setTimeout(() => setShowDispatchModal(true), 100); }}
       />
 
-      {/* MODAL DISPATCH (Bourse d'échange) */}
       <DispatchModal 
         visible={showDispatchModal}
         onClose={() => setShowDispatchModal(false)}
@@ -334,22 +324,16 @@ export default function AgendaScreen({ navigation }) {
         onSuccess={() => loadData(true)}
       />
 
-      {/* MODAL CRÉATION GROUPE */}
       <GroupCreatorModal 
         visible={showGroupCreator}
         onClose={() => { setShowGroupCreator(false); setTimeout(() => setShowDispatchModal(true), 200); }}
         contacts={contacts}
-        onSaveGroup={handleCreateGroup} // ✅ La vraie connexion API
+        onSaveGroup={handleCreateGroup} 
       />
-      {/* 👆 -------------------------------------------------- 👆 */}
 
-      {/* MODAL PARTAGE */}
       <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor:'#FFF' }}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.headerTitle}>Partager</Text>
-            <TouchableOpacity onPress={() => setModals({...modals, share: false})}><Ionicons name="close-circle" size={32} color="#999"/></TouchableOpacity>
-          </View>
+          <View style={styles.modalHeader}><Text style={styles.headerTitle}>Partager</Text><TouchableOpacity onPress={() => setModals({...modals, share: false})}><Ionicons name="close-circle" size={32} color="#999"/></TouchableOpacity></View>
           <View style={{padding: 20, flex: 1}}>
              <TextInput style={styles.noteInput} placeholder="Note (Optionnel)..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} textAlignVertical="top"/>
              <TouchableOpacity style={styles.whatsappBtn} onPress={shareViaWhatsApp}><Ionicons name="logo-whatsapp" size={24} color="#FFF" style={{marginRight: 10}}/><Text style={styles.whatsappText}>WhatsApp</Text></TouchableOpacity>
@@ -363,7 +347,6 @@ export default function AgendaScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL DOCS */}
       <Modal visible={modals.docs} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.docModalContainer}>
           <View style={styles.modalHeader}><Text style={styles.headerTitle}>Dossier</Text><TouchableOpacity onPress={() => setModals({...modals, docs: false})}><Ionicons name="close-circle" size={32} color="#999"/></TouchableOpacity></View>
@@ -383,7 +366,6 @@ export default function AgendaScreen({ navigation }) {
         </View>
       </Modal>
 
-      {/* MODAL VALIDATION CPAM */}
       <Modal visible={btValidationModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.finishCard, {backgroundColor: '#FFF3E0'}]}>
@@ -397,7 +379,6 @@ export default function AgendaScreen({ navigation }) {
         </View>
       </Modal>
 
-      {/* MODAL FIN */}
       <Modal visible={finishModal} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.finishCard}>
@@ -410,7 +391,6 @@ export default function AgendaScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL RETOUR */}
       <Modal visible={returnModal} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
             <View style={styles.finishCard}>
@@ -423,14 +403,12 @@ export default function AgendaScreen({ navigation }) {
             </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* TOAST NOTIFICATION (Avec changement automatique de date) */}
       <IncomingOfferToast 
           onRideAccepted={(dateOfNewRide) => {
               console.log("🚀 Nouvelle course reçue pour le :", dateOfNewRide);
-              
-              // 1. On rafraîchit les données
               loadData(true); 
-
-              // 2. 👇 MAGIE : On force le calendrier à aller sur la date de la course
               if (dateOfNewRide) {
                   const formattedDate = moment(dateOfNewRide).format('YYYY-MM-DD');
                   setSelectedDate(formattedDate);
@@ -494,14 +472,12 @@ const styles = StyleSheet.create({
   avatarPlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E3F2FD', justifyContent:'center', alignItems:'center' },
   avatarText: { color: '#1976D2', fontWeight: 'bold', fontSize: 18 },
 
-  // SYNC BUTTON
   syncBtn: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#4285F4',
     paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginRight: 10, elevation: 2
   },
   syncBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
 
-  // STYLES VALIDATION BT
   cpamWarning: { fontSize: 13, color: '#5D4037', marginBottom: 20, lineHeight: 20 },
   comparisonRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginVertical: 20, backgroundColor: '#FFE0B2', padding: 10, borderRadius: 10 },
   compLabel: { fontSize: 10, color: '#E65100', fontWeight: 'bold', textAlign: 'center' },
