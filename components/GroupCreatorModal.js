@@ -6,46 +6,48 @@ import { Ionicons } from '@expo/vector-icons';
 
 export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGroup, groupToEdit }) {
   const [groupName, setGroupName] = useState('');
-  const [selectedContactIds, setSelectedContactIds] = useState([]);
+  const [selectedUserIds, setSelectedUserIds] = useState([]); // On stocke les IDs des Utilisateurs (pas des contacts)
 
-  // Quand le modal s'ouvre : Si on édite, on remplit. Sinon, on vide.
+  // Initialisation (Mode Modification ou Création)
   useEffect(() => {
     if (visible) {
         if (groupToEdit) {
             setGroupName(groupToEdit.name);
-            // On récupère les IDs des membres actuels
-            setSelectedContactIds(groupToEdit.members.map(m => m._id));
+            // On récupère les IDs des membres existants
+            // groupToEdit.members contient déjà des objets User peuplés
+            setSelectedUserIds(groupToEdit.members.map(m => m._id));
         } else {
             setGroupName('');
-            setSelectedContactIds([]);
+            setSelectedUserIds([]);
         }
     }
   }, [visible, groupToEdit]);
 
-  const toggleContact = (id) => {
-    if (selectedContactIds.includes(id)) {
-      setSelectedContactIds(selectedContactIds.filter(cId => cId !== id));
+  const toggleContact = (userId) => {
+    if (selectedUserIds.includes(userId)) {
+      setSelectedUserIds(selectedUserIds.filter(id => id !== userId));
     } else {
-      setSelectedContactIds([...selectedContactIds, id]);
+      setSelectedUserIds([...selectedUserIds, userId]);
     }
   };
 
   const handleSave = () => {
     if (!groupName.trim()) return Alert.alert("Erreur", "Donnez un nom au groupe.");
-    if (selectedContactIds.length === 0) return Alert.alert("Erreur", "Sélectionnez au moins un membre.");
+    if (selectedUserIds.length === 0) return Alert.alert("Erreur", "Sélectionnez au moins un membre.");
+
+    // 👇 C'EST ICI LA CORRECTION MAJEURE
+    // On doit retrouver les objets "Contacts" complets correspondant aux IDs utilisateurs sélectionnés
+    const selectedMembers = contacts.filter(c => 
+        c.contactId && selectedUserIds.includes(c.contactId._id)
+    );
 
     const groupData = {
       name: groupName,
-      members: contacts.filter(c => selectedContactIds.includes(c._id))
+      members: selectedMembers, // On envoie les objets contacts
+      _id: groupToEdit ? groupToEdit._id : null
     };
 
-    // Si on édite, on renvoie aussi l'ID pour que le parent sache quoi mettre à jour
-    if (groupToEdit) {
-        onSaveGroup({ ...groupData, _id: groupToEdit._id });
-    } else {
-        onSaveGroup(groupData);
-    }
-    
+    onSaveGroup(groupData);
     onClose();
   };
 
@@ -67,18 +69,23 @@ export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGr
             />
         </View>
 
-        <Text style={styles.labelList}>Membres ({selectedContactIds.length}) :</Text>
+        <Text style={styles.labelList}>Membres ({selectedUserIds.length}) :</Text>
         
         <FlatList
           data={contacts}
-          keyExtractor={item => item._id}
+          // On utilise l'ID de l'utilisateur comme clé unique
+          keyExtractor={item => item.contactId ? item.contactId._id : Math.random().toString()}
           renderItem={({ item }) => {
-            const isSelected = selectedContactIds.includes(item._id);
+            if (!item.contactId) return null; // Sécurité si contact mal formé
+
+            const userId = item.contactId._id;
+            const isSelected = selectedUserIds.includes(userId);
+
             return (
-              <TouchableOpacity style={[styles.contactRow, isSelected && styles.selectedRow]} onPress={() => toggleContact(item._id)}>
+              <TouchableOpacity style={[styles.contactRow, isSelected && styles.selectedRow]} onPress={() => toggleContact(userId)}>
                 <View style={styles.rowLeft}>
                     <Ionicons name={isSelected ? "checkbox" : "square-outline"} size={24} color={isSelected ? "#6200EE" : "#AAA"} />
-                    <Text style={[styles.name, isSelected && {color: '#6200EE', fontWeight:'bold'}]}>{item.contactId?.fullName}</Text>
+                    <Text style={[styles.name, isSelected && {color: '#6200EE', fontWeight:'bold'}]}>{item.contactId.fullName}</Text>
                 </View>
               </TouchableOpacity>
             );
@@ -86,7 +93,7 @@ export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGr
         />
 
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-            <Text style={styles.saveText}>{groupToEdit ? "ENREGISTRER LES MODIFICATIONS" : "CRÉER LE GROUPE"}</Text>
+            <Text style={styles.saveText}>{groupToEdit ? "ENREGISTRER" : "CRÉER LE GROUPE"}</Text>
         </TouchableOpacity>
       </View>
     </Modal>

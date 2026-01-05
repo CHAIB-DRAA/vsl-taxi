@@ -108,12 +108,18 @@ export default function AgendaScreen({ navigation }) {
   
   const handleSaveGroup = async (groupData) => {
     try {
-        // Préparation des IDs
-        const payload = {
-            name: groupData.name,
-            members: groupData.members.map(m => m._id) 
-        };
+      // 👇 CORRECTION ICI : On extrait le bon ID (contactId._id)
+      const memberIds = groupData.members.map(m => {
+          // Si c'est un objet Contact complet (avec contactId)
+          if (m.contactId && m.contactId._id) return m.contactId._id;
+          // Si c'est déjà un ID ou un objet User direct (cas rares)
+          return m._id;
+      });
 
+      const payload = {
+          name: groupData.name,
+          members: memberIds 
+      };
         if (groupData._id) {
             // MODE MODIFICATION (PUT)
             console.log("✏️ Modification groupe:", groupData._id);

@@ -68,28 +68,37 @@ router.get('/my-offers', async (req, res) => {
 });
 
 // 3. ACCEPTER UNE OFFRE (CORRECTION ICI 🛠️)
+// 3. ACCEPTER UNE OFFRE (TRANSFERT)
 router.post('/accept/:dispatchId', async (req, res) => {
     console.log("🤝 Tentative de transfert...");
     try {
         const myUserId = req.user.id || req.user.userId;
         const { dispatchId } = req.params;
 
-        const dispatch = await Dispatch.findById(dispatchId);
+        // 👇 CORRECTION ICI : On ajoute .populate('senderId') pour récupérer le NOM
+        const dispatch = await Dispatch.findById(dispatchId).populate('senderId', 'fullName');
 
         if (!dispatch) return res.status(404).json({ error: "Offre introuvable" });
-        // On autorise 'accepted' temporairement si le front a buggé, sinon 'pending'
-        if (dispatch.status !== 'pending' && dispatch.status !== 'accepted') return res.status(400).json({ error: "Offre déjà traitée" });
+        
+        // On vérifie le statut
+        if (dispatch.status !== 'pending' && dispatch.status !== 'accepted') {
+             return res.status(400).json({ error: "Offre déjà traitée" });
+        }
 
         const rideId = dispatch.rideId;
+        
+        // 👇 On récupère proprement le nom
+        const senderName = dispatch.senderId ? dispatch.senderId.fullName : "Inconnu";
 
-        // 👇 LA CORRECTION EST ICI : on utilise 'chauffeurId'
+        // 2. TRANSFERT
         const updatedRide = await Ride.findByIdAndUpdate(
             rideId, 
             { 
-                chauffeurId: myUserId,   // ✅ On remplace l'ancien ID par le tien
-                status: 'Confirmée',     // On remet le statut "Confirmée"
-                isShared: true,          // Marqueur visuel
-                shareNote: `Transféré depuis ${dispatch.senderId}`
+                chauffeurId: myUserId,
+                status: 'Confirmée',
+                isShared: true,
+                // 👇 ON UTILISE LE NOM ICI AU LIEU DE L'ID
+                shareNote: `Transféré depuis ${senderName}` 
             },
             { new: true }
         );
@@ -98,13 +107,12 @@ router.post('/accept/:dispatchId', async (req, res) => {
             return res.status(404).json({ error: "La course n'existe plus." });
         }
 
-        // On ferme le dispatch
+        // 3. Fermer l'offre
         dispatch.status = 'accepted';
         await dispatch.save();
 
-        console.log(`✅ Course transférée ! Nouveau chauffeur : ${myUserId}`);
+        console.log(`✅ Course transférée de ${senderName} vers ${myUserId}`);
 
-        // On renvoie la course mise à jour pour que le frontend puisse lire la date
         res.json({ message: "Course transférée !", ride: updatedRide });
 
     } catch (err) {
@@ -112,5 +120,4 @@ router.post('/accept/:dispatchId', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
 module.exports = router;
