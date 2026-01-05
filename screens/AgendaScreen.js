@@ -16,7 +16,9 @@ import DocumentScannerButton from '../components/DocumentScannerButton';
 import RideOptionsModal from '../components/RideOptionsModal';
 import OffersNotification from '../components/OffersNotification'; 
 import DispatchModal from '../components/DispatchModal'; 
+// 👇 NOUVEAUX IMPORTS
 import GroupCreatorModal from '../components/GroupCreatorModal'; 
+import GroupListModal from '../components/GroupListModal'; 
 
 // --- SERVICES & CONTEXTE ---
 import { syncDailyRidesToCalendar, addRideToCalendar } from '../services/calendarService';
@@ -51,8 +53,12 @@ export default function AgendaScreen({ navigation }) {
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
   const [finishModal, setFinishModal] = useState(false); 
   const [returnModal, setReturnModal] = useState(false); 
+  
+  // GESTION DES GROUPES
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [showGroupCreator, setShowGroupCreator] = useState(false);
+  const [showGroupList, setShowGroupList] = useState(false); // 👈 Pour voir la liste
+  const [editingGroup, setEditingGroup] = useState(null); // 👈 Groupe en cours d'édition
   
   // 4. DONNÉES LOCALES
   const [myGroups, setMyGroups] = useState([]); 
@@ -89,31 +95,53 @@ export default function AgendaScreen({ navigation }) {
     } catch (e) { console.log("Info: Pas encore de groupes"); }
   };
 
-  // --- GESTION CALENDRIER (Nouvelle Fonction Robuste) ---
+  // --- GESTION CALENDRIER ---
   const handleSyncDay = async () => {
     try {
-        console.log("📅 Lancement synchro...");
         await syncDailyRidesToCalendar(dailyRides);
-        // Le service gère déjà les Alertes de succès/erreur
     } catch (e) {
-        console.error("Erreur Sync:", e);
-        Alert.alert("Erreur", "La synchronisation a échoué. Vérifiez les permissions.");
+        Alert.alert("Erreur", "La synchronisation a échoué.");
     }
   };
 
-  // --- CRÉATION DE GROUPE ---
-  const handleCreateGroup = async (groupDataFromModal) => {
+  // --- GESTION DES GROUPES (Create, Update, Delete) ---
+  
+  const handleSaveGroup = async (groupData) => {
     try {
-      const payload = {
-        name: groupDataFromModal.name,
-        members: groupDataFromModal.members.map(m => m._id) 
-      };
-      const res = await api.post('/groups', payload);
-      setMyGroups(prev => [...prev, res.data]);
-      Alert.alert("Succès", "Groupe créé et sauvegardé ! ✅");
+        // Préparation des IDs
+        const payload = {
+            name: groupData.name,
+            members: groupData.members.map(m => m._id) 
+        };
+
+        if (groupData._id) {
+            // MODE MODIFICATION (PUT)
+            console.log("✏️ Modification groupe:", groupData._id);
+            const res = await api.put(`/groups/${groupData._id}`, payload);
+            
+            // Mise à jour locale
+            setMyGroups(prev => prev.map(g => g._id === groupData._id ? res.data : g));
+            Alert.alert("Succès", "Groupe modifié !");
+        } else {
+            // MODE CRÉATION (POST)
+            console.log("➕ Création groupe");
+            const res = await api.post('/groups', payload);
+            setMyGroups(prev => [...prev, res.data]);
+            Alert.alert("Succès", "Groupe créé !");
+        }
     } catch (e) {
-      console.error("Erreur création groupe:", e);
-      Alert.alert("Erreur", "Impossible de créer le groupe sur le serveur.");
+        console.error("Erreur groupe:", e);
+        Alert.alert("Erreur", "Opération échouée.");
+    }
+  };
+
+  const handleDeleteGroup = async (groupId) => {
+    try {
+        await api.delete(`/groups/${groupId}`);
+        setMyGroups(prev => prev.filter(g => g._id !== groupId));
+        Alert.alert("Supprimé", "Le groupe a été supprimé.");
+    } catch (e) {
+        Alert.alert("Erreur", "Impossible de supprimer.");
     }
   };
 
@@ -239,10 +267,17 @@ export default function AgendaScreen({ navigation }) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Planning</Text>
         <View style={styles.headerRightButtons}>
+            {/* 👇 BOUTON MES GROUPES */}
+            <TouchableOpacity onPress={() => setShowGroupList(true)} style={[styles.iconButton, {marginRight: 10, backgroundColor: '#E3F2FD'}]}>
+                <Ionicons name="people" size={24} color="#1565C0" />
+            </TouchableOpacity>
+            
             <OffersNotification /> 
+            
             <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={[styles.iconButton, {marginRight: 10}]}>
                 <Ionicons name="settings-outline" size={24} color="#333" />
             </TouchableOpacity>
+            
             <TouchableOpacity onPress={() => setShowCalendar(!showCalendar)} style={[styles.iconButton, {backgroundColor: '#FFF3E0'}]}>
                 <Ionicons name={showCalendar ? "chevron-up" : "calendar-outline"} size={24} color="#FF6B00" />
             </TouchableOpacity>
@@ -257,7 +292,6 @@ export default function AgendaScreen({ navigation }) {
         <View style={styles.listHeader}>
             <Text style={styles.dateTitle}>{moment(selectedDate).format('dddd D MMMM')}</Text>
             <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                {/* 👇 BOUTON SYNC UTILISANT LA NOUVELLE FONCTION 👇 */}
                 {dailyRides.length > 0 && (
                   <TouchableOpacity onPress={handleSyncDay} style={styles.syncBtn}>
                     <Ionicons name="logo-google" size={16} color="#FFF" style={{marginRight: 4}} />
@@ -300,7 +334,7 @@ export default function AgendaScreen({ navigation }) {
         )}
       </View>
 
-      {/* --- TOUS LES MODALS --- */}
+      {/* --- MODALS --- */}
       
       <RideOptionsModal 
         visible={modals.options}
@@ -320,17 +354,35 @@ export default function AgendaScreen({ navigation }) {
         ride={activeRide}
         contacts={contacts}
         groups={myGroups} 
-        onCreateGroup={() => { setShowDispatchModal(false); setTimeout(() => setShowGroupCreator(true), 200); }}
+        onCreateGroup={() => { setShowDispatchModal(false); setTimeout(() => { setEditingGroup(null); setShowGroupCreator(true); }, 200); }}
         onSuccess={() => loadData(true)}
       />
 
-      <GroupCreatorModal 
-        visible={showGroupCreator}
-        onClose={() => { setShowGroupCreator(false); setTimeout(() => setShowDispatchModal(true), 200); }}
-        contacts={contacts}
-        onSaveGroup={handleCreateGroup} 
+      {/* MODAL GESTION LISTE GROUPES */}
+      <GroupListModal 
+        visible={showGroupList}
+        onClose={() => setShowGroupList(false)}
+        groups={myGroups}
+        onCreateNew={() => { setEditingGroup(null); setShowGroupList(false); setTimeout(() => setShowGroupCreator(true), 200); }}
+        onEdit={(group) => { setEditingGroup(group); setShowGroupList(false); setTimeout(() => setShowGroupCreator(true), 200); }}
+        onDelete={handleDeleteGroup}
       />
 
+      {/* MODAL CRÉATION / ÉDITION GROUPE */}
+      <GroupCreatorModal 
+        visible={showGroupCreator}
+        groupToEdit={editingGroup} // 👈 On passe le groupe à modifier
+        onClose={() => { 
+            setShowGroupCreator(false); 
+            // Si on venait de la liste, on réouvre la liste
+            if (!showDispatchModal) setTimeout(() => setShowGroupList(true), 200);
+            else setTimeout(() => setShowDispatchModal(true), 200);
+        }}
+        contacts={contacts}
+        onSaveGroup={handleSaveGroup} 
+      />
+
+      {/* MODALS CLASSIQUES ... */}
       <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor:'#FFF' }}>
           <View style={styles.modalHeader}><Text style={styles.headerTitle}>Partager</Text><TouchableOpacity onPress={() => setModals({...modals, share: false})}><Ionicons name="close-circle" size={32} color="#999"/></TouchableOpacity></View>
@@ -404,7 +456,6 @@ export default function AgendaScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* TOAST NOTIFICATION (Avec changement automatique de date) */}
       <IncomingOfferToast 
           onRideAccepted={(dateOfNewRide) => {
               console.log("🚀 Nouvelle course reçue pour le :", dateOfNewRide);

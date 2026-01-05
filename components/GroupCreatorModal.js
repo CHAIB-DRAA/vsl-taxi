@@ -1,12 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, Modal, TouchableOpacity, FlatList, TextInput, Alert 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGroup }) {
+export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGroup, groupToEdit }) {
   const [groupName, setGroupName] = useState('');
   const [selectedContactIds, setSelectedContactIds] = useState([]);
+
+  // Quand le modal s'ouvre : Si on édite, on remplit. Sinon, on vide.
+  useEffect(() => {
+    if (visible) {
+        if (groupToEdit) {
+            setGroupName(groupToEdit.name);
+            // On récupère les IDs des membres actuels
+            setSelectedContactIds(groupToEdit.members.map(m => m._id));
+        } else {
+            setGroupName('');
+            setSelectedContactIds([]);
+        }
+    }
+  }, [visible, groupToEdit]);
 
   const toggleContact = (id) => {
     if (selectedContactIds.includes(id)) {
@@ -18,20 +32,20 @@ export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGr
 
   const handleSave = () => {
     if (!groupName.trim()) return Alert.alert("Erreur", "Donnez un nom au groupe.");
-    if (selectedContactIds.length === 0) return Alert.alert("Erreur", "Sélectionnez au moins un collègue.");
+    if (selectedContactIds.length === 0) return Alert.alert("Erreur", "Sélectionnez au moins un membre.");
 
-    // 👇 CORRECTION : On ne génère PAS d'ID ici.
-    const newGroupData = {
+    const groupData = {
       name: groupName,
-      // On envoie les contacts entiers, AgendaScreen triera les IDs
       members: contacts.filter(c => selectedContactIds.includes(c._id))
     };
 
-    onSaveGroup(newGroupData); // On passe le relais à AgendaScreen
+    // Si on édite, on renvoie aussi l'ID pour que le parent sache quoi mettre à jour
+    if (groupToEdit) {
+        onSaveGroup({ ...groupData, _id: groupToEdit._id });
+    } else {
+        onSaveGroup(groupData);
+    }
     
-    // Reset
-    setGroupName('');
-    setSelectedContactIds([]);
     onClose();
   };
 
@@ -39,7 +53,7 @@ export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGr
     <Modal visible={visible} animationType="slide" presentationStyle="formSheet">
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>Nouveau Groupe 👥</Text>
+          <Text style={styles.title}>{groupToEdit ? "Modifier le Groupe ✏️" : "Nouveau Groupe 👥"}</Text>
           <TouchableOpacity onPress={onClose}><Ionicons name="close" size={28} color="#333" /></TouchableOpacity>
         </View>
 
@@ -47,13 +61,13 @@ export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGr
             <Text style={styles.label}>Nom du groupe</Text>
             <TextInput 
                 style={styles.input} 
-                placeholder="Ex: Team Purpan, Équipe de Nuit..." 
+                placeholder="Ex: Team Nuit..." 
                 value={groupName}
                 onChangeText={setGroupName}
             />
         </View>
 
-        <Text style={styles.labelList}>Sélectionner les membres :</Text>
+        <Text style={styles.labelList}>Membres ({selectedContactIds.length}) :</Text>
         
         <FlatList
           data={contacts}
@@ -72,7 +86,7 @@ export default function GroupCreatorModal({ visible, onClose, contacts, onSaveGr
         />
 
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-            <Text style={styles.saveText}>CRÉER LE GROUPE ({selectedContactIds.length})</Text>
+            <Text style={styles.saveText}>{groupToEdit ? "ENREGISTRER LES MODIFICATIONS" : "CRÉER LE GROUPE"}</Text>
         </TouchableOpacity>
       </View>
     </Modal>
@@ -92,5 +106,5 @@ const styles = StyleSheet.create({
   rowLeft: { flexDirection: 'row', alignItems: 'center' },
   name: { marginLeft: 15, fontSize: 16, color: '#333' },
   saveBtn: { backgroundColor: '#6200EE', padding: 18, borderRadius: 12, alignItems: 'center', marginTop: 20 },
-  saveText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
+  saveText: { color: '#FFF', fontWeight: 'bold', fontSize: 16, textAlign: 'center' }
 });
