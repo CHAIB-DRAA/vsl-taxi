@@ -37,36 +37,40 @@ router.post('/send', async (req, res) => {
 });
 
 // 2. RÉCUPÉRER LES OFFRES
+// 2. RÉCUPÉRER LES OFFRES
 router.get('/my-offers', async (req, res) => {
-  try {
-    const myUserId = req.user.id || req.user.userId;
-
-    // A. Groupes
-    const myGroups = await Group.find({ members: myUserId }).select('_id');
-    const myGroupIds = myGroups.map(g => g._id);
-
-    // B. Offres
-    const offers = await Dispatch.find({
-        $or: [
-            { targetUserId: myUserId },
-            { targetGroupId: { $in: myGroupIds } }
-        ],
-        status: 'pending'
-    })
-    .populate('rideId')
-    .populate('senderId', 'fullName phone')
-    .populate('targetGroupId', 'name');
-
-    // Filtre de sécurité
-    const validOffers = offers.filter(o => o.rideId !== null);
-
-    res.json(validOffers);
-  } catch (err) {
-    console.error("🔥 Erreur My-Offers:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
+    try {
+      const myUserId = req.user.id || req.user.userId;
+  
+      // A. Groupes
+      const myGroups = await Group.find({ members: myUserId }).select('_id');
+      const myGroupIds = myGroups.map(g => g._id);
+  
+      // B. Offres
+      const offers = await Dispatch.find({
+          $or: [
+              { targetUserId: myUserId },
+              { targetGroupId: { $in: myGroupIds } }
+          ],
+          status: 'pending',
+          
+          // 👇 C'EST ICI LA CORRECTION !
+          // "senderId n'est pas égal ($ne) à moi"
+          senderId: { $ne: myUserId } 
+      })
+      .populate('rideId')
+      .populate('senderId', 'fullName phone')
+      .populate('targetGroupId', 'name');
+  
+      // Filtre de sécurité
+      const validOffers = offers.filter(o => o.rideId !== null);
+  
+      res.json(validOffers);
+    } catch (err) {
+      console.error("🔥 Erreur My-Offers:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 // 3. ACCEPTER UNE OFFRE (CORRECTION ICI 🛠️)
 // 3. ACCEPTER UNE OFFRE (TRANSFERT)
 router.post('/accept/:dispatchId', async (req, res) => {

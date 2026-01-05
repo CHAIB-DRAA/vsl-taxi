@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions, Alert 
+  View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions, Alert, Vibration 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 import moment from 'moment';
+
+// 👇 1. IMPORT AUDIO
+import { Audio } from 'expo-av';
 
 const { width } = Dimensions.get('window');
 
@@ -12,6 +15,9 @@ export default function IncomingOfferToast({ onRideAccepted }) {
   const [offer, setOffer] = useState(null);
   const [ignoredIds, setIgnoredIds] = useState([]); 
   
+  // Gestion du son
+  const [sound, setSound] = useState();
+
   const offerRef = useRef(offer);
   const ignoredIdsRef = useRef(ignoredIds);
   const slideAnim = useRef(new Animated.Value(-200)).current; 
@@ -19,7 +25,29 @@ export default function IncomingOfferToast({ onRideAccepted }) {
   useEffect(() => { offerRef.current = offer; }, [offer]);
   useEffect(() => { ignoredIdsRef.current = ignoredIds; }, [ignoredIds]);
 
-  // POLLING (Vérification serveur)
+  // 👇 2. FONCTION POUR JOUER LE SON ET VIBRER
+  const triggerAlert = async () => {
+    // A. Vibration (Pattern : attendre 0ms, vibrer 500ms, pause 200ms, vibrer 500ms)
+    Vibration.vibrate([0, 500, 200, 500]);
+
+    // B. Son
+    try {
+        const { sound } = await Audio.Sound.createAsync(
+            require('../assets/notification.mp3') // ⚠️ Assure-toi d'avoir ce fichier !
+        );
+        setSound(sound);
+        await sound.playAsync();
+    } catch (error) {
+        console.log("Erreur lecture son (fichier manquant ?)", error);
+    }
+  };
+
+  // Nettoyage du son quand on quitte
+  useEffect(() => {
+    return sound ? () => { sound.unloadAsync(); } : undefined;
+  }, [sound]);
+
+  // POLLING
   useEffect(() => {
     let isMounted = true; 
 
@@ -32,10 +60,14 @@ export default function IncomingOfferToast({ onRideAccepted }) {
 
         if (validOffers.length > 0) {
           const newOffer = validOffers[0];
+          // Si c'est une nouvelle offre
           if (!currentOffer || currentOffer._id !== newOffer._id) {
             if (isMounted) {
                 setOffer(newOffer);
                 slideDown();
+                
+                // 👇 3. ON DÉCLENCHE L'ALERTE ICI !
+                triggerAlert();
             }
           }
         } else {
@@ -56,29 +88,26 @@ export default function IncomingOfferToast({ onRideAccepted }) {
   const slideUp = (callback) => { Animated.timing(slideAnim, { toValue: -200, duration: 300, useNativeDriver: true }).start(callback); };
 
   // --- ACTIONS ---
-
- // Dans IncomingOfferToast.js -> handleAccept
-
- const handleAccept = async () => {
+  const handleAccept = async () => {
     if (!offer) return;
     try {
       const response = await api.post(`/dispatch/accept/${offer._id}`);
       
-      // On détermine la date de la course
       const rideDate = response.data.ride ? response.data.ride.date : offer.rideId.date;
+      const formattedDate = moment(rideDate).format('DD/MM');
 
-      Alert.alert("✅ Course Acceptée !");
+      Alert.alert("✅ Course Acceptée !", `La course a été ajoutée à votre agenda pour le ${formattedDate}.`);
       
       setIgnoredIds(prev => [...prev, offer._id]);
       slideUp(() => setOffer(null));
       
-      if (onRideAccepted) {
-          // 👇 CHANGEMENT ICI : On envoie la date au parent
-          onRideAccepted(rideDate); 
-      }
+      if (onRideAccepted) onRideAccepted(rideDate); 
 
     } catch (e) {
-      // ... gestion erreur ...
+      console.error("Erreur Accept:", e);
+      Alert.alert("Oups", "Erreur lors de l'acceptation (ou course déjà prise).");
+      setIgnoredIds(prev => [...prev, offer._id]); 
+      slideUp(() => setOffer(null));
     }
   };
 
