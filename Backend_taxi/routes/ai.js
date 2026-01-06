@@ -1,69 +1,81 @@
 const express = require('express');
 const router = express.Router();
 const OpenAI = require('openai');
-const authMiddleware = require('../middleware/auth'); // On protège la route
+const authMiddleware = require('../middleware/auth');
 
-// Config OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 router.use(authMiddleware);
 
-router.post('/parse-ride', async (req, res) => {
-  try {
-    const { text } = req.body;
+// --- FONCTION DE SECOURS (REGEX) ---
+// C'est ton ancien cerveau manuel, il servira de roue de secours
+const parseWithRegex = (text) => {
+    const result = {
+      patientName: '', patientPhone: '', startLocation: '', endLocation: '',
+      date: new Date().toISOString(), type: 'Aller', notes: text
+    };
+  
+    // Téléphone
+    const phoneRegex = /(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}/;
+    const phoneMatch = text.match(phoneRegex);
+    if (phoneMatch) result.patientPhone = phoneMatch[0].replace(/\s/g, '').replace(/\./g, '');
+  
+    // Heure
+    const timeRegex = /(\d{1,2})[hH:](\d{2})/;
+    const timeMatch = text.match(timeRegex);
+    if (timeMatch) {
+      const d = new Date();
+      d.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
+      result.date = d.toISOString();
+    }
+  
+    // Adresses (Basique)
+    const parts = text.split(/[\n-]/).map(p => p.trim()).filter(p => p.length > 0);
+    parts.forEach(part => {
+        const lower = part.toLowerCase();
+        if (lower.includes('dep') || lower.startsWith('de ')) result.startLocation = part;
+        else if (lower.includes('dest') || lower.includes('pour ') || lower.startsWith('à ')) result.endLocation = part;
+        else if (!result.patientName && !part.match(/\d/) && part.length > 3) result.patientName = part;
+    });
     
-    if (!text) return res.status(400).json({ error: "Texte manquant" });
+    return result;
+};
+// -----------------------------------
 
-    const currentDate = new Date().toISOString();
+router.post('/parse-ride', async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: "Texte manquant" });
 
-    // LE PROMPT MAGIQUE 🧙‍♂️
-    // On explique à l'IA ce qu'on veut exactement.
-    const prompt = `
-      Tu es un assistant pour un chauffeur de taxi. Analyse le texte suivant copié depuis WhatsApp et extrais les informations de la course.
-      
-      Texte : "${text}"
-      
-      Date de référence (aujourd'hui) : ${currentDate}
-      
-      Règles :
-      1. Trouve le nom du patient (patientName).
-      2. Trouve le numéro de téléphone (patientPhone) formaté sans espaces.
-      3. Trouve le lieu de départ (startLocation) et d'arrivée (endLocation).
-      4. Trouve la date et l'heure (date). Si l'heure est donnée mais pas la date, utilise la date d'aujourd'hui. Renvoie au format ISO.
-      5. Détermine le type (Aller, Retour, Consultation) selon le contexte.
-      
-      Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour.
-      Format attendu :
-      {
-        "patientName": "String",
-        "patientPhone": "String",
-        "startLocation": "String",
-        "endLocation": "String",
-        "date": "ISOString",
-        "type": "String"
-      }
-    `;
-
+  try {
+    console.log("🤖 Tentative analyse IA...");
+    
+    // TENTATIVE 1 : OPENAI
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Modèle rapide et pas cher
+      model: "gpt-4o-mini",
       messages: [
-          { role: "system", content: "Tu es un extracteur de données JSON strict." },
-          { role: "user", content: prompt }
+          { role: "system", content: "Tu es un extracteur de données JSON strict pour taxi." },
+          { role: "user", content: `Extrait en JSON (patientName, patientPhone, startLocation, endLocation, date (ISO), type) de : "${text}"` }
       ],
-      response_format: { type: "json_object" }, // Force le JSON
-      temperature: 0, // 0 = Analyse froide et logique
+      response_format: { type: "json_object" },
+      temperature: 0,
     });
 
     const result = JSON.parse(completion.choices[0].message.content);
-    
-    console.log("🤖 IA a extrait :", result);
+    console.log("✅ Succès IA");
     res.json(result);
 
   } catch (error) {
-    console.error("Erreur OpenAI:", error);
-    res.status(500).json({ error: "Erreur lors de l'analyse IA" });
+    // TENTATIVE 2 : SECOURS
+    console.warn("⚠️ Échec IA (Quota ou Panne). Passage en mode Manuel (Regex).");
+    console.error("Détail erreur:", error.message);
+
+    // On ne renvoie PAS d'erreur 500, on renvoie le résultat manuel !
+    const manualResult = parseWithRegex(text);
+    
+    // On ajoute un petit flag pour dire au front que c'est du manuel (optionnel)
+    res.json({ ...manualResult, source: 'manual_fallback' });
   }
 });
 
