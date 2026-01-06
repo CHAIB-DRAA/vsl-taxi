@@ -12,6 +12,7 @@ const patientRoutes = require('./routes/patientRoutes');
 const shareRoutes = require('./routes/shareRoutes'); 
 const dispatchRoutes = require('./routes/dispatch'); 
 const groupRoutes = require('./routes/groups');      
+const aiRoutes = require('./routes/ai'); // 👈 Import OK
 
 dotenv.config();
 const app = express();
@@ -30,14 +31,11 @@ app.use('/api/documents', docRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/share', shareRoutes);
-
-// 👇 MODIFICATION ICI : On a retiré 'authMiddleware'
 app.use('/api/dispatch', dispatchRoutes);
 app.use('/api/groups', groupRoutes);
-// 👆 Le serveur est plus propre, la sécurité est gérée "à l'intérieur" des fichiers routes
-// Dans server.js
-const aiRoutes = require('./routes/ai');
-app.use('/ai', aiRoutes);
+
+// 👇 CORRECTION ICI : On ajoute '/api' devant pour être cohérent !
+app.use('/api/ai', aiRoutes); 
 
 
 app.get('/ping', (req, res) => {
