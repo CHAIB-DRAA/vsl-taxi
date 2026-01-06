@@ -35,6 +35,10 @@ app.use('/api/share', shareRoutes);
 app.use('/api/dispatch', dispatchRoutes);
 app.use('/api/groups', groupRoutes);
 // 👆 Le serveur est plus propre, la sécurité est gérée "à l'intérieur" des fichiers routes
+// Dans server.js
+const aiRoutes = require('./routes/ai');
+app.use('/ai', aiRoutes);
+
 
 app.get('/ping', (req, res) => {
     res.status(200).send('Pong! Server is alive 🤖');

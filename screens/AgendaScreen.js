@@ -7,6 +7,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
+import * as Clipboard from 'expo-clipboard';
+import { parseRideFromText } from '../utils/textParser'; // 👈 Le cerveau
+import RideCreatorModal from '../components/RideCreatorModal'; // 👈 Le formulaire
 
 // --- COMPOSANTS IMPORTÉS ---
 import IncomingOfferToast from '../components/IncomingOfferToast';
@@ -48,12 +51,13 @@ export default function AgendaScreen({ navigation }) {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
   const [showCalendar, setShowCalendar] = useState(true);
   const [activeRide, setActiveRide] = useState(null); 
-  
+  const [showRideCreator, setShowRideCreator] = useState(false);
+const [importedRideData, setImportedRideData] = useState(null);
   // 3. MODALS
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
   const [finishModal, setFinishModal] = useState(false); 
   const [returnModal, setReturnModal] = useState(false); 
-  
+  const [analyzing, setAnalyzing] = useState(false); // Pour le loading
   // GESTION DES GROUPES
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [showGroupCreator, setShowGroupCreator] = useState(false);
@@ -150,7 +154,60 @@ export default function AgendaScreen({ navigation }) {
         Alert.alert("Erreur", "Impossible de supprimer.");
     }
   };
+// --- IMPORT WHATSAPP ---
+// --- IMPORT INTELLIGENT VIA IA ---
+const handleImportFromClipboard = async () => {
+  const text = await Clipboard.getStringAsync();
+  
+  if (!text) {
+      Alert.alert("Presse-papier vide", "Copiez d'abord le message WhatsApp.");
+      return;
+  }
 
+  setAnalyzing(true); // On affiche un spinner
+
+  try {
+      // On envoie le texte à TON serveur (qui parle à l'IA)
+      const response = await api.post('/ai/parse-ride', { text });
+      
+      const aiData = response.data;
+      
+      // On ouvre le modal avec les données magiques de l'IA
+      setImportedRideData(aiData);
+      setShowRideCreator(true);
+      
+      Vibration.vibrate(50); // Petit retour haptique "Succès"
+
+  } catch (e) {
+      console.error(e);
+      Alert.alert("Erreur IA", "L'analyse a échoué. Vérifiez votre connexion.");
+  } finally {
+      setAnalyzing(false);
+  }
+};
+
+// --- SAUVEGARDE FINALE ---
+const handleSaveNewRide = async (rideData) => {
+    try {
+        // On s'assure que la date est complète
+        const fullDate = moment(selectedDate).set({
+            hour: moment(rideData.date).hour(),
+            minute: moment(rideData.date).minute()
+        }).toISOString();
+
+        const newRide = {
+            ...rideData,
+            date: fullDate,
+            status: 'Confirmée'
+        };
+
+        await api.post('/rides', newRide);
+        loadData(true); // On rafraîchit
+        Alert.alert("Succès", "Course ajoutée !");
+    } catch (e) {
+        Alert.alert("Erreur", "Impossible de créer la course.");
+    }
+};
   // --- STATUS BT ---
   const getPMTStatusForRide = (ride) => {
     const typesMedicaux = ['VSL', 'Ambulance', 'Taxi', 'Aller', 'Retour', 'Consultation'];
@@ -279,7 +336,18 @@ export default function AgendaScreen({ navigation }) {
             </TouchableOpacity>
             
             <OffersNotification /> 
-            
+            {/* BOUTON MAGIC PASTE DANS LE HEADER */}
+            <TouchableOpacity 
+                onPress={handleImportFromClipboard} 
+                disabled={analyzing} // On désactive pendant le chargement
+                style={[styles.iconButton, {marginRight: 10, backgroundColor: '#E8F5E9', flexDirection:'row'}]}
+            >
+                {analyzing ? (
+                    <ActivityIndicator size="small" color="#2E7D32" />
+                ) : (
+                    <Ionicons name="sparkles" size={24} color="#2E7D32" /> // Icône "Magie"
+                )}
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={[styles.iconButton, {marginRight: 10}]}>
                 <Ionicons name="settings-outline" size={24} color="#333" />
             </TouchableOpacity>
@@ -373,7 +441,12 @@ export default function AgendaScreen({ navigation }) {
         onEdit={(group) => { setEditingGroup(group); setShowGroupList(false); setTimeout(() => setShowGroupCreator(true), 200); }}
         onDelete={handleDeleteGroup}
       />
-
+      <RideCreatorModal 
+    visible={showRideCreator}
+    onClose={() => setShowRideCreator(false)}
+    initialData={importedRideData}
+    onSave={handleSaveNewRide}
+/>
       {/* MODAL CRÉATION / ÉDITION GROUPE */}
       <GroupCreatorModal 
         visible={showGroupCreator}
