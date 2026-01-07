@@ -337,17 +337,17 @@ const handleSaveNewRide = async (rideData) => {
             
             <OffersNotification /> 
             {/* BOUTON MAGIC PASTE DANS LE HEADER */}
-            <TouchableOpacity 
-                onPress={handleImportFromClipboard} 
-                disabled={analyzing} // On désactive pendant le chargement
-                style={[styles.iconButton, {marginRight: 10, backgroundColor: '#E8F5E9', flexDirection:'row'}]}
-            >
-                {analyzing ? (
-                    <ActivityIndicator size="small" color="#2E7D32" />
-                ) : (
-                    <Ionicons name="sparkles" size={24} color="#2E7D32" /> // Icône "Magie"
-                )}
-            </TouchableOpacity>
+<TouchableOpacity 
+    onPress={handleImportFromClipboard} 
+    disabled={analyzing} // On désactive pendant le chargement
+    style={[styles.iconButton, {marginRight: 10, backgroundColor: '#E8F5E9', flexDirection:'row'}]}
+>
+    {analyzing ? (
+        <ActivityIndicator size="small" color="#2E7D32" />
+    ) : (
+        <Ionicons name="sparkles" size={24} color="#2E7D32" /> // Icône "Magie"
+    )}
+</TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={[styles.iconButton, {marginRight: 10}]}>
                 <Ionicons name="settings-outline" size={24} color="#333" />
             </TouchableOpacity>
