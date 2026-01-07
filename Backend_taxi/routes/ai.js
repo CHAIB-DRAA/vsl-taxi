@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const OpenAI = require('openai');
 const authMiddleware = require('../middleware/auth');
-const Patient = require('../models/Patient'); // Assure-toi que le modèle existe bien ici
+const Patient = require('../models/Patient'); 
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -10,32 +10,32 @@ const openai = new OpenAI({
 
 router.use(authMiddleware);
 
-// --- 1. DICTIONNAIRE DES LIEUX (A compléter selon ta zone) ---
-// Mets ici les raccourcis que tu utilises souvent
+// --- 1. DICTIONNAIRE DES LIEUX (A compléter) ---
 const KNOWN_LOCATIONS = {
+    "estela": "Clinique Estela, Route de Revel, Toulouse",
+    "basso": "Basso Cambo, Toulouse",
+    "candy": "Clinique Candy, Toulouse",
+    "smr": "SMR, Toulouse",
     "oncopole": "1 Avenue Irène Joliot-Curie, 31100 Toulouse",
     "purpan": "Place du Dr Baylac, 31300 Toulouse",
     "rangueil": "1 Avenue du Professeur Jean Poulhès, 31400 Toulouse",
     "pasteur": "45 Avenue de Lombez, 31300 Toulouse",
-    "cedres": "Château d'Alliez, 31700 Cornebarrieu",
-    "croix du sud": "52 Chemin de Ribaute, 31130 Quint-Fonsegrives",
-    "ducuing": "15 Rue de Varsovie, 31300 Toulouse",
-    "gare": "Gare Matabiau, 64 Boulevard Pierre Semard, 31000 Toulouse",
-    "airport": "Aéroport Toulouse-Blagnac, 31700 Blagnac"
+    "st simon": "Saint-Simon, Toulouse",
+    "pl st etienne": "Place Saint-Étienne, Toulouse",
+    "pont des demoiselles": "Pont des Demoiselles, Toulouse",
+    "minimes": "Les Minimes, Toulouse",
+    "les carmes": "Les Carmes, Toulouse",
+    "clinique": "Clinique",
+    "chu": "CHU Toulouse"
 };
 
-// Fonction pour normaliser et trouver une adresse connue
 const findRealAddress = (input) => {
     if (!input) return "";
     const lower = input.toLowerCase();
-    
-    // On cherche si un mot clé (ex: "oncopole") est dans le texte
     for (const [key, address] of Object.entries(KNOWN_LOCATIONS)) {
-        if (lower.includes(key)) {
-            return address; // On remplace par l'adresse complète
-        }
+        if (lower.includes(key)) return address;
     }
-    return input; // Sinon on garde ce que l'IA a trouvé
+    return input;
 };
 
 // --- 2. ROUTE PRINCIPALE ---
@@ -44,22 +44,42 @@ router.post('/parse-ride', async (req, res) => {
   if (!text) return res.status(400).json({ error: "Texte manquant" });
 
   try {
-    // A. APPEL OPENAI
-    const prompt = `
-      Analyse ce texte de transport médical : "${text}"
-      Date réf : ${new Date().toISOString()}
+    // Calcul de la date de DEMAIN pour la référence
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0]; // Format YYYY-MM-DD
 
-      Règles :
-      1. Trouve les courses.
-      2. Type STRICT : 'Aller', 'Retour' ou 'Consultation'.
-      3. Si "Domicile" ou "Chez lui", mets "DOMICILE" dans l'adresse.
-      4. Réponds JSON : { "rides": [ { "patientName": "...", "patientPhone": "...", "startLocation": "...", "endLocation": "...", "date": "...", "type": "..." } ] }
+    // A. PROMPT SPÉCIAL FORMAT "PEC HDJ"
+    const prompt = `
+      Tu es un assistant dispatch. Analyse ce message de courses VSL/Taxi.
+      
+      TEXTE REÇU : "${text}"
+      
+      CONTEXTE TEMPOREL :
+      - Nous sommes le : ${today.toISOString()}
+      - Par défaut, les courses sont pour DEMAIN (${tomorrowStr}), sauf si une date précise est écrite.
+
+      FORMAT A DÉCODER ("Pec Hdj..."):
+      1. "Pec Hdj" ou "Pec" = Début de course.
+      2. L'heure suit immédiatement (ex: 9h15).
+      3. "Me" = Madame / "Mr" = Monsieur. LE MOT QUI SUIT EST LE NOM DU PATIENT.
+      4. Le symbole ">" sépare le Départ de l'Arrivée (Départ > Arrivée).
+      5. Si pas de ">", c'est une adresse simple.
+
+      RÈGLES CRUCIALES :
+      - "Hdj" signifie Hôpital de Jour -> CE N'EST PAS UN NOM DE FAMILLE.
+      - "Estela", "Basso", "Candy", "SMR" -> CE SONT DES LIEUX, pas des patients.
+      - Si tu vois "Me Bouteraa", le patient est "Mme Bouteraa".
+      - Ne confonds jamais le chauffeur (toi) avec le patient.
+
+      Réponds JSON : { "rides": [ { "patientName": "...", "patientPhone": "...", "startLocation": "...", "endLocation": "...", "date": "ISOString", "type": "Aller" } ] }
     `;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-          { role: "system", content: "Expert JSON logistique." },
+          { role: "system", content: "Expert logistique." },
           { role: "user", content: prompt }
       ],
       response_format: { type: "json_object" },
@@ -68,55 +88,40 @@ router.post('/parse-ride', async (req, res) => {
 
     const result = JSON.parse(completion.choices[0].message.content);
     
-    // B. ENRICHISSEMENT (Hôpitaux + Base de Données)
-    const validTypes = ['Aller', 'Retour', 'Consultation', 'Taxi', 'VSL', 'Ambulance'];
-    
+    // B. TRAITEMENT & RECHERCHE BDD
     const enrichedRides = await Promise.all((result.rides || []).map(async (r) => {
         
-        // 1. Correction du Type
-        let t = r.type;
-        if (t === 'Pec' || t === 'Départ') t = 'Aller';
-        if (t === 'Récupération') t = 'Retour';
-        const finalType = validTypes.includes(t) ? t : 'Aller';
+        let finalName = r.patientName || "";
+        
+        // Sécurité anti-bruit (si l'IA remet Hdj en nom)
+        if (finalName.match(/^(Hdj|Pec|Estela|SMR|Candy|Basso)$/i)) {
+            finalName = "";
+        }
 
-        // 2. Correction des Adresses (Hôpitaux connus) 🏥
+        // Correction des lieux via le dictionnaire
         let start = findRealAddress(r.startLocation);
         let end = findRealAddress(r.endLocation);
-
-        // 3. Recherche du Patient en BDD (Pour Adresse & Tel) 🔍
         let finalPhone = r.patientPhone;
-        let finalName = r.patientName;
-        
-        // On ne cherche que si on a un nom d'au moins 3 lettres (évite de trouver "Moi" ou le chauffeur)
-        if (r.patientName && r.patientName.length > 2) {
-            const cleanSearchName = r.patientName.replace(/mme|mr|m\.|monsieur|madame/gi, '').trim();
+
+        // 3. RECHERCHE BDD INTELLIGENTE
+        if (finalName.length > 2) {
+            // Nettoyage pour recherche (enlève Me, Mr, Mme)
+            const cleanSearchName = finalName.replace(/mme|mr|m\.|me |monsieur|madame/gi, '').trim();
             
-            if (cleanSearchName.length >= 3) {
-                // Recherche stricte sur le nom ou le téléphone
-                const dbPatient = await Patient.findOne({
-                    $or: [
-                        { fullName: { $regex: new RegExp(`^${cleanSearchName}`, 'i') } }, // Commence par le nom (plus précis)
-                        { phone: r.patientPhone }
-                    ]
-                });
+            const dbPatient = await Patient.findOne({
+                fullName: { $regex: new RegExp(cleanSearchName, 'i') }
+            });
 
-                if (dbPatient) {
-                    console.log(`✅ Patient trouvé : ${dbPatient.fullName}`);
-                    finalName = dbPatient.fullName; // On met le vrai nom complet
-                    
-                    // Si pas de téléphone dans le message, on prend celui du dossier
-                    if (!finalPhone) finalPhone = dbPatient.phone;
-
-                    // LOGIQUE D'ADRESSE INTELLIGENTE 🏠
-                    // Si c'est un ALLER et que le départ est vide ou "DOMICILE"
-                    if (finalType === 'Aller' && (!start || start.toUpperCase().includes('DOMICILE'))) {
-                        start = dbPatient.address || start;
-                    }
-                    // Si c'est un RETOUR et que l'arrivée est vide ou "DOMICILE"
-                    if (finalType === 'Retour' && (!end || end.toUpperCase().includes('DOMICILE'))) {
-                        end = dbPatient.address || end;
-                    }
-                }
+            if (dbPatient) {
+                console.log(`✅ Patient reconnu BDD : ${dbPatient.fullName}`);
+                finalName = dbPatient.fullName; 
+                if (!finalPhone) finalPhone = dbPatient.phone;
+                
+                // Si l'adresse de départ ou arrivée est "Domicile" (ou vide dans le contexte >), on met l'adresse du patient
+                // Ex: "Basso > Estela" -> Pas de domicile
+                // Ex: "Chez lui > Estela" -> Domicile
+                if (start && start.toLowerCase().includes("domicile")) start = dbPatient.address;
+                if (end && end.toLowerCase().includes("domicile")) end = dbPatient.address;
             }
         }
 
@@ -126,7 +131,7 @@ router.post('/parse-ride', async (req, res) => {
             patientPhone: finalPhone,
             startLocation: start,
             endLocation: end,
-            type: finalType
+            type: "Aller" // Par défaut
         };
     }));
 
@@ -134,8 +139,7 @@ router.post('/parse-ride', async (req, res) => {
 
   } catch (error) {
     console.error("⚠️ Erreur IA:", error.message);
-    // Fallback simple pour ne pas bloquer
-    res.json([{ notes: text, source: 'error_fallback', type: 'Aller' }]);
+    res.json([]);
   }
 });
 
