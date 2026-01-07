@@ -45,38 +45,65 @@ const parseWithRegex = (text) => {
 // -----------------------------------
 
 router.post('/parse-ride', async (req, res) => {
-  const { text } = req.body;
-  if (!text) return res.status(400).json({ error: "Texte manquant" });
-
-  try {
-    console.log("🤖 Tentative analyse IA...");
-    
-    // TENTATIVE 1 : OPENAI
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-          { role: "system", content: "Tu es un extracteur de données JSON strict pour taxi." },
-          { role: "user", content: `Extrait en JSON (patientName, patientPhone, startLocation, endLocation, date (ISO), type) de : "${text}"` }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0,
-    });
-
-    const result = JSON.parse(completion.choices[0].message.content);
-    console.log("✅ Succès IA");
-    res.json(result);
-
-  } catch (error) {
-    // TENTATIVE 2 : SECOURS
-    console.warn("⚠️ Échec IA (Quota ou Panne). Passage en mode Manuel (Regex).");
-    console.error("Détail erreur:", error.message);
-
-    // On ne renvoie PAS d'erreur 500, on renvoie le résultat manuel !
-    const manualResult = parseWithRegex(text);
-    
-    // On ajoute un petit flag pour dire au front que c'est du manuel (optionnel)
-    res.json({ ...manualResult, source: 'manual_fallback' });
-  }
-});
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "Texte manquant" });
+  
+    try {
+      // 👇 PROMPT CORRIGÉ ET STRICT SUR LES TYPES
+      const prompt = `
+        Analyse le texte suivant (copié de WhatsApp) qui peut contenir UNE ou PLUSIEURS courses de taxi.
+        
+        Texte : "${text}"
+        Date de référence : ${new Date().toISOString()}
+  
+        Tâche :
+        1. Repère chaque course distincte.
+        2. Pour chaque course, extrais : patientName, patientPhone, startLocation, endLocation, date (ISO).
+        3. Détermine le "type" de la course.
+        
+        ⚠️ RÈGLE CRUCIALE POUR LE TYPE :
+        Tu dois choisir la valeur STRICTEMENT parmi cette liste : ['Aller', 'Retour', 'Consultation'].
+        - Si c'est une prise en charge, un départ, ou un aller simple -> Choisis 'Aller'.
+        - Si c'est un retour, une récupération, ou "ramener" -> Choisis 'Retour'.
+        - Si c'est une attente ou un rdv médical complet -> Choisis 'Consultation'.
+        - Ne jamais inventer de terme comme "Pec", "Urgence", etc.
+  
+        IMPORTANT : Réponds UNIQUEMENT avec un objet JSON contenant un tableau "rides".
+        Format attendu :
+        {
+          "rides": [
+            { "patientName": "String", "patientPhone": "String", "startLocation": "String", "endLocation": "String", "date": "ISOString", "type": "String" }
+          ]
+        }
+      `;
+  
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+            { role: "system", content: "Tu es un assistant expert en logistique qui respecte strictement les énumérations JSON." },
+            { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0,
+      });
+  
+      const result = JSON.parse(completion.choices[0].message.content);
+      
+      // Sécurité supplémentaire : On force le type si l'IA s'est quand même trompée
+      const validTypes = ['Aller', 'Retour', 'Consultation', 'Taxi', 'VSL', 'Ambulance'];
+      const safeRides = (result.rides || []).map(r => ({
+          ...r,
+          // Si le type renvoyé n'est pas dans la liste, on met 'Aller' par défaut
+          type: validTypes.includes(r.type) ? r.type : 'Aller'
+      }));
+  
+      res.json(safeRides);
+  
+    } catch (error) {
+      console.error("Erreur IA:", error);
+      // Fallback manuel
+      res.json([{ notes: text, source: 'error_fallback', type: 'Aller' }]);
+    }
+  });
 
 module.exports = router;
