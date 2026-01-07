@@ -6,20 +6,33 @@ import moment from 'moment';
 
 export default function RideCreatorModal({ visible, onClose, initialData, onSave }) {
   const [formData, setFormData] = useState({
-    patientName: '', patientPhone: '', startLocation: '', endLocation: '', 
-    date: new Date(), type: 'Aller'
+    patientName: '', 
+    patientPhone: '', 
+    startLocation: '', 
+    endLocation: '', 
+    date: new Date(), 
+    type: 'Aller'
   });
   
   const [showPicker, setShowPicker] = useState(false);
 
-  // Chargement des données quand le modal s'ouvre (ou quand on colle du texte)
+  // 👇 C'EST ICI LA CORRECTION
   useEffect(() => {
     if (initialData) {
-        setFormData(prev => ({
-            ...prev,
-            ...initialData,
-            date: initialData.startTime ? new Date(initialData.startTime) : new Date()
-        }));
+        // 1. On récupère la date (soit 'date' de l'IA, soit 'startTime' de l'ancien système)
+        const dateString = initialData.date || initialData.startTime;
+        
+        // 2. On la convertit en Objet Date (sinon le calendrier plante)
+        const dateObject = dateString ? new Date(dateString) : new Date();
+
+        setFormData({
+            patientName: initialData.patientName || '',
+            patientPhone: initialData.patientPhone || '',
+            startLocation: initialData.startLocation || '',
+            endLocation: initialData.endLocation || '',
+            type: initialData.type || 'Aller',
+            date: dateObject // On utilise l'objet Date propre
+        });
     }
   }, [initialData]);
 
@@ -28,7 +41,7 @@ export default function RideCreatorModal({ visible, onClose, initialData, onSave
         return Alert.alert("Erreur", "Nom et Départ obligatoires.");
     }
     onSave(formData);
-    onClose();
+    onClose(); // Le parent gérera le passage à la suivante
   };
 
   return (
@@ -41,31 +54,68 @@ export default function RideCreatorModal({ visible, onClose, initialData, onSave
 
         <ScrollView contentContainerStyle={{paddingBottom: 20}}>
             <Text style={styles.label}>Patient</Text>
-            <TextInput style={styles.input} placeholder="Nom du patient" value={formData.patientName} onChangeText={t => setFormData({...formData, patientName: t})} />
+            <TextInput 
+                style={styles.input} 
+                placeholder="Nom du patient" 
+                value={formData.patientName} 
+                onChangeText={t => setFormData({...formData, patientName: t})} 
+            />
 
             <Text style={styles.label}>Téléphone</Text>
-            <TextInput style={styles.input} placeholder="06..." keyboardType="phone-pad" value={formData.patientPhone} onChangeText={t => setFormData({...formData, patientPhone: t})} />
+            <TextInput 
+                style={styles.input} 
+                placeholder="06..." 
+                keyboardType="phone-pad" 
+                value={formData.patientPhone} 
+                onChangeText={t => setFormData({...formData, patientPhone: t})} 
+            />
 
             <Text style={styles.label}>Heure</Text>
             <TouchableOpacity style={styles.dateBtn} onPress={() => setShowPicker(true)}>
-                <Text style={styles.dateText}>{moment(formData.date).format('HH:mm')}</Text>
+                <Text style={styles.dateText}>
+                    {moment(formData.date).format('DD/MM à HH:mm')}
+                </Text>
                 <Ionicons name="time" size={20} color="#333"/>
             </TouchableOpacity>
+            
             {showPicker && (
-                <DateTimePicker value={formData.date} mode="time" is24Hour={true} display="spinner"
-                    onChange={(e, d) => { setShowPicker(false); if(d) setFormData({...formData, date: d}); }}
+                <DateTimePicker 
+                    value={formData.date} 
+                    mode="datetime" // J'ai mis datetime pour vérifier la date aussi (demain, après-demain...)
+                    is24Hour={true} 
+                    display="spinner"
+                    onChange={(e, d) => { 
+                        setShowPicker(false); 
+                        if(d) setFormData({...formData, date: d}); 
+                    }}
                 />
             )}
 
             <Text style={styles.label}>Départ 🏠</Text>
-            <TextInput style={styles.input} placeholder="Adresse de départ" value={formData.startLocation} onChangeText={t => setFormData({...formData, startLocation: t})} multiline />
+            <TextInput 
+                style={styles.input} 
+                placeholder="Adresse de départ" 
+                value={formData.startLocation} 
+                onChangeText={t => setFormData({...formData, startLocation: t})} 
+                multiline 
+            />
 
             <Text style={styles.label}>Destination 🏥</Text>
-            <TextInput style={styles.input} placeholder="Adresse d'arrivée" value={formData.endLocation} onChangeText={t => setFormData({...formData, endLocation: t})} multiline />
+            <TextInput 
+                style={styles.input} 
+                placeholder="Adresse d'arrivée" 
+                value={formData.endLocation} 
+                onChangeText={t => setFormData({...formData, endLocation: t})} 
+                multiline 
+            />
             
             <View style={styles.typeContainer}>
                 {['Aller', 'Retour', 'Consultation'].map(type => (
-                    <TouchableOpacity key={type} style={[styles.typeBtn, formData.type === type && styles.typeBtnActive]} onPress={() => setFormData({...formData, type})}>
+                    <TouchableOpacity 
+                        key={type} 
+                        style={[styles.typeBtn, formData.type === type && styles.typeBtnActive]} 
+                        onPress={() => setFormData({...formData, type})}
+                    >
                         <Text style={[styles.typeText, formData.type === type && {color: '#FFF'}]}>{type}</Text>
                     </TouchableOpacity>
                 ))}

@@ -1,15 +1,14 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, ActivityIndicator, StyleSheet,
-  Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions, Linking
+  Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Dimensions, Linking, Vibration
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import moment from 'moment';
 import 'moment/locale/fr';
 import * as Clipboard from 'expo-clipboard';
-import { parseRideFromText } from '../utils/textParser'; // 👈 Le cerveau
-import RideCreatorModal from '../components/RideCreatorModal'; // 👈 Le formulaire
+import RideCreatorModal from '../components/RideCreatorModal'; 
 
 // --- COMPOSANTS IMPORTÉS ---
 import IncomingOfferToast from '../components/IncomingOfferToast';
@@ -19,7 +18,6 @@ import DocumentScannerButton from '../components/DocumentScannerButton';
 import RideOptionsModal from '../components/RideOptionsModal';
 import OffersNotification from '../components/OffersNotification'; 
 import DispatchModal from '../components/DispatchModal'; 
-// 👇 NOUVEAUX IMPORTS
 import GroupCreatorModal from '../components/GroupCreatorModal'; 
 import GroupListModal from '../components/GroupListModal'; 
 
@@ -51,18 +49,23 @@ export default function AgendaScreen({ navigation }) {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
   const [showCalendar, setShowCalendar] = useState(true);
   const [activeRide, setActiveRide] = useState(null); 
+  
+  // --- ÉTATS IMPORT & QUEUE (MULTI-COURSES) ---
   const [showRideCreator, setShowRideCreator] = useState(false);
-const [importedRideData, setImportedRideData] = useState(null);
+  const [importedRideData, setImportedRideData] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false); 
+  const [rideQueue, setRideQueue] = useState([]); // 👈 LA FILE D'ATTENTE EST DE RETOUR
+
   // 3. MODALS
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
   const [finishModal, setFinishModal] = useState(false); 
   const [returnModal, setReturnModal] = useState(false); 
-  const [analyzing, setAnalyzing] = useState(false); // Pour le loading
+  
   // GESTION DES GROUPES
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [showGroupCreator, setShowGroupCreator] = useState(false);
-  const [showGroupList, setShowGroupList] = useState(false); // 👈 Pour voir la liste
-  const [editingGroup, setEditingGroup] = useState(null); // 👈 Groupe en cours d'édition
+  const [showGroupList, setShowGroupList] = useState(false); 
+  const [editingGroup, setEditingGroup] = useState(null); 
   
   // 4. DONNÉES LOCALES
   const [myGroups, setMyGroups] = useState([]); 
@@ -90,6 +93,25 @@ const [importedRideData, setImportedRideData] = useState(null);
     fetchGroups();
   }, [allRides]); 
 
+  // --- 🤖 LE ROBOT GESTIONNAIRE DE FILE D'ATTENTE ---
+  useEffect(() => {
+    // Si le modal est FERMÉ et qu'il reste des courses dans la file...
+    if (!showRideCreator && rideQueue.length > 0) {
+        // On prend la prochaine course (la première de la liste)
+        const nextRideToValidate = rideQueue[0];
+        setImportedRideData(nextRideToValidate);
+        
+        // Petite pause pour l'animation (confort visuel)
+        setTimeout(() => setShowRideCreator(true), 300);
+    }
+    
+    // Si la file est vide et qu'on vient de finir
+    if (!showRideCreator && rideQueue.length === 0 && importedRideData) {
+        setImportedRideData(null); // On nettoie
+    }
+  }, [rideQueue, showRideCreator]);
+
+
   const fetchGlobalPMTs = async () => { try { const res = await api.get('/documents/pmts/all'); setAllPMTs(res.data); } catch (err) {} };
   
   const fetchGroups = async () => {
@@ -99,115 +121,104 @@ const [importedRideData, setImportedRideData] = useState(null);
     } catch (e) { console.log("Info: Pas encore de groupes"); }
   };
 
-  // --- GESTION CALENDRIER ---
   const handleSyncDay = async () => {
-    try {
-        await syncDailyRidesToCalendar(dailyRides);
-    } catch (e) {
-        Alert.alert("Erreur", "La synchronisation a échoué.");
-    }
+    try { await syncDailyRidesToCalendar(dailyRides); } 
+    catch (e) { Alert.alert("Erreur", "La synchronisation a échoué."); }
   };
 
-  // --- GESTION DES GROUPES (Create, Update, Delete) ---
-  
+  // --- GESTION GROUPES ---
   const handleSaveGroup = async (groupData) => {
     try {
-      // 👇 CORRECTION ICI : On extrait le bon ID (contactId._id)
-      const memberIds = groupData.members.map(m => {
-          // Si c'est un objet Contact complet (avec contactId)
-          if (m.contactId && m.contactId._id) return m.contactId._id;
-          // Si c'est déjà un ID ou un objet User direct (cas rares)
-          return m._id;
-      });
-
-      const payload = {
-          name: groupData.name,
-          members: memberIds 
-      };
-        if (groupData._id) {
-            // MODE MODIFICATION (PUT)
-            console.log("✏️ Modification groupe:", groupData._id);
-            const res = await api.put(`/groups/${groupData._id}`, payload);
-            
-            // Mise à jour locale
-            setMyGroups(prev => prev.map(g => g._id === groupData._id ? res.data : g));
-            Alert.alert("Succès", "Groupe modifié !");
-        } else {
-            // MODE CRÉATION (POST)
-            console.log("➕ Création groupe");
-            const res = await api.post('/groups', payload);
-            setMyGroups(prev => [...prev, res.data]);
-            Alert.alert("Succès", "Groupe créé !");
-        }
-    } catch (e) {
-        console.error("Erreur groupe:", e);
-        Alert.alert("Erreur", "Opération échouée.");
-    }
+      const memberIds = groupData.members.map(m => (m.contactId && m.contactId._id) ? m.contactId._id : m._id);
+      const payload = { name: groupData.name, members: memberIds };
+      if (groupData._id) {
+          const res = await api.put(`/groups/${groupData._id}`, payload);
+          setMyGroups(prev => prev.map(g => g._id === groupData._id ? res.data : g));
+          Alert.alert("Succès", "Groupe modifié !");
+      } else {
+          const res = await api.post('/groups', payload);
+          setMyGroups(prev => [...prev, res.data]);
+          Alert.alert("Succès", "Groupe créé !");
+      }
+    } catch (e) { Alert.alert("Erreur", "Opération échouée."); }
   };
 
   const handleDeleteGroup = async (groupId) => {
+    try { await api.delete(`/groups/${groupId}`); setMyGroups(prev => prev.filter(g => g._id !== groupId)); Alert.alert("Supprimé", "Le groupe a été supprimé."); } 
+    catch (e) { Alert.alert("Erreur", "Impossible de supprimer."); }
+  };
+
+  // --- IMPORT INTELLIGENT VIA IA (MULTI-COURSES) ---
+  const handleImportFromClipboard = async () => {
+    const text = await Clipboard.getStringAsync();
+    
+    if (!text) {
+        Alert.alert("Presse-papier vide", "Copiez d'abord le message WhatsApp.");
+        return;
+    }
+
+    setAnalyzing(true); 
+
     try {
-        await api.delete(`/groups/${groupId}`);
-        setMyGroups(prev => prev.filter(g => g._id !== groupId));
-        Alert.alert("Supprimé", "Le groupe a été supprimé.");
+        const response = await api.post('/ai/parse-ride', { text });
+        let aiData = response.data; 
+
+        console.log("📦 Réception Backend:", JSON.stringify(aiData, null, 2));
+
+        // NORMALISATION DES DONNÉES
+        // 1. Si l'IA renvoie { rides: [...] }
+        if (aiData.rides && Array.isArray(aiData.rides)) {
+            aiData = aiData.rides;
+        }
+        
+        // 2. Si l'IA renvoie un seul objet, on le met dans un tableau
+        if (!Array.isArray(aiData) && aiData.patientName) {
+            aiData = [aiData];
+        }
+
+        const ridesFound = Array.isArray(aiData) ? aiData : [];
+        
+        if (ridesFound.length > 0) {
+            Alert.alert("IA", `${ridesFound.length} course(s) détectée(s) ! Validation séquence...`);
+            setRideQueue(ridesFound); // 👈 ON REMPLIT LA FILE
+            Vibration.vibrate(50);
+        } else {
+             Alert.alert("Oups", "Aucune course claire trouvée.");
+        }
+
     } catch (e) {
-        Alert.alert("Erreur", "Impossible de supprimer.");
+        console.error(e);
+        Alert.alert("Erreur IA", "L'analyse a échoué.");
+    } finally {
+        setAnalyzing(false);
     }
   };
-// --- IMPORT WHATSAPP ---
-// --- IMPORT INTELLIGENT VIA IA ---
-const handleImportFromClipboard = async () => {
-  const text = await Clipboard.getStringAsync();
-  
-  if (!text) {
-      Alert.alert("Presse-papier vide", "Copiez d'abord le message WhatsApp.");
-      return;
-  }
 
-  setAnalyzing(true); // On affiche un spinner
+  // --- SAUVEGARDE FINALE AVEC QUEUE ---
+  const handleSaveNewRide = async (rideData) => {
+      try {
+          const fullDate = moment(selectedDate).set({
+              hour: moment(rideData.date).hour(),
+              minute: moment(rideData.date).minute()
+          }).toISOString();
 
-  try {
-      // On envoie le texte à TON serveur (qui parle à l'IA)
-      const response = await api.post('/ai/parse-ride', { text });
-      
-      const aiData = response.data;
-      
-      // On ouvre le modal avec les données magiques de l'IA
-      setImportedRideData(aiData);
-      setShowRideCreator(true);
-      
-      Vibration.vibrate(50); // Petit retour haptique "Succès"
+          const newRide = { ...rideData, date: fullDate, status: 'Confirmée' };
 
-  } catch (e) {
-      console.error(e);
-      Alert.alert("Erreur IA", "L'analyse a échoué. Vérifiez votre connexion.");
-  } finally {
-      setAnalyzing(false);
-  }
-};
+          await api.post('/rides', newRide);
+          loadData(true); 
+          Alert.alert("Succès", "Course ajoutée !");
 
-// --- SAUVEGARDE FINALE ---
-const handleSaveNewRide = async (rideData) => {
-    try {
-        // On s'assure que la date est complète
-        const fullDate = moment(selectedDate).set({
-            hour: moment(rideData.date).hour(),
-            minute: moment(rideData.date).minute()
-        }).toISOString();
+          // 👇 GESTION DE LA FILE D'ATTENTE
+          // On retire la course qu'on vient de traiter (la première)
+          setRideQueue(prevQueue => prevQueue.slice(1)); 
+          // On ferme le modal (le useEffect rouvrira le modal pour la suivante)
+          setShowRideCreator(false);
 
-        const newRide = {
-            ...rideData,
-            date: fullDate,
-            status: 'Confirmée'
-        };
+      } catch (e) {
+          Alert.alert("Erreur", "Impossible de créer la course.");
+      }
+  };
 
-        await api.post('/rides', newRide);
-        loadData(true); // On rafraîchit
-        Alert.alert("Succès", "Course ajoutée !");
-    } catch (e) {
-        Alert.alert("Erreur", "Impossible de créer la course.");
-    }
-};
   // --- STATUS BT ---
   const getPMTStatusForRide = (ride) => {
     const typesMedicaux = ['VSL', 'Ambulance', 'Taxi', 'Aller', 'Retour', 'Consultation'];
@@ -219,8 +230,6 @@ const handleSaveNewRide = async (rideData) => {
     patientPMTs.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
     const lastPMT = patientPMTs[0];
     const max = lastPMT.maxRides || 1; 
-    
-    if (max >= 1000) return { color: '#4CAF50', text: 'BT VALIDE', icon: 'checkmark-circle' };
     
     const ridesSince = allRides.filter(r => r.patientName === ride.patientName && new Date(r.date) >= new Date(lastPMT.uploadDate) && r.status !== 'Annulée');
     let consumed = 0; ridesSince.forEach(r => consumed += (r.isRoundTrip ? 1 : 0.5));
@@ -330,24 +339,26 @@ const handleSaveNewRide = async (rideData) => {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Planning</Text>
         <View style={styles.headerRightButtons}>
-            {/* 👇 BOUTON MES GROUPES */}
+            {/* BOUTON MES GROUPES */}
             <TouchableOpacity onPress={() => setShowGroupList(true)} style={[styles.iconButton, {marginRight: 10, backgroundColor: '#E3F2FD'}]}>
                 <Ionicons name="people" size={24} color="#1565C0" />
             </TouchableOpacity>
             
             <OffersNotification /> 
-            {/* BOUTON MAGIC PASTE DANS LE HEADER */}
-  <TouchableOpacity 
-      onPress={handleImportFromClipboard} 
-      disabled={analyzing} // On désactive pendant le chargement
-      style={[styles.iconButton, {marginRight: 10, backgroundColor: '#E8F5E9', flexDirection:'row'}]}
-  >
-      {analyzing ? (
-          <ActivityIndicator size="small" color="#2E7D32" />
-      ) : (
-          <Ionicons name="sparkles" size={24} color="#2E7D32" /> // Icône "Magie"
-      )}
-  </TouchableOpacity>
+            
+            {/* BOUTON MAGIC PASTE */}
+            <TouchableOpacity 
+                onPress={handleImportFromClipboard} 
+                disabled={analyzing} 
+                style={[styles.iconButton, {marginRight: 10, backgroundColor: '#E8F5E9', flexDirection:'row'}]}
+            >
+                {analyzing ? (
+                    <ActivityIndicator size="small" color="#2E7D32" />
+                ) : (
+                    <Ionicons name="sparkles" size={24} color="#2E7D32" /> 
+                )}
+            </TouchableOpacity>
+            
             <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={[styles.iconButton, {marginRight: 10}]}>
                 <Ionicons name="settings-outline" size={24} color="#333" />
             </TouchableOpacity>
@@ -441,19 +452,25 @@ const handleSaveNewRide = async (rideData) => {
         onEdit={(group) => { setEditingGroup(group); setShowGroupList(false); setTimeout(() => setShowGroupCreator(true), 200); }}
         onDelete={handleDeleteGroup}
       />
+      
+      {/* MODAL CRÉATION / ÉDITION COURSE (AVEC FILE D'ATTENTE) */}
       <RideCreatorModal 
-    visible={showRideCreator}
-    onClose={() => setShowRideCreator(false)}
-    initialData={importedRideData}
-    onSave={handleSaveNewRide}
-/>
+        visible={showRideCreator}
+        onClose={() => {
+            // Si on ferme (annule), on passe à la suivante
+            setRideQueue(prev => prev.slice(1));
+            setShowRideCreator(false);
+        }}
+        initialData={importedRideData}
+        onSave={handleSaveNewRide}
+      />
+
       {/* MODAL CRÉATION / ÉDITION GROUPE */}
       <GroupCreatorModal 
         visible={showGroupCreator}
-        groupToEdit={editingGroup} // 👈 On passe le groupe à modifier
+        groupToEdit={editingGroup} 
         onClose={() => { 
             setShowGroupCreator(false); 
-            // Si on venait de la liste, on réouvre la liste
             if (!showDispatchModal) setTimeout(() => setShowGroupList(true), 200);
             else setTimeout(() => setShowDispatchModal(true), 200);
         }}

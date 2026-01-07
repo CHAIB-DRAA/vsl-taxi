@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const OpenAI = require('openai');
 const authMiddleware = require('../middleware/auth');
+const Patient = require('../models/Patient'); // 👈 IMPORT DU MODÈLE PATIENT
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -10,22 +11,19 @@ const openai = new OpenAI({
 router.use(authMiddleware);
 
 // --- 1. MOTEUR DE SECOURS (REGEX) ---
-// Si l'IA échoue, on utilise ce code "bête mais robuste"
 const parseWithRegex = (text) => {
     const result = {
       patientName: '', patientPhone: '', startLocation: '', endLocation: '',
       date: new Date().toISOString(), type: 'Aller', notes: text
     };
   
-    // Téléphone
     const phoneRegex = /(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}/;
     const phoneMatch = text.match(phoneRegex);
     if (phoneMatch) {
         result.patientPhone = phoneMatch[0].replace(/\s/g, '').replace(/\./g, '');
-        text = text.replace(phoneMatch[0], ''); // On l'enlève pour pas gêner la suite
+        text = text.replace(phoneMatch[0], '');
     }
   
-    // Heure (ex: 14h30)
     const timeRegex = /(\d{1,2})[hH:]?(\d{2})?/;
     const timeMatch = text.match(timeRegex);
     if (timeMatch) {
@@ -34,10 +32,8 @@ const parseWithRegex = (text) => {
       result.date = d.toISOString();
     }
   
-    // Adresses & Nom (Déduction simple)
     const parts = text.split(/[\n\/-]/).map(p => p.trim()).filter(p => p.length > 2);
     let addresses = [];
-
     parts.forEach(part => {
         const lower = part.toLowerCase();
         if (lower.includes('dep') || lower.startsWith('de ')) result.startLocation = part;
@@ -46,13 +42,11 @@ const parseWithRegex = (text) => {
         else addresses.push(part);
     });
 
-    // Bouche-trous
     if (addresses.length > 0) {
         if (!result.patientName) result.patientName = addresses[0];
         else if (!result.startLocation) result.startLocation = addresses[0];
         else if (!result.endLocation) result.endLocation = addresses[0];
     }
-    
     return result;
 };
 
@@ -61,10 +55,10 @@ router.post('/parse-ride', async (req, res) => {
   const { text } = req.body;
   if (!text) return res.status(400).json({ error: "Texte manquant" });
 
-  console.log("📝 Analyse reçue :", text); // LOG 1
+  console.log("📝 Analyse IA + DB pour :", text);
 
   try {
-    // TENTATIVE IA
+    // A. APPEL OPENAI
     const prompt = `
       Analyse ce texte de transport médical : "${text}"
       Date réf : ${new Date().toISOString()}
@@ -85,31 +79,62 @@ router.post('/parse-ride', async (req, res) => {
       temperature: 0,
     });
 
-    const rawContent = completion.choices[0].message.content;
-    console.log("🤖 Réponse IA brute :", rawContent); // LOG 2 : On voit ce que l'IA renvoie
-
-    const result = JSON.parse(rawContent);
+    const result = JSON.parse(completion.choices[0].message.content);
     
-    // Sécurité Types
+    // B. NETTOYAGE & ENRICHISSEMENT AVEC LA BDD
     const validTypes = ['Aller', 'Retour', 'Consultation', 'Taxi', 'VSL', 'Ambulance'];
-    const safeRides = (result.rides || []).map(r => {
+    
+    // On utilise Promise.all pour faire les recherches DB en parallèle
+    const enrichedRides = await Promise.all((result.rides || []).map(async (r) => {
+        // 1. Correction du Type
         let t = r.type;
         if (t === 'Pec' || t === 'Départ') t = 'Aller';
         if (t === 'Récupération') t = 'Retour';
-        return { ...r, type: validTypes.includes(t) ? t : 'Aller' };
-    });
+        const finalType = validTypes.includes(t) ? t : 'Aller';
 
-    // Si l'IA renvoie une liste vide (bug), on déclenche l'erreur pour passer au manuel
-    if (safeRides.length === 0) throw new Error("IA a renvoyé une liste vide");
+        // 2. Recherche du Patient en BDD 🔍
+        let dbPatient = null;
+        let finalPhone = r.patientPhone;
+        let finalName = r.patientName;
 
-    res.json(safeRides);
+        if (r.patientName && r.patientName.length > 2) {
+            // On nettoie le nom (ex: "Mme Martin" -> "Martin") pour la recherche
+            const cleanSearchName = r.patientName.replace(/mme|mr|m\.|monsieur|madame/gi, '').trim();
+            
+            // Recherche "fuzzy" (qui contient le nom) insensible à la casse
+            dbPatient = await Patient.findOne({
+                $or: [
+                    { fullName: { $regex: cleanSearchName, $options: 'i' } }, // Recherche par nom
+                    { phone: r.patientPhone } // Ou par téléphone si l'IA l'a trouvé
+                ]
+            });
+
+            if (dbPatient) {
+                console.log(`✅ Patient reconnu en base : ${dbPatient.fullName}`);
+                // Si l'IA n'a pas trouvé de téléphone, on prend celui de la base
+                if (!finalPhone) finalPhone = dbPatient.phone;
+                // On normalise le nom avec celui de la base (plus propre)
+                finalName = dbPatient.fullName;
+            }
+        }
+
+        return {
+            ...r,
+            patientName: finalName,
+            patientPhone: finalPhone,
+            type: finalType,
+            // On ajoute un petit flag pour le debug
+            fromDb: !!dbPatient
+        };
+    }));
+
+    if (enrichedRides.length === 0) throw new Error("IA vide");
+
+    res.json(enrichedRides);
 
   } catch (error) {
-    console.error("⚠️ IA Échec/Erreur -> Passage Manuel. Raison :", error.message);
-    
-    // RECOURS AU MANUEL
+    console.error("⚠️ Erreur IA, passage manuel:", error.message);
     const manualResult = parseWithRegex(text);
-    // On renvoie un tableau contenant le résultat manuel
     res.json([manualResult]);
   }
 });
