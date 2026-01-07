@@ -54,7 +54,7 @@ export default function AgendaScreen({ navigation }) {
   const [showRideCreator, setShowRideCreator] = useState(false);
   const [importedRideData, setImportedRideData] = useState(null);
   const [analyzing, setAnalyzing] = useState(false); 
-  const [rideQueue, setRideQueue] = useState([]); // 👈 LA FILE D'ATTENTE EST DE RETOUR
+  const [rideQueue, setRideQueue] = useState([]); 
 
   // 3. MODALS
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
@@ -97,17 +97,15 @@ export default function AgendaScreen({ navigation }) {
   useEffect(() => {
     // Si le modal est FERMÉ et qu'il reste des courses dans la file...
     if (!showRideCreator && rideQueue.length > 0) {
-        // On prend la prochaine course (la première de la liste)
         const nextRideToValidate = rideQueue[0];
         setImportedRideData(nextRideToValidate);
-        
-        // Petite pause pour l'animation (confort visuel)
+        // Petite pause pour l'animation
         setTimeout(() => setShowRideCreator(true), 300);
     }
     
     // Si la file est vide et qu'on vient de finir
     if (!showRideCreator && rideQueue.length === 0 && importedRideData) {
-        setImportedRideData(null); // On nettoie
+        setImportedRideData(null); 
     }
   }, [rideQueue, showRideCreator]);
 
@@ -162,25 +160,17 @@ export default function AgendaScreen({ navigation }) {
     try {
         const response = await api.post('/ai/parse-ride', { text });
         let aiData = response.data; 
-
         console.log("📦 Réception Backend:", JSON.stringify(aiData, null, 2));
 
         // NORMALISATION DES DONNÉES
-        // 1. Si l'IA renvoie { rides: [...] }
-        if (aiData.rides && Array.isArray(aiData.rides)) {
-            aiData = aiData.rides;
-        }
-        
-        // 2. Si l'IA renvoie un seul objet, on le met dans un tableau
-        if (!Array.isArray(aiData) && aiData.patientName) {
-            aiData = [aiData];
-        }
+        if (aiData.rides && Array.isArray(aiData.rides)) aiData = aiData.rides;
+        if (!Array.isArray(aiData) && aiData.patientName) aiData = [aiData];
 
         const ridesFound = Array.isArray(aiData) ? aiData : [];
         
         if (ridesFound.length > 0) {
             Alert.alert("IA", `${ridesFound.length} course(s) détectée(s) ! Validation séquence...`);
-            setRideQueue(ridesFound); // 👈 ON REMPLIT LA FILE
+            setRideQueue(ridesFound); 
             Vibration.vibrate(50);
         } else {
              Alert.alert("Oups", "Aucune course claire trouvée.");
@@ -194,28 +184,38 @@ export default function AgendaScreen({ navigation }) {
     }
   };
 
-  // --- SAUVEGARDE FINALE AVEC QUEUE ---
-  const handleSaveNewRide = async (rideData) => {
+  // --- SAUVEGARDE UNIFIÉE (CRÉATION & MODIFICATION) ---
+  const handleSaveRide = async (rideData) => {
       try {
           const fullDate = moment(selectedDate).set({
               hour: moment(rideData.date).hour(),
               minute: moment(rideData.date).minute()
           }).toISOString();
 
-          const newRide = { ...rideData, date: fullDate, status: 'Confirmée' };
+          // 👇 LOGIQUE DE MODIFICATION (SI ID EXISTE)
+          if (rideData._id) {
+              const updatedRide = { ...rideData, date: fullDate };
+              await api.put(`/rides/${rideData._id}`, updatedRide);
+              Alert.alert("Succès", "Course modifiée !");
+              
+              setShowRideCreator(false);
+              setImportedRideData(null); // Reset propre
+          } 
+          // 👇 LOGIQUE DE CRÉATION (NOUVEAU)
+          else {
+              const newRide = { ...rideData, date: fullDate, status: 'Confirmée' };
+              await api.post('/rides', newRide);
+              Alert.alert("Succès", "Course ajoutée !");
 
-          await api.post('/rides', newRide);
+              // Gestion de la file d'attente UNIQUEMENT en création
+              setRideQueue(prevQueue => prevQueue.slice(1)); 
+              setShowRideCreator(false);
+          }
+
           loadData(true); 
-          Alert.alert("Succès", "Course ajoutée !");
-
-          // 👇 GESTION DE LA FILE D'ATTENTE
-          // On retire la course qu'on vient de traiter (la première)
-          setRideQueue(prevQueue => prevQueue.slice(1)); 
-          // On ferme le modal (le useEffect rouvrira le modal pour la suivante)
-          setShowRideCreator(false);
 
       } catch (e) {
-          Alert.alert("Erreur", "Impossible de créer la course.");
+          Alert.alert("Erreur", "Opération échouée.");
       }
   };
 
@@ -425,6 +425,17 @@ export default function AgendaScreen({ navigation }) {
         visible={modals.options}
         ride={activeRide}
         onClose={() => setModals({ ...modals, options: false })}
+        
+        // 👇 AJOUT FONCTION EDITER
+        onEdit={() => {
+            setModals({ ...modals, options: false });
+            // On charge les données de la course active dans le formulaire
+            setTimeout(() => {
+                setImportedRideData(activeRide); 
+                setShowRideCreator(true);
+            }, 200);
+        }}
+
         onCreateReturn={() => { setModals({ ...modals, options: false }); setTimeout(() => prepareReturnRide(), 100); }}
         onAddToCalendar={() => { addRideToCalendar(activeRide); setModals({ ...modals, options: false }); }}
         onOpenDocs={() => fetchRideDocuments(activeRide)}
@@ -457,12 +468,16 @@ export default function AgendaScreen({ navigation }) {
       <RideCreatorModal 
         visible={showRideCreator}
         onClose={() => {
-            // Si on ferme (annule), on passe à la suivante
-            setRideQueue(prev => prev.slice(1));
+            // Si c'est une création (pas d'ID), on retire de la file
+            // Si c'est une édition (il y a un ID), on ferme juste
+            if (importedRideData && !importedRideData._id) {
+                setRideQueue(prev => prev.slice(1));
+            }
             setShowRideCreator(false);
+            setImportedRideData(null);
         }}
         initialData={importedRideData}
-        onSave={handleSaveNewRide}
+        onSave={handleSaveRide} // Utilise la fonction unifiée
       />
 
       {/* MODAL CRÉATION / ÉDITION GROUPE */}
