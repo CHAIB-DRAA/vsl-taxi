@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, StyleSheet, 
-  ScrollView, Alert, Switch, KeyboardAvoidingView, Platform, Modal, FlatList, ActivityIndicator, Dimensions
+  ScrollView, Alert, Switch, KeyboardAvoidingView, Platform, Modal, ActivityIndicator, Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -12,23 +12,17 @@ import 'moment/locale/fr';
 import AddressAutocomplete from '../components/AddressAutocomplete'; 
 import { createRide, getPatients, createPatient } from '../services/api';
 import ScreenWrapper from '../components/ScreenWrapper';
-
-// 👇 IMPORT AJOUTÉ POUR L'HISTORIQUE
 import { useData } from '../contexts/DataContext'; 
 
-// 👇 LISTE MISE À JOUR
 const TOULOUSE_HOSPITALS = [
   "Purpan", "Rangueil", "Oncopole", 
   "Clinique Pasteur", "Cèdres", "Rive Gauche",
   "Médipôle", "St-Exupéry",
-  "Clinique Estella",       // Ajouté
-  "Hôpital Larrey",         // Ajouté
-  "Clinique Croix du Sud",  // Ajouté
-  "Clinique de l'Union"     // Ajouté
+  "Clinique Estella", "Hôpital Larrey", 
+  "Clinique Croix du Sud", "Clinique de l'Union"
 ];
 
-export default function CreateRideScreen({ navigation }) {
-  // 👇 RÉCUPÉRATION DE L'HISTORIQUE
+export default function CreateRideScreen({ navigation, route }) {
   const { allRides } = useData();
 
   // --- STATES ---
@@ -39,6 +33,8 @@ export default function CreateRideScreen({ navigation }) {
   const [startLocation, setStartLocation] = useState('');
   const [endLocation, setEndLocation] = useState('');
   
+  const [notes, setNotes] = useState(''); 
+
   const [date, setDate] = useState(new Date()); 
   const [returnDate, setReturnDate] = useState(new Date()); 
   
@@ -48,7 +44,10 @@ export default function CreateRideScreen({ navigation }) {
   
   const [type, setType] = useState('Aller');
   const [isRoundTrip, setIsRoundTrip] = useState(false);
-  const [loading, setLoading] = useState(false);
+  
+  const [loading, setLoading] = useState(false); // Chargement global (sauvegarde)
+  const [patientsLoading, setPatientsLoading] = useState(false); // Chargement liste patients
+  const [errorLoading, setErrorLoading] = useState(false); // Erreur chargement patients
 
   const [allPatients, setAllPatients] = useState([]);
   const [filteredPatients, setFilteredPatients] = useState([]);
@@ -57,33 +56,54 @@ export default function CreateRideScreen({ navigation }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [newPatient, setNewPatient] = useState({ fullName: '', phone: '', address: '' });
 
-  // --- LOGIQUE ---
+  // --- 1. CHARGEMENT INITIAL ---
   useEffect(() => { loadPatients(); }, []);
   
+  // --- 2. RÉCEPTION DONNÉES IA (MAGIC PASTE) ---
+  useEffect(() => {
+    if (route.params?.importedData) {
+        const data = route.params.importedData;
+        console.log("📥 Données reçues du Magic Paste :", data);
+
+        if (data.patientName) setPatientName(data.patientName);
+        if (data.patientPhone) setPatientPhone(data.patientPhone);
+        if (data.startLocation) setStartLocation(data.startLocation);
+        if (data.endLocation) setEndLocation(data.endLocation);
+        if (data.type) setType(data.type);
+        if (data.notes) setNotes(data.notes);
+
+        if (data.date) setDate(new Date(data.date));
+        else if (data.startTime) setDate(new Date(data.startTime));
+
+        navigation.setParams({ importedData: null });
+    }
+  }, [route.params]);
+
+  // --- 3. FONCTIONS LOGIQUES ---
+
+  // Chargement robuste des patients avec gestion d'erreur
   const loadPatients = async () => {
+    setPatientsLoading(true);
+    setErrorLoading(false);
     try {
       const data = await getPatients();
       setAllPatients(data || []);
-    } catch (err) { console.log("Erreur chargement patients"); }
+    } catch (err) { 
+      console.log("Erreur chargement patients:", err);
+      setErrorLoading(true);
+    } finally {
+      setPatientsLoading(false);
+    }
   };
 
-  // 👇 NOUVELLE FONCTION : SUGGESTIONS INTELLIGENTES
   const recentDestinations = useMemo(() => {
     if (!patientName || patientName.length < 2) return [];
-
-    // 1. Filtrer l'historique pour ce patient
     const history = allRides.filter(r => 
       r.patientName && 
       r.patientName.toLowerCase().trim() === patientName.toLowerCase().trim()
     );
-
-    // 2. Trier par date (plus récent d'abord)
     history.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    // 3. Extraire les destinations uniques
     const uniqueLocs = [...new Set(history.map(r => r.endLocation))].filter(l => l);
-
-    // 4. Retourner les 3 premières
     return uniqueLocs.slice(0, 3);
   }, [patientName, allRides]);
 
@@ -171,18 +191,21 @@ export default function CreateRideScreen({ navigation }) {
       setLoading(true);
       const rideData = {
         patientName, patientPhone, startLocation, endLocation,
-        date: date.toISOString(), returnDate: isRoundTrip ? returnDate.toISOString() : null, type, isRoundTrip
+        date: date.toISOString(), returnDate: isRoundTrip ? returnDate.toISOString() : null, 
+        type, isRoundTrip, notes
       };
       await createRide(rideData);
       Alert.alert('Succès', 'Course ajoutée au planning.');
+      
+      // Reset form
       setPatientName(''); setPatientPhone(''); setPatientAddressMem(''); 
-      setStartLocation(''); setEndLocation(''); setIsRoundTrip(false); 
+      setStartLocation(''); setEndLocation(''); setIsRoundTrip(false); setNotes('');
+      
       navigation.navigate('Agenda'); 
     } catch (error) { Alert.alert('Erreur', "Echec de l'enregistrement."); } 
     finally { setLoading(false); }
   };
 
-  // --- RENDU VISUEL ---
   return (
     <ScreenWrapper>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex: 1}}>
@@ -195,7 +218,7 @@ export default function CreateRideScreen({ navigation }) {
           
           <Text style={styles.pageTitle}>Nouvelle Course</Text>
 
-          {/* === 1. SECTION PATIENT (Z-Index élevé pour la liste) === */}
+          {/* === 1. PATIENT === */}
           <View style={[styles.sectionContainer, { zIndex: 2000, elevation: 2000 }]}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>1. LE PASSAGER</Text>
@@ -213,34 +236,51 @@ export default function CreateRideScreen({ navigation }) {
                 value={patientName}
                 onChangeText={handleNameChange}
               />
-              {patientName.length > 0 && (
+              
+              {/* Loader discret à droite */}
+              {patientsLoading && <ActivityIndicator size="small" color="#FF6B00" />}
+
+              {!patientsLoading && patientName.length > 0 && (
                 <TouchableOpacity onPress={() => {setPatientName(''); setShowSuggestions(false);}}>
                    <Ionicons name="close-circle" size={18} color="#CCC" />
                 </TouchableOpacity>
               )}
             </View>
             
+            {/* BOUTON REESSAYER EN CAS D'ERREUR RÉSEAU */}
+            {errorLoading && (
+                <TouchableOpacity onPress={loadPatients} style={styles.retryButton}>
+                    <Ionicons name="refresh" size={16} color="#D32F2F" />
+                    <Text style={styles.retryText}>Erreur connexion. Tap pour réessayer.</Text>
+                </TouchableOpacity>
+            )}
+
             {patientPhone ? <Text style={styles.helperText}>📞 {patientPhone}</Text> : null}
 
-            {/* LISTE SUGGESTIONS */}
+            {/* LISTE DÉROULANTE (CORRIGÉE AVEC SCROLLVIEW + MAP) */}
             {showSuggestions && (
               <View style={styles.suggestionsDropdown}>
-                <FlatList
-                  data={filteredPatients}
-                  keyExtractor={(item, i) => item._id || i.toString()}
-                  keyboardShouldPersistTaps="handled"
-                  renderItem={({ item }) => (
-                    <TouchableOpacity style={styles.suggestionRow} onPress={() => selectPatient(item)}>
+                <ScrollView 
+                    keyboardShouldPersistTaps="handled" 
+                    nestedScrollEnabled={true} 
+                    style={{ maxHeight: 200 }}
+                >
+                  {filteredPatients.map((item, index) => (
+                    <TouchableOpacity 
+                        key={item._id || index} 
+                        style={styles.suggestionRow} 
+                        onPress={() => selectPatient(item)}
+                    >
                       <Text style={styles.suggestionText}>{item.fullName}</Text>
                       {item.address && <Text style={styles.suggestionSubText}>{item.address}</Text>}
                     </TouchableOpacity>
-                  )}
-                />
+                  ))}
+                </ScrollView>
               </View>
             )}
           </View>
 
-          {/* === 2. SECTION TYPE === */}
+          {/* === 2. TYPE === */}
           <View style={[styles.sectionContainer, { zIndex: 1 }]}>
             <Text style={styles.sectionTitle}>2. TYPE DE TRANSPORT</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginTop: 10}}>
@@ -256,11 +296,10 @@ export default function CreateRideScreen({ navigation }) {
             </ScrollView>
           </View>
 
-          {/* === 3. SECTION ITINÉRAIRE (CORRIGÉ : TEXTE NOIR) === */}
+          {/* === 3. ITINÉRAIRE === */}
           <View style={[styles.sectionContainer, { zIndex: 1000, elevation: 1000 }]}>
             <Text style={styles.sectionTitle}>3. ITINÉRAIRE</Text>
             
-            {/* 👇 SUGGESTIONS DESTINATIONS RÉCENTES 👇 */}
             {recentDestinations.length > 0 && (
               <View style={styles.recentContainer}>
                 <Text style={styles.recentLabel}>Habitudes :</Text>
@@ -275,7 +314,6 @@ export default function CreateRideScreen({ navigation }) {
               </View>
             )}
 
-            {/* Chips Hôpitaux */}
             <View style={styles.hospitalRow}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 {TOULOUSE_HOSPITALS.map((h, i) => (
@@ -286,9 +324,7 @@ export default function CreateRideScreen({ navigation }) {
               </ScrollView>
             </View>
 
-            {/* BLOC PRINCIPAL STACKED */}
             <View style={styles.stackedInputContainer}>
-              
               <View style={styles.timelineContainer}>
                  <View style={styles.timelineDotStart} />
                  <View style={styles.timelineLine} />
@@ -296,7 +332,6 @@ export default function CreateRideScreen({ navigation }) {
               </View>
 
               <View style={styles.inputsColumn}>
-                 {/* DEPART */}
                  <View style={[styles.inputRow, { zIndex: 50, elevation: 50 }]}>
                     <Text style={styles.inputLabelSmall}>DE</Text>
                     <View style={{flex:1, paddingRight: 40}}> 
@@ -313,7 +348,6 @@ export default function CreateRideScreen({ navigation }) {
 
                  <View style={styles.separator} />
 
-                 {/* ARRIVÉE */}
                  <View style={[styles.inputRow, { zIndex: 40, elevation: 40 }]}>
                     <Text style={styles.inputLabelSmall}>À</Text>
                     <View style={{flex:1, paddingRight: 40}}>
@@ -333,20 +367,15 @@ export default function CreateRideScreen({ navigation }) {
                   <Ionicons name="swap-vertical" size={20} color="#FF6B00" />
               </TouchableOpacity>
             </View>
-
           </View>
 
-          {/* === 4. SECTION HORAIRES === */}
+          {/* === 4. DATE === */}
           <View style={[styles.sectionContainer, { zIndex: 1 }]}>
             <View style={styles.sectionHeader}>
                <Text style={styles.sectionTitle}>4. DATE & HEURE</Text>
                <View style={styles.switchRow}>
                   <Text style={[styles.switchText, isRoundTrip && {color:'#FF6B00'}]}>Retour ?</Text>
-                  <Switch 
-                    value={isRoundTrip} 
-                    onValueChange={setIsRoundTrip} 
-                    trackColor={{ false: "#EEE", true: "#FF6B00" }} 
-                  />
+                  <Switch value={isRoundTrip} onValueChange={setIsRoundTrip} trackColor={{ false: "#EEE", true: "#FF6B00" }} />
                </View>
             </View>
 
@@ -373,7 +402,25 @@ export default function CreateRideScreen({ navigation }) {
             </View>
           </View>
 
-          {/* FOOTER FIXE EN BAS */}
+          {/* === 5. NOTES === */}
+          <View style={[styles.sectionContainer, { zIndex: 1 }]}>
+            <Text style={styles.sectionTitle}>5. NOTES (OPTIONNEL)</Text>
+            <View style={styles.notesBox}>
+                <Ionicons name="document-text-outline" size={20} color="#999" style={{marginTop: 5, marginRight: 8}} />
+                <TextInput 
+                    style={styles.notesInput} 
+                    placeholder="Ex: Patient en fauteuil, code porte 12A..." 
+                    placeholderTextColor="#999"
+                    multiline={true}
+                    numberOfLines={3}
+                    value={notes}
+                    onChangeText={setNotes}
+                    textAlignVertical="top"
+                />
+            </View>
+          </View>
+
+          {/* FOOTER */}
           <View style={styles.footer}>
             <TouchableOpacity style={styles.mainButton} onPress={handleCreate} disabled={loading}>
               {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.mainButtonText}>VALIDER LA COURSE</Text>}
@@ -391,7 +438,6 @@ export default function CreateRideScreen({ navigation }) {
                 <TextInput style={styles.modalField} placeholder="Nom & Prénom" placeholderTextColor="#999" autoFocus value={newPatient.fullName} onChangeText={t => setNewPatient({...newPatient, fullName: t})} />
                 <TextInput style={styles.modalField} placeholder="Adresse (complète)" placeholderTextColor="#999" value={newPatient.address} onChangeText={t => setNewPatient({...newPatient, address: t})} />
                 <TextInput style={styles.modalField} placeholder="Téléphone" placeholderTextColor="#999" keyboardType="phone-pad" value={newPatient.phone} onChangeText={t => setNewPatient({...newPatient, phone: t})} />
-                
                 <View style={styles.modalBtns}>
                    <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.cancelBtn}><Text style={styles.cancelTxt}>Annuler</Text></TouchableOpacity>
                    <TouchableOpacity onPress={saveNewPatient} style={styles.saveBtn}><Text style={styles.saveTxt}>Enregistrer</Text></TouchableOpacity>
@@ -412,11 +458,9 @@ export default function CreateRideScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  // LAYOUT
   container: { flex: 1, backgroundColor: '#F8F9FA' },
   pageTitle: { fontSize: 26, fontWeight: '800', color: '#111', marginTop: 20, marginBottom: 15, paddingHorizontal: 20 },
 
-  // BLOCS COMMUNS
   sectionContainer: {
     backgroundColor: '#FFF',
     marginHorizontal: 15,
@@ -429,19 +473,18 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 12, fontWeight: '800', color: '#B0BEC5', letterSpacing: 1 },
   linkText: { color: '#FF6B00', fontWeight: 'bold', fontSize: 14 },
 
-  // INPUTS PATIENT
   inputBox: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#F3F4F6', 
-    borderRadius: 12, 
-    height: 50, 
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: '#EEE'
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', 
+    borderRadius: 12, height: 50, paddingHorizontal: 15, borderWidth: 1, borderColor: '#EEE'
   },
   inputField: { flex: 1, fontSize: 16, color: '#000', fontWeight: '600' },
   helperText: { marginTop: 8, color: '#2E7D32', fontSize: 12, fontWeight: '700' },
+
+  // Bouton Réessayer
+  retryButton: {
+    flexDirection: 'row', alignItems: 'center', marginTop: 10, padding: 8, backgroundColor: '#FFEBEE', borderRadius: 8
+  },
+  retryText: { color: '#D32F2F', fontSize: 12, fontWeight: 'bold', marginLeft: 5 },
 
   suggestionsDropdown: { 
     position: 'absolute', top: 85, left: 0, right: 0, 
@@ -453,30 +496,22 @@ const styles = StyleSheet.create({
   suggestionText: { fontWeight: 'bold', fontSize: 15, color: '#333' },
   suggestionSubText: { fontSize: 12, color: '#888', marginTop: 2 },
 
-  // TYPES
   typeButton: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#EEE', borderRadius: 20, paddingHorizontal: 18, paddingVertical: 10, marginRight: 10 },
   typeButtonActive: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
   typeButtonText: { color: '#666', fontWeight: '600', fontSize: 14 },
 
-  // ITINÉRAIRE
   hospitalRow: { marginBottom: 15 },
   hospitalChip: { backgroundColor: '#F0F4C3', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginRight: 8 },
   hospitalText: { color: '#827717', fontWeight: '700', fontSize: 12 },
 
-  // 👇 STYLES SUGGESTIONS
   recentContainer: { marginBottom: 10 },
   recentLabel: { fontSize: 12, color: '#1565C0', marginBottom: 5, fontWeight: 'bold', fontStyle: 'italic' },
   recentChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E3F2FD', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginRight: 8, borderWidth: 1, borderColor: '#90CAF9' },
   recentChipText: { color: '#1565C0', fontSize: 12, fontWeight: 'bold' },
 
-  // --- STACKED INPUT CONTAINER ---
   stackedInputContainer: {
-    backgroundColor: '#FFFFFF', 
-    borderRadius: 16,
-    paddingVertical: 5,
-    paddingHorizontal: 15,
-    position: 'relative',
-    borderWidth: 1, borderColor: '#E0E0E0',
+    backgroundColor: '#FFFFFF', borderRadius: 16, paddingVertical: 5, paddingHorizontal: 15,
+    position: 'relative', borderWidth: 1, borderColor: '#E0E0E0',
   },
   timelineContainer: { position: 'absolute', left: 15, top: 25, bottom: 25, width: 20, alignItems: 'center', justifyContent: 'space-between' },
   timelineDotStart: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#4CAF50' },
@@ -496,7 +531,6 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 3, shadowOffset: { width: 0, height: 2 }
   },
 
-  // DATES
   switchRow: { flexDirection: 'row', alignItems: 'center' },
   switchText: { fontSize: 13, color: '#666', marginRight: 10, fontWeight: '600' },
   dateGrid: { flexDirection: 'row', gap: 15 },
@@ -506,12 +540,21 @@ const styles = StyleSheet.create({
   dateBig: { fontSize: 22, fontWeight: '800', color: '#333' },
   dateSmall: { fontSize: 12, color: '#666' },
 
-  // FOOTER
+  notesBox: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    backgroundColor: '#F9FAFB', borderRadius: 12, 
+    padding: 10, borderWidth: 1, borderColor: '#EEE',
+    marginTop: 10
+  },
+  notesInput: {
+    flex: 1, fontSize: 15, color: '#333', 
+    minHeight: 60, textAlignVertical: 'top' 
+  },
+
   footer: { padding: 20 },
   mainButton: { backgroundColor: '#111', borderRadius: 16, height: 60, justifyContent: 'center', alignItems: 'center', shadowColor: "#FF6B00", shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
   mainButtonText: { color: '#FFF', fontWeight: '800', fontSize: 16, letterSpacing: 1 },
 
-  // MODAL
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 25 },
   modalCard: { backgroundColor: '#FFF', borderRadius: 24, padding: 25 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },

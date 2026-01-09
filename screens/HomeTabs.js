@@ -1,149 +1,136 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, 
-  ActivityIndicator, Alert 
+  ActivityIndicator, Alert, StatusBar, Platform, Dimensions 
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import moment from 'moment';
 import 'moment/locale/fr';
 
-// 👇 1. IMPORTS ANTI-FRAUDE
+// --- MODULES ---
 import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
-import { extractSecuNumber } from '../services/ocrService'; // Ton service OCR
 
+// --- SERVICES ---
 import { getRides } from '../services/api';
+import { extractSecuNumber } from '../services/ocrService';
+import { calculatePrice } from '../utils/pricing'; 
 
-// CONFIGURATION TARIFS (CPAM)
-const TARIFS = {
-  TAXI: { priseEnCharge: 2.60, prixKm: 1.80 },
-  VSL: { forfait: 14.50, prixKm: 1.05 },
-  AMBULANCE: { forfait: 65.00, prixKm: 2.50 }
-};
-
-const calculateRidePrice = (ride) => {
-  if (!ride.realDistance) return 0;
-  const dist = parseFloat(ride.realDistance);
-  const tolls = parseFloat(ride.tolls || 0);
-  let basePrice = 0;
-
-  switch (ride.type) {
-    case 'Ambulance': basePrice = TARIFS.AMBULANCE.forfait + (dist * TARIFS.AMBULANCE.prixKm); break;
-    case 'VSL': basePrice = TARIFS.VSL.forfait + (dist * TARIFS.VSL.prixKm); break;
-    default: basePrice = TARIFS.TAXI.priseEnCharge + (dist * TARIFS.TAXI.prixKm);
-  }
-  return basePrice + tolls;
-};
+const { width } = Dimensions.get('window');
 
 export default function HomeScreen({ navigation }) {
-  const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [scanning, setScanning] = useState(false); // Loader spécifique scan
-
+  const [scanning, setScanning] = useState(false);
+  
   const [stats, setStats] = useState({
     todayCount: 0,
     monthEarnings: 0,
     nextRide: null
   });
 
+  // Salutation dynamique (Bonjour / Bonsoir)
+  const getGreeting = () => {
+    const hour = moment().hour();
+    return hour >= 18 ? "Bonsoir," : "Bonjour,";
+  };
+
   const loadDashboard = useCallback(async () => {
     try {
       setLoading(true);
       const data = await getRides();
       
-      const today = moment().format('YYYY-MM-DD');
-      const currentMonth = moment().format('MM-YYYY');
+      const todayStr = moment().format('YYYY-MM-DD');
+      const currentMonthStr = moment().format('MM-YYYY');
       const now = moment();
 
-      const todayRides = data.filter(r => moment(r.date).format('YYYY-MM-DD') === today);
+      // 1. Courses du jour
+      const todayRides = data.filter(r => moment(r.date).format('YYYY-MM-DD') === todayStr);
       
+      // 2. Prochaine course (Future)
       const upcoming = todayRides
-        .filter(r => moment(r.date).isAfter(now))
+        .filter(r => moment(r.date || r.startTime).isAfter(now))
         .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
 
+      // 3. CA Mois (Basé sur Convention 2025)
       const finishedRidesThisMonth = data.filter(r => 
         r.status === 'Terminée' && 
-        moment(r.date).format('MM-YYYY') === currentMonth
+        moment(r.date).format('MM-YYYY') === currentMonthStr
       );
 
-      const totalEarnings = finishedRidesThisMonth.reduce((acc, ride) => acc + calculateRidePrice(ride), 0);
+      const totalEarnings = finishedRidesThisMonth.reduce((acc, ride) => {
+        return acc + parseFloat(calculatePrice(ride)); 
+      }, 0);
 
-      setRides(todayRides);
       setStats({
         todayCount: todayRides.length,
-        monthEarnings: Math.round(totalEarnings),
+        monthEarnings: totalEarnings.toFixed(2),
         nextRide: upcoming
       });
 
     } catch (error) {
-      console.error("Dashboard Error:", error);
+      console.error("Erreur Dashboard:", error);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { loadDashboard(); }, [loadDashboard]);
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+    }, [loadDashboard])
+  );
 
-  // 👇 2. NOUVELLE FONCTION DE SCAN (Compatible Emulateur)
+  // --- SCANNER ANTI-FRAUDE ---
   const handleAntiFraudScan = async () => {
-    
-    // Fonction interne pour traiter l'image (évite de répéter le code)
     const processImage = async (uri) => {
-      setScanning(true);
-      // Appel à ton service OCR intelligent
-      const nir = await extractSecuNumber(uri);
-      setScanning(false);
-
-      if (nir) {
-        await Clipboard.setStringAsync(nir);
-        Alert.alert(
-          "NIR Copié !",
-          `Numéro : ${nir}\n\nOuverture d'AmeliPro pour vérification...`,
-          [
-            { text: "Annuler", style: "cancel" },
-            { 
-              text: "Ouvrir AmeliPro", 
-              onPress: () => Linking.openURL('https://professionnels.ameli.fr/') 
-            }
-          ]
-        );
-      } else {
-        Alert.alert("Échec", "Aucun numéro de sécu lisible. Essayez une image plus nette.");
+      try {
+        setScanning(true);
+        const nir = await extractSecuNumber(uri); 
+        
+        if (nir) {
+          await Clipboard.setStringAsync(nir);
+          Alert.alert(
+            "✅ NIR Copié !",
+            `Numéro : ${nir}\n\nOuvrir AmeliPro maintenant ?`,
+            [
+              { text: "Non", style: "cancel" },
+              { text: "Oui, ouvrir", onPress: () => Linking.openURL('https://professionnels.ameli.fr/') }
+            ]
+          );
+        } else {
+          Alert.alert("Info", "Aucun numéro détecté. Essayez de mieux cadrer.");
+        }
+      } catch (e) {
+        Alert.alert("Erreur", "Analyse impossible.");
+      } finally {
+        setScanning(false);
       }
     };
 
-    // Menu de choix
     Alert.alert(
-      "Vérification Droits",
-      "Choisir la méthode de scan :",
+      "Scanner Carte Vitale",
+      "Sélectionnez une méthode :",
       [
         {
-          text: "📷 Caméra",
+          text: "📷 Appareil Photo",
           onPress: async () => {
-            const permission = await ImagePicker.requestCameraPermissionsAsync();
-            if (!permission.granted) return Alert.alert("Erreur", "Accès caméra requis");
-            
-            const result = await ImagePicker.launchCameraAsync({
-              allowsEditing: true, // Important pour recadrer sur le numéro
-              quality: 1,
-            });
-            
-            if (!result.canceled) await processImage(result.assets[0].uri);
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status === 'granted') {
+                const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 1 });
+                if (!result.canceled) processImage(result.assets[0].uri);
+            }
           }
         },
         {
-          text: "🖼️ Galerie ",
+          text: "🖼️ Galerie",
           onPress: async () => {
-            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (!permission.granted) return Alert.alert("Erreur", "Accès galerie requis");
-
-            const result = await ImagePicker.launchImageLibraryAsync({
-              allowsEditing: true, // Important pour recadrer sur le numéro
-              quality: 1,
-            });
-
-            if (!result.canceled) await processImage(result.assets[0].uri);
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status === 'granted') {
+                const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, quality: 1 });
+                if (!result.canceled) processImage(result.assets[0].uri);
+            }
           }
         },
         { text: "Annuler", style: "cancel" }
@@ -153,170 +140,236 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#E65100" />
+      
       <ScrollView 
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadDashboard} tintColor="#FF6B00"/>}
+        contentContainerStyle={styles.scrollContent} 
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadDashboard} tintColor="#FFF"/>}
+        showsVerticalScrollIndicator={false}
       >
-        {/* HEADER */}
+        {/* === HEADER PREMIUM === */}
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <View>
-              <Text style={styles.greeting}>Bonjour,</Text>
+              <Text style={styles.greeting}>{getGreeting()}</Text>
               <Text style={styles.date}>{moment().format('dddd D MMMM')}</Text>
             </View>
-            <TouchableOpacity onPress={() => navigation.navigate('Profile')} style={styles.avatarBtn}>
-              <Ionicons name="person" size={20} color="#FF6B00" />
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.avatarBtn}>
+              <Ionicons name="settings-outline" size={22} color="#E65100" />
             </TouchableOpacity>
           </View>
 
+          {/* STATS CARDS */}
           <View style={styles.statsRow}>
             <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Aujourd'hui</Text>
-              <Text style={styles.statValue}>{stats.todayCount}</Text>
-              <Text style={styles.statSub}>Courses</Text>
+              <View style={[styles.iconContainer, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                <Ionicons name="speedometer-outline" size={20} color="#FFF" />
+              </View>
+              <View>
+                <Text style={styles.statValue}>{stats.todayCount}</Text>
+                <Text style={styles.statLabel}>Courses du jour</Text>
+              </View>
             </View>
+            
             <View style={styles.statCard}>
-              <Text style={styles.statLabel}>CA du Mois</Text>
-              <Text style={styles.statValue}>{stats.monthEarnings} €</Text>
-              <Text style={styles.statSub}>Estimé (CPAM)</Text>
+              <View style={[styles.iconContainer, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                <Ionicons name="cash-outline" size={20} color="#FFF" />
+              </View>
+              <View>
+                <Text style={styles.statValue}>{stats.monthEarnings} €</Text>
+                <Text style={styles.statLabel}>CA Estimé</Text>
+              </View>
             </View>
           </View>
         </View>
 
-        {/* 👇 3. SECTION OUTILS (Scan) */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Outils Chauffeur</Text>
-          <TouchableOpacity 
-            style={styles.toolCard} 
-            onPress={handleAntiFraudScan} 
-            disabled={scanning}
-          >
-            <View style={[styles.iconBox, { backgroundColor: '#E8F5E9', marginBottom: 0, marginRight: 15 }]}>
-               {scanning ? <ActivityIndicator color="#2E7D32"/> : <Ionicons name="scan" size={24} color="#2E7D32" />}
-            </View>
-            <View style={{flex: 1}}>
-                <Text style={styles.toolTitle}>Vérif. Droits Ameli</Text>
-                <Text style={styles.toolSub}>Scanner Carte Vitale → Copier NIR</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={24} color="#CCC" />
-          </TouchableOpacity>
-          
-        </View>
+        <View style={styles.bodyContainer}>
+            
+            {/* === PROCHAIN DÉPART (HERO SECTION) === */}
+            <Text style={styles.sectionTitle}>Prochain Départ</Text>
+            {stats.nextRide ? (
+                <TouchableOpacity 
+                    style={styles.nextRideCard}
+                    activeOpacity={0.9}
+                    onPress={() => navigation.navigate('Agenda')} 
+                >
+                    <View style={styles.ticketLeft}>
+                        <View style={styles.timeBlock}>
+                            <Text style={styles.bigTime}>{moment(stats.nextRide.date).format('HH:mm')}</Text>
+                            <Text style={styles.timeLabel}>DÉPART</Text>
+                        </View>
+                    </View>
 
-        {/* PROCHAINE COURSE */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Prochain Départ</Text>
-          {stats.nextRide ? (
-            <View style={styles.nextRideCard}>
-              <View style={styles.nextRideHeader}>
-                <Text style={styles.nextTime}>{moment(stats.nextRide.date).format('HH:mm')}</Text>
-                <View style={styles.liveBadge}>
-                  <View style={styles.dot} />
-                  <Text style={styles.liveText}>À venir</Text>
+                    <View style={styles.ticketDivider}>
+                        <View style={[styles.notch, {top: -10}]} />
+                        <View style={styles.dashedLine} />
+                        <View style={[styles.notch, {bottom: -10}]} />
+                    </View>
+
+                    <View style={styles.ticketRight}>
+                        <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start'}}>
+                            <Text style={styles.patientName} numberOfLines={1}>{stats.nextRide.patientName}</Text>
+                            <View style={[styles.typeBadge, {backgroundColor: stats.nextRide.type === 'Ambulance' ? '#FFEBEE' : '#E3F2FD'}]}>
+                                <Text style={{color: stats.nextRide.type === 'Ambulance' ? '#D32F2F' : '#1565C0', fontWeight:'bold', fontSize:10}}>
+                                    {stats.nextRide.type}
+                                </Text>
+                            </View>
+                        </View>
+                        
+                        <View style={styles.routeMini}>
+                            <View style={styles.routePoint}>
+                                <View style={[styles.dot, {backgroundColor:'#4CAF50'}]}/>
+                                <Text style={styles.routeText} numberOfLines={1}>{stats.nextRide.startLocation}</Text>
+                            </View>
+                            <View style={styles.routePoint}>
+                                <View style={[styles.dot, {backgroundColor:'#FF6B00'}]}/>
+                                <Text style={styles.routeText} numberOfLines={1}>{stats.nextRide.endLocation}</Text>
+                            </View>
+                        </View>
+                    </View>
+                </TouchableOpacity>
+            ) : (
+                <View style={styles.emptyCard}>
+                    <Ionicons name="checkmark-circle-outline" size={48} color="#CCC" />
+                    <Text style={styles.emptyText}>Aucune course à venir aujourd'hui.</Text>
+                    <Text style={styles.emptySubText}>Profitez de votre pause ! ☕</Text>
                 </View>
-              </View>
-              <Text style={styles.patientName}>{stats.nextRide.patientName}</Text>
-              <View style={styles.routeRow}>
-                <Ionicons name="location" size={16} color="#4CAF50" />
-                <Text style={styles.routeText} numberOfLines={1}>{stats.nextRide.startLocation}</Text>
-              </View>
-              <View style={styles.routeLine} />
-              <View style={styles.routeRow}>
-                <Ionicons name="flag" size={16} color="#FF6B00" />
-                <Text style={styles.routeText} numberOfLines={1}>{stats.nextRide.endLocation}</Text>
-              </View>
-              <TouchableOpacity 
-                style={styles.goBtn}
-                onPress={() => navigation.navigate('History')}
-              >
-                <Text style={styles.goBtnText}>Voir détails</Text>
-                <Ionicons name="arrow-forward" size={16} color="#FFF" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.emptyCard}>
-              <Ionicons name="bed-outline" size={40} color="#CCC" />
-              <Text style={styles.emptyText}>Aucune course à venir aujourd'hui.</Text>
-            </View>
-          )}
-        </View>
+            )}
 
-        {/* ACCÈS RAPIDE */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Accès Rapide</Text>
-          <View style={styles.quickActions}>
-            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('AddRide')}>
-              <View style={[styles.iconBox, { backgroundColor: '#E3F2FD' }]}>
-                <Ionicons name="add-circle" size={24} color="#1565C0" />
-              </View>
-              <Text style={styles.actionText}>Nouvelle</Text>
+            {/* === OUTIL SCANNER === */}
+            <Text style={styles.sectionTitle}>Outils Rapides</Text>
+            <TouchableOpacity 
+                style={styles.scannerCard} 
+                onPress={handleAntiFraudScan} 
+                disabled={scanning}
+                activeOpacity={0.8}
+            >
+                <View style={styles.scannerIconBox}>
+                    {scanning ? <ActivityIndicator color="#FFF"/> : <Ionicons name="scan" size={24} color="#FFF" />}
+                </View>
+                <View style={{flex: 1}}>
+                    <Text style={styles.scannerTitle}>Scanner Droits Ameli</Text>
+                    <Text style={styles.scannerSub}>Vérification Carte Vitale / Attestation</Text>
+                </View>
+                <View style={styles.arrowContainer}>
+                     <Ionicons name="chevron-forward" size={20} color="#2E7D32" />
+                </View>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('Patients')}>
-              <View style={[styles.iconBox, { backgroundColor: '#E8F5E9' }]}>
-                <Ionicons name="people" size={24} color="#2E7D32" />
-              </View>
-              <Text style={styles.actionText}>Patients</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('History')}>
-              <View style={[styles.iconBox, { backgroundColor: '#FFF3E0' }]}>
-                <Ionicons name="calendar" size={24} color="#EF6C00" />
-              </View>
-              <Text style={styles.actionText}>Historique</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
 
+            {/* === GRILLE NAVIGATION === */}
+            <View style={styles.gridMenu}>
+                <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('Agenda')}>
+                    <View style={[styles.menuIcon, {backgroundColor:'#E3F2FD'}]}><Ionicons name="calendar" size={26} color="#1565C0"/></View>
+                    <Text style={styles.menuText}>Planning</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('History')}>
+                    <View style={[styles.menuIcon, {backgroundColor:'#FFF3E0'}]}><Ionicons name="stats-chart" size={26} color="#EF6C00"/></View>
+                    <Text style={styles.menuText}>Activité</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('Patients')}>
+                    <View style={[styles.menuIcon, {backgroundColor:'#E8F5E9'}]}><Ionicons name="people" size={26} color="#2E7D32"/></View>
+                    <Text style={styles.menuText}>Patients</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('Settings')}>
+                    <View style={[styles.menuIcon, {backgroundColor:'#F3E5F5'}]}><Ionicons name="options" size={26} color="#6A1B9A"/></View>
+                    <Text style={styles.menuText}>Réglages</Text>
+                </TouchableOpacity>
+            </View>
+
+        </View>
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  container: { flex: 1, backgroundColor: '#F4F6F8' }, // Fond très légèrement gris pour le contraste
+  
+  // SCROLL CONTENT : LE FIX EST ICI 👇
+  scrollContent: {
+    paddingBottom: 100, 
+  },
+
+  // HEADER AVANCÉ
   header: { 
     backgroundColor: '#FF6B00', 
-    padding: 20, 
-    paddingTop: 60, 
-    borderBottomLeftRadius: 30, 
-    borderBottomRightRadius: 30, 
-    paddingBottom: 40 
+    paddingHorizontal: 20, 
+    paddingTop: Platform.OS === 'ios' ? 60 : 50, 
+    paddingBottom: 30, 
+    borderBottomLeftRadius: 35, 
+    borderBottomRightRadius: 35,
+    elevation: 8,
+    shadowColor: '#FF6B00', shadowOffset: {width:0, height:4}, shadowOpacity:0.3, shadowRadius:8
   },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  greeting: { color: 'rgba(255,255,255,0.8)', fontSize: 16 },
-  date: { color: '#FFF', fontSize: 22, fontWeight: 'bold', textTransform: 'capitalize' },
-  avatarBtn: { width: 40, height: 40, backgroundColor: '#FFF', borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  statCard: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 15, padding: 15, width: '48%', alignItems: 'center' },
-  statLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginBottom: 5 },
-  statValue: { color: '#FFF', fontSize: 24, fontWeight: 'bold' },
-  statSub: { color: 'rgba(255,255,255,0.6)', fontSize: 10 },
-  section: { padding: 20, paddingBottom: 0 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333', marginBottom: 15 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25 },
+  greeting: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: '500' },
+  date: { color: '#FFF', fontSize: 24, fontWeight: '800', textTransform: 'capitalize' },
+  avatarBtn: { width: 44, height: 44, backgroundColor: '#FFF', borderRadius: 22, justifyContent: 'center', alignItems: 'center', elevation: 4 },
   
-  // STYLE OUTIL
-  toolCard: { 
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', 
-    padding: 15, borderRadius: 15, elevation: 2, marginBottom: 10 
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 15 },
+  statCard: { 
+    flex: 1, 
+    backgroundColor: 'rgba(255,255,255,0.15)', 
+    borderRadius: 20, 
+    padding: 15, 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)'
   },
-  toolTitle: { fontWeight: 'bold', fontSize: 16, color: '#333' },
-  toolSub: { fontSize: 12, color: '#666', marginTop: 2 },
+  iconContainer: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  statValue: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
+  statLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: '500' },
 
-  nextRideCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 20, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
-  nextRideHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  nextTime: { fontSize: 28, fontWeight: 'bold', color: '#333' },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E9', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 10 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4CAF50', marginRight: 5 },
-  liveText: { color: '#2E7D32', fontWeight: 'bold', fontSize: 12 },
-  patientName: { fontSize: 18, color: '#555', marginBottom: 15 },
-  routeRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 2 },
-  routeText: { marginLeft: 10, color: '#333', flex: 1 },
-  routeLine: { height: 15, width: 1, backgroundColor: '#DDD', marginLeft: 7.5, marginVertical: 2 },
-  goBtn: { marginTop: 15, backgroundColor: '#FF6B00', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: 12, borderRadius: 10 },
-  goBtnText: { color: '#FFF', fontWeight: 'bold', marginRight: 5 },
-  emptyCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 30, alignItems: 'center', borderStyle: 'dashed', borderWidth: 2, borderColor: '#EEE' },
-  emptyText: { color: '#999', marginTop: 10 },
-  quickActions: { flexDirection: 'row', justifyContent: 'space-between', paddingBottom: 30 },
-  actionBtn: { width: '30%', backgroundColor: '#FFF', padding: 15, borderRadius: 15, alignItems: 'center', elevation: 2 },
-  iconBox: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  actionText: { fontWeight: '600', color: '#555', fontSize: 12 }
+  bodyContainer: { padding: 20, marginTop: -10 },
+  sectionTitle: { fontSize: 17, fontWeight: '800', color: '#333', marginBottom: 15, marginLeft: 5, marginTop: 10 },
+
+  // NEXT RIDE CARD STYLE BILLET
+  nextRideCard: { 
+    flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 20, elevation: 4, marginBottom: 20,
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, height: 110
+  },
+  ticketLeft: { width: 90, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF', borderTopLeftRadius: 20, borderBottomLeftRadius: 20 },
+  timeBlock: { alignItems: 'center' },
+  bigTime: { fontSize: 22, fontWeight: '900', color: '#333' },
+  timeLabel: { fontSize: 10, color: '#999', fontWeight: 'bold', marginTop: 2 },
+  
+  ticketDivider: { width: 20, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  notch: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#F4F6F8', position: 'absolute', zIndex: 1 },
+  dashedLine: { width: 1, height: '80%', borderLeftWidth: 1, borderLeftColor: '#DDD', borderStyle: 'dashed' },
+
+  ticketRight: { flex: 1, padding: 15, justifyContent: 'center' },
+  patientName: { fontSize: 16, fontWeight: 'bold', color: '#333', maxWidth: '75%' },
+  typeBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  
+  routeMini: { marginTop: 10 },
+  routePoint: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  dot: { width: 6, height: 6, borderRadius: 3, marginRight: 8 },
+  routeText: { fontSize: 13, color: '#555', flex: 1 },
+
+  emptyCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 30, alignItems: 'center', borderStyle: 'dashed', borderWidth: 2, borderColor: '#EEE', marginBottom: 20 },
+  emptyText: { color: '#555', marginTop: 10, fontWeight: 'bold', fontSize: 16 },
+  emptySubText: { color: '#999', marginTop: 5, fontSize: 13 },
+
+  // SCANNER CARD PRO
+  scannerCard: { 
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F8E9', 
+    padding: 12, borderRadius: 16, marginBottom: 25, borderWidth: 1, borderColor: '#C8E6C9'
+  },
+  scannerIconBox: { width: 44, height: 44, backgroundColor: '#2E7D32', borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginRight: 15, elevation: 2 },
+  scannerTitle: { fontWeight: 'bold', fontSize: 15, color: '#1B5E20' },
+  scannerSub: { fontSize: 12, color: '#388E3C', marginTop: 2 },
+  arrowContainer: { backgroundColor: '#FFF', borderRadius: 15, width: 30, height: 30, justifyContent: 'center', alignItems: 'center' },
+
+  // GRID MENU RECTANGLES
+  gridMenu: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  menuItem: { 
+    width: '48%', backgroundColor: '#FFF', borderRadius: 20, padding: 15, alignItems: 'center', marginBottom: 15, 
+    elevation: 2, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 5
+  },
+  menuIcon: { width: 55, height: 55, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  menuText: { fontWeight: '700', color: '#444', fontSize: 14 }
 });
