@@ -1,34 +1,35 @@
 const nodemailer = require('nodemailer');
 
 const sendEmail = async (options) => {
-  // 1. CONFIGURATION ROBUSTE (Port 465 + SSL)
+  // CONFIGURATION SPÉCIALE CLOUD (Render/Heroku/etc)
   const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com', // On force l'adresse exacte
-    port: 465,              // On force le port SSL (plus fiable que 587)
-    secure: true,           // true pour le port 465
+    host: 'smtp.gmail.com',
+    port: 587,              // On passe au port 587 (STARTTLS) qui passe mieux les pare-feu
+    secure: false,          // false pour le port 587 (c'est normal)
+    requireTLS: true,       // On exige quand même la sécurité
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS
     },
-    // On ajoute des timeouts pour ne pas bloquer indéfiniment
-    connectionTimeout: 10000, // 10 secondes max pour se connecter
-    greetingTimeout: 5000,    // 5 secondes pour dire bonjour
-    socketTimeout: 10000      // 10 secondes pour les échanges
+    // 👇 LA CLÉ MAGIQUE POUR RENDER :
+    family: 4,              // On force l'IPv4 (car l'IPv6 de Google bug souvent sur le cloud)
+    // ----------------------------
+    connectionTimeout: 10000, 
+    greetingTimeout: 5000
   });
 
-  console.log("🔌 Tentative de connexion SMTP (Port 465)...");
+  console.log("🔌 Tentative connexion SMTP (Port 587 + IPv4)...");
 
-  // 2. VERIFICATION
+  // Vérification
   try {
     await transporter.verify();
     console.log("✅ Connexion SMTP réussie !");
   } catch (error) {
-    console.error("❌ ECHEC Connexion SMTP :", error.message);
-    // On lance une erreur pour que le Frontend arrête de tourner
-    throw new Error("Impossible de contacter le serveur Gmail (Timeout ou Auth).");
+    console.error("❌ ECHEC SMTP :", error.message);
+    throw new Error("Impossible de contacter Gmail. Vérifiez les variables d'environnement.");
   }
 
-  // 3. MESSAGE
+  // Préparation du mail
   const message = {
     from: `"Support Taxi App" <${process.env.EMAIL_USER}>`,
     to: options.email,
@@ -39,13 +40,13 @@ const sendEmail = async (options) => {
         <h2 style="color: #FF6B00;">${options.subject}</h2>
         <p>${options.message}</p>
         ${options.token ? `<h1 style="background: #eee; padding: 10px; display: inline-block; border-radius: 5px;">${options.token}</h1>` : ''}
-        <p>Ceci est un message automatique, merci de ne pas répondre.</p>
+        <p>Code valable 1 heure.</p>
       </div>
     `
   };
 
-  // 4. ENVOI
-  console.log(`📤 Envoi en cours vers ${options.email}...`);
+  // Envoi
+  console.log(`📤 Envoi vers ${options.email}...`);
   await transporter.sendMail(message);
   console.log("✅ Email envoyé !");
 };
