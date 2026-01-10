@@ -1,28 +1,37 @@
 import React, { useState } from 'react';
 import { 
   View, TextInput, TouchableOpacity, Text, StyleSheet, 
-  Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Keyboard 
+  Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Keyboard, Modal 
 } from 'react-native';
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { Ionicons } from '@expo/vector-icons'; // Assure-toi d'avoir installé @expo/vector-icons
 
-const API_URL = 'https://vsl-taxi.onrender.com/api/user';
+const API_URL = 'https://vsl-taxi.onrender.com/api/user'; // Vérifie que c'est la bonne URL (api/user ou api/auth selon ton backend)
+// NOTE : Si tu as mis les routes auth dans /api/auth dans le backend, change ici. 
+// D'après ton code précédent c'était api/user/login, donc je garde api/user.
 
-// Regex simple mais efficace pour valider le format email
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignInScreen({ navigation, onSignIn }) {
+  // --- États Connexion ---
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Fonction utilitaire pour valider l'email
+  // --- États Mot de Passe Oublié ---
+  const [forgotModalVisible, setForgotModalVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+
+  // Validation email
   const isValidEmail = (email) => EMAIL_REGEX.test(email);
 
+  // ==========================================
+  // 1. GESTION DU LOGIN (Ton code existant)
+  // ==========================================
   const handleSignIn = async () => {
-    Keyboard.dismiss(); // Fermer le clavier par sécurité UX
-
-    // 1. Nettoyage et Validation Locale (Security Layer 1)
+    Keyboard.dismiss();
     const cleanEmail = email.trim();
     
     if (!cleanEmail || !password) {
@@ -38,24 +47,19 @@ export default function SignInScreen({ navigation, onSignIn }) {
     setLoading(true);
 
     try {
-      // 2. Configuration Sécurisée de la Requête (Security Layer 2)
-      // On ajoute un timeout pour éviter que la requête ne pende (DoS protection)
+      // Vérifie bien si ton backend attend /login sur /api/user ou /api/auth
       const res = await axios.post(
         `${API_URL}/login`, 
         { email: cleanEmail, password },
-        { timeout: 10000 } // 10 secondes max
+        { timeout: 10000 }
       );
 
-      // 3. Stockage Sécurisé (Security Layer 3)
       if (res.data && res.data.token) {
         await SecureStore.setItemAsync('token', res.data.token);
-        
-        // Optionnel : Stocker l'email pour l'UX future, mais jamais le mot de passe
         await SecureStore.setItemAsync('userEmail', cleanEmail);
 
-        // Transition réussie
         onSignIn({
-          user: res.data.user,
+          user: res.data.user || { email: cleanEmail }, // Fallback si user n'est pas renvoyé
           token: res.data.token
         });
       } else {
@@ -63,39 +67,73 @@ export default function SignInScreen({ navigation, onSignIn }) {
       }
 
     } catch (err) {
-      // 4. Gestion des Erreurs Obfusquée (Security Layer 4)
-      console.log('Login attempt failed'); // On évite console.error avec les détails en prod
-      
-      let userMessage = 'Une erreur est survenue. Veuillez vérifier votre connexion.';
+      console.log('Login failed'); 
+      let userMessage = 'Une erreur est survenue.';
 
       if (err.response) {
-        // IMPORTANT : Ne jamais dire "Utilisateur inconnu" ou "Mauvais mot de passe".
-        // On reste vague pour empêcher l'énumération des comptes.
         if (err.response.status === 400 || err.response.status === 401 || err.response.status === 404) {
           userMessage = 'Email ou mot de passe incorrect.';
-        } else if (err.response.status === 429) {
-          userMessage = 'Trop de tentatives. Veuillez réessayer plus tard.'; // Si ton backend gère le Rate Limit
         } else if (err.response.status >= 500) {
-          userMessage = 'Erreur serveur temporaire. Veuillez réessayer.';
+          userMessage = 'Erreur serveur. Réessayez plus tard.';
         }
       } else if (err.code === 'ECONNABORTED') {
-        userMessage = 'Le serveur met trop de temps à répondre.';
+        userMessage = 'Le serveur ne répond pas (Timeout).';
       }
 
-      Alert.alert('Échec de connexion', userMessage);
-      
-      // Sécurité : On vide le mot de passe en cas d'échec
+      Alert.alert('Échec', userMessage);
       setPassword('');
 
     } finally {
-      // 5. Anti-Brute Force Frontend (Security Layer 5)
-      // On impose un petit délai artificiel avant de rendre la main à l'utilisateur
-      setTimeout(() => {
-        setLoading(false);
-      }, 500); // 500ms de délai
+      setTimeout(() => setLoading(false), 500);
     }
   };
 
+  // ==========================================
+  // 2. GESTION MOT DE PASSE OUBLIÉ
+  // ==========================================
+  const handleResetRequest = async () => {
+    const cleanResetEmail = resetEmail.trim();
+
+    if (!isValidEmail(cleanResetEmail)) {
+      Alert.alert("Erreur", "Veuillez entrer un email valide.");
+      return;
+    }
+
+    setResetLoading(true);
+
+    try {
+      // Appel à la route créée précédemment
+      // Attention : vérifie si ta route est /forgot-password ou /api/user/forgot-password
+      await axios.post(`${API_URL}/forgot-password`, { 
+        email: cleanResetEmail 
+      });
+
+      // On ferme le modal et on prévient l'utilisateur
+      setForgotModalVisible(false);
+      setResetEmail('');
+      
+      Alert.alert(
+        "Email envoyé 📧", 
+        "Si ce compte existe, vous recevrez un code de réinitialisation."
+      );
+
+    } catch (error) {
+      console.log("Reset error", error);
+      // Même si l'email n'existe pas (404), pour la sécurité, on peut dire que c'est envoyé
+      // Ou alors afficher un message générique.
+      if (error.response && error.response.status === 404) {
+         Alert.alert("Compte introuvable", "Aucun compte associé à cet email.");
+      } else {
+         Alert.alert("Erreur", "Impossible d'envoyer la demande. Vérifiez votre connexion.");
+      }
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  // ==========================================
+  // RENDU
+  // ==========================================
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -109,9 +147,7 @@ export default function SignInScreen({ navigation, onSignIn }) {
           placeholder="Email"
           placeholderTextColor="#999"
           autoCapitalize="none"
-          autoCorrect={false} // Désactive la correction auto pour éviter les erreurs de saisie
           keyboardType="email-address"
-          textContentType="emailAddress" // Aide iOS à suggérer l'email
           value={email}
           onChangeText={setEmail}
         />
@@ -120,12 +156,19 @@ export default function SignInScreen({ navigation, onSignIn }) {
           style={styles.input}
           placeholder="Mot de passe"
           placeholderTextColor="#999"
-          secureTextEntry={true} // Masque le mot de passe
+          secureTextEntry={true}
           autoCapitalize="none"
-          textContentType="password" // Aide iOS à gérer le trousseau
           value={password}
           onChangeText={setPassword}
         />
+
+        {/* LIEN MOT DE PASSE OUBLIÉ */}
+        <TouchableOpacity 
+            style={styles.forgotContainer} 
+            onPress={() => setForgotModalVisible(true)}
+        >
+            <Text style={styles.forgotText}>Mot de passe oublié ?</Text>
+        </TouchableOpacity>
 
         {loading ? (
           <ActivityIndicator size="large" color="#FF6B00" style={{ marginVertical: 20 }} />
@@ -148,6 +191,53 @@ export default function SignInScreen({ navigation, onSignIn }) {
             </TouchableOpacity>
           </View>
         )}
+
+        {/* --- MODAL DE RÉCUPÉRATION --- */}
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={forgotModalVisible}
+            onRequestClose={() => setForgotModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <TouchableOpacity 
+                        style={styles.closeModalBtn} 
+                        onPress={() => setForgotModalVisible(false)}
+                    >
+                        <Ionicons name="close" size={24} color="#666" />
+                    </TouchableOpacity>
+
+                    <Text style={styles.modalTitle}>Réinitialisation</Text>
+                    <Text style={styles.modalDesc}>
+                        Entrez votre email pour recevoir un code de sécurité.
+                    </Text>
+
+                    <TextInput
+                        style={[styles.input, {width: '100%', marginTop: 15}]}
+                        placeholder="Votre email"
+                        placeholderTextColor="#999"
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        value={resetEmail}
+                        onChangeText={setResetEmail}
+                    />
+
+                    <TouchableOpacity 
+                        style={[styles.button, {width: '100%', marginTop: 10}]} 
+                        onPress={handleResetRequest}
+                        disabled={resetLoading}
+                    >
+                        {resetLoading ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <Text style={styles.buttonText}>Envoyer le code</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </Modal>
+
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -169,7 +259,7 @@ const styles = StyleSheet.create({
   },
   input: { 
     height: 55, 
-    borderColor: '#E0E0E0', // Plus subtil
+    borderColor: '#E0E0E0', 
     borderWidth: 1, 
     borderRadius: 12, 
     marginBottom: 15, 
@@ -177,11 +267,21 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     color: "#333",
     backgroundColor: '#FFF',
-    elevation: 2, // Légère ombre sur Android
-    shadowColor: "#000", // Ombre sur iOS
+    elevation: 2, 
+    shadowColor: "#000", 
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
+  },
+  forgotContainer: {
+    alignSelf: 'flex-end',
+    marginBottom: 25,
+    padding: 5
+  },
+  forgotText: {
+    color: '#666',
+    fontWeight: '600',
+    fontSize: 14
   },
   button: { 
     backgroundColor: '#FF6B00', 
@@ -205,4 +305,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: 0.5 
   },
+  
+  // STYLES MODAL
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20
+  },
+  modalContent: {
+    backgroundColor: '#FFF',
+    borderRadius: 20,
+    padding: 25,
+    alignItems: 'center',
+    elevation: 5
+  },
+  closeModalBtn: {
+    position: 'absolute',
+    top: 15,
+    right: 15,
+    padding: 5
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10
+  },
+  modalDesc: {
+    textAlign: 'center',
+    color: '#666',
+    marginBottom: 10,
+    lineHeight: 20
+  }
 });

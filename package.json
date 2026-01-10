@@ -24,12 +24,15 @@
     "@react-navigation/stack": "^7.4.7",
     "@supabase/supabase-js": "^2.55.0",
     "axios": "^1.11.0",
+    "crypto": "^1.0.1",
     "expo": "~53.0.20",
     "expo-av": "~15.1.7",
+    "expo-calendar": "~14.1.4",
     "expo-clipboard": "~7.1.5",
     "expo-constants": "~17.1.8",
     "expo-dev-client": "~5.2.4",
     "expo-device": "~7.1.4",
+    "expo-file-system": "~18.1.11",
     "expo-image-picker": "~16.1.4",
     "expo-linear-gradient": "~14.1.5",
     "expo-linking": "~7.1.7",
@@ -38,8 +41,10 @@
     "expo-print": "~14.1.4",
     "expo-secure-store": "~14.2.4",
     "expo-sharing": "~13.1.5",
+    "expo-sms": "~13.1.4",
     "expo-status-bar": "~2.2.3",
     "lodash": "^4.17.21",
+    "nodemailer": "^7.0.12",
     "react": "19.0.0",
     "react-native": "0.79.5",
     "react-native-calendars": "^1.1313.0",
@@ -51,10 +56,7 @@
     "react-native-screens": "^4.14.1",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-vector-icons": "^10.3.0",
-    "react-navigation": "^5.0.0",
-    "expo-file-system": "~18.1.11",
-    "expo-calendar": "~14.1.4",
-    "expo-sms": "~13.1.4"
+    "react-navigation": "^5.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
