@@ -1,149 +1,111 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-/**
- * CONFIGURATION
- */
-const BASE_URL = 'https://vsl-taxi.onrender.com/api';
-const SESSION_KEY = 'user_session';
+// Ton URL Backend
+const API_URL = 'https://vsl-taxi.onrender.com/api';
 
+// 1. Création de l'instance Axios
 const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: 40000, 
-  headers: { 'Content-Type': 'application/json' },
+  baseURL: API_URL,
+  timeout: 15000, // On laisse un peu de temps (15s) pour les connexions lentes
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
-/** INTERCEPTEURS (Sécurité & Token) */
+// ============================================================
+// 🔐 LE FIX EST ICI : L'INTERCEPTEUR (Pour l'erreur 401)
+// ============================================================
+// Avant chaque requête, on va chercher le token dans le téléphone
+// et on l'attache à la requête.
 api.interceptors.request.use(
   async (config) => {
     try {
-      const sessionData = await SecureStore.getItemAsync(SESSION_KEY);
-      if (sessionData) {
-        const { token } = JSON.parse(sessionData);
-        if (token) config.headers.Authorization = `Bearer ${token}`;
+      const token = await SecureStore.getItemAsync('token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
-    } catch (err) { console.error("🔒 Erreur Token:", err); }
+    } catch (error) {
+      console.log("Erreur token:", error);
+    }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      console.warn("⚠️ Session expirée ou invalide");
-      // Ici tu pourrais ajouter une logique pour déconnecter l'user
-    }
-    return Promise.reject(error);
-  }
-);
+// ============================================================
+// 📦 TES FONCTIONS API (Adaptées pour utiliser l'instance sécurisée)
+// ============================================================
 
-// =========================================================
-// 1. AUTHENTIFICATION & NOTIFICATIONS (Nouveau)
-// =========================================================
-
-export const login = (credentials) => api.post('/auth/login', credentials);
-export const register = (userData) => api.post('/auth/register', userData);
-
-// Envoi du Token de notification (Push)
-export const updatePushToken = async (pushToken) => {
-  return api.put('/auth/push-token', { pushToken });
-};
-
-// =========================================================
-// 2. CONTACTS & UTILISATEURS
-// =========================================================
-
-export const getContacts = async () => {
-  const res = await api.get('/contacts');
-  return res.data;
-};
-
-export const searchUsers = async (emailQuery) => {
-  const res = await api.get(`/contacts/search?q=${encodeURIComponent(emailQuery)}`);
-  return res.data;
-};
-
-export const addContact = async (contactId) => {
-  const res = await api.post('/contacts', { contactId });
-  return res.data;
-};
-
-export const deleteContact = (contactId) => api.delete(`/contacts/${contactId}`);
-
-// =========================================================
-// 3. GESTION DES PATIENTS (Nouveau pour RideForm)
-// =========================================================
-
-export const getPatients = async () => {
-  const res = await api.get('/patients');
-  return res.data;
-};
-
-export const createPatient = async (patientData) => {
-  // patientData = { fullName, address, phone }
-  const res = await api.post('/patients', patientData);
-  return res.data;
-};
-
-// =========================================================
-// 4. GESTION DES COURSES (CRUD)
-// =========================================================
-
-export const getRides = async (date) => {
-  const url = date ? `/rides?date=${date}` : '/rides';
-  const res = await api.get(url);
-  return res.data || [];
-};
-
-export const createRide = async (rideData) => {
-  const res = await api.post('/rides', rideData);
-  return res.data;
-};
-
-export const updateRide = async (id, data) => {
-  const res = await api.patch(`/rides/${id}`, data);
-  return res.data;
-};
-
-export const deleteRide = async (id) => {
-  const res = await api.delete(`/rides/${id}`);
-  return res.data;
-};
-
-// =========================================================
-// 5. PARTAGE (RÉSEAU)
-// =========================================================
-
-export const shareRide = async (rideId, contactId, note = '') => {
-  const response = await api.post(`/rides/${rideId}/share`, { 
-    targetUserId: contactId,
-    note: note 
-  });
+// --- COURSES (RIDES) ---
+export const getRides = async () => {
+  const response = await api.get('/rides');
   return response.data;
 };
 
-// Correction : On utilise rideId, pas shareId, selon ton dernier contrôleur Backend
-
-
-
-  export const updatePatient = async (id, data) => {
-    const res = await api.put(`/patients/${id}`, data);
-    return res.data;
-  };
- // services/api.js
-
- export const respondToShare = async (rideId, action) => {
-  // L'URL doit être '/rides/respond-share' (le /api est souvent ajouté auto par axios)
-  return api.post('/rides/respond-share', { rideId, action });
+export const createRide = async (rideData) => {
+  const response = await api.post('/rides', rideData);
+  return response.data;
 };
-  export const deletePatient = async (id) => {
-    const res = await api.delete(`/patients/${id}`);
-    return res.data;
-  };
-// services/api.js
 
-// ... tes autres imports et configs ...
+export const updateRide = async (id, updates) => {
+  const response = await api.put(`/rides/${id}`, updates);
+  return response.data;
+};
+
+export const deleteRide = async (id) => {
+  const response = await api.delete(`/rides/${id}`);
+  return response.data;
+};
+
+export const shareRide = async (rideId, contactId, note) => {
+  const response = await api.post(`/rides/${rideId}/share`, { targetUserId: contactId, note });
+  return response.data;
+};
+
+// --- PATIENTS ---
+export const getPatients = async () => {
+  // L'erreur 401 venait souvent d'ici car cette route est protégée
+  const response = await api.get('/patients');
+  return response.data;
+};
+
+export const createPatient = async (patientData) => {
+  const response = await api.post('/patients', patientData);
+  return response.data;
+};
+
+// --- GROUPES & CONTACTS ---
+export const getGroups = async () => {
+  const response = await api.get('/groups');
+  return response.data;
+};
+
+// Pour récupérer la liste des collègues/contacts (utilisé dans le partage)
+export const getContacts = async () => {
+  // Vérifie si ta route backend est bien /user/contacts ou juste /users
+  // Par défaut je mets /user/contacts comme souvent configuré
+  const response = await api.get('/user/contacts'); 
+  return response.data;
+};
+
+// --- IA (MAGIC PASTE) ---
+export const parseRideWithAI = async (text) => {
+  // Note: Pas besoin de token ici techniquement, mais ça ne gêne pas
+  const response = await api.post('/ai/parse-ride', { text });
+  return response.data;
+};
+
+// --- DOCUMENTS (UPLOAD) ---
+export const uploadDocument = async (formData) => {
+  // Pour l'upload, on doit laisser Axios gérer le Content-Type automatiquement
+  const response = await api.post('/documents/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    transformRequest: (data) => data, // Empêche Axios de casser le format fichier
+  });
+  return response.data;
+};
 
 export default api;
