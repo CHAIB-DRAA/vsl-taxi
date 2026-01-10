@@ -22,16 +22,16 @@ import OffersNotification from '../components/OffersNotification';
 import DispatchModal from '../components/DispatchModal'; 
 import GroupCreatorModal from '../components/GroupCreatorModal'; 
 import GroupListModal from '../components/GroupListModal'; 
-import RideCreatorModal from '../components/RideCreatorModal'; 
 
 // --- SERVICES & CONTEXTE ---
-import { syncDailyRidesToCalendar, addRideToCalendar } from '../services/calendarService';
+// 👇 J'ai ajouté syncBatchRides ici
+import { addRideToCalendar, syncBatchRides } from '../services/calendarService';
 import api, { updateRide, shareRide, deleteRide } from '../services/api';
 import { useData } from '../contexts/DataContext'; 
 
-const { height, width } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
-// --- CONFIG CALENDRIER FR ---
+// --- CONFIG CALENDRIER ---
 LocaleConfig.locales['fr'] = {
   monthNames: ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'],
   dayNames: ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'],
@@ -40,7 +40,6 @@ LocaleConfig.locales['fr'] = {
 };
 LocaleConfig.defaultLocale = 'fr';
 
-// --- COULEURS THÈME ---
 const THEME = {
   primary: '#FF6B00',
   bg: '#F4F6F8',
@@ -58,14 +57,9 @@ export default function AgendaScreen({ navigation }) {
   const [selectedDate, setSelectedDate] = useState(moment().format('YYYY-MM-DD'));
   const [showCalendar, setShowCalendar] = useState(true);
   const [activeRide, setActiveRide] = useState(null);
-  
-  // 3. ÉTATS IA & FILE D'ATTENTE
-  const [showRideCreator, setShowRideCreator] = useState(false);
-  const [importedRideData, setImportedRideData] = useState(null);
   const [analyzing, setAnalyzing] = useState(false); 
-  const [rideQueue, setRideQueue] = useState([]); 
 
-  // 4. MODALS
+  // 3. MODALS
   const [modals, setModals] = useState({ options: false, share: false, docs: false });
   const [finishModal, setFinishModal] = useState(false); 
   const [returnModal, setReturnModal] = useState(false); 
@@ -74,12 +68,12 @@ export default function AgendaScreen({ navigation }) {
   const [showGroupList, setShowGroupList] = useState(false); 
   const [editingGroup, setEditingGroup] = useState(null); 
   
-  // 5. DONNÉES LOCALES & DOCS
+  // 4. DONNÉES LOCALES & DOCS
   const [myGroups, setMyGroups] = useState([]); 
   const [patientDocs, setPatientDocs] = useState([]);
   const [allPMTs, setAllPMTs] = useState([]); 
 
-  // 6. FORMULAIRES TEMPORAIRES
+  // 5. FORMULAIRES TEMPORAIRES
   const [btValidationModal, setBtValidationModal] = useState(false);
   const [prescriptionDate, setPrescriptionDate] = useState(new Date());
   const [showPrescriptionPicker, setShowPrescriptionPicker] = useState(false);
@@ -99,93 +93,70 @@ export default function AgendaScreen({ navigation }) {
     fetchGroups();
   }, [allRides]); 
 
-  // --- GESTIONNAIRE DE FILE D'ATTENTE (ROBOT) ---
-  useEffect(() => {
-    if (!showRideCreator && rideQueue.length > 0) {
-        const nextRideToValidate = rideQueue[0];
-        setImportedRideData(nextRideToValidate);
-        setTimeout(() => setShowRideCreator(true), 300);
-    }
-    if (!showRideCreator && rideQueue.length === 0 && importedRideData) {
-        setImportedRideData(null); 
-    }
-  }, [rideQueue, showRideCreator]);
-
   // --- API CALLS ---
   const fetchGlobalPMTs = async () => { try { const res = await api.get('/documents/pmts/all'); setAllPMTs(res.data); } catch (err) {} };
   const fetchGroups = async () => { try { const res = await api.get('/groups'); setMyGroups(res.data); } catch (e) {} };
 
-  // --- ACTIONS LOGISTIQUE ---
- // --- DANS AgendaScreen.js ---
+  // --- 1. MAGIC PASTE -> CREATE SCREEN ---
+  const handleImportFromClipboard = async () => {
+    const text = await Clipboard.getStringAsync();
+    
+    if (!text) return Alert.alert("Presse-papier vide", "Copiez d'abord le message.");
 
- const handleImportFromClipboard = async () => {
-  const text = await Clipboard.getStringAsync();
-  
-  if (!text) {
-      return Alert.alert("Presse-papier vide", "Copiez d'abord le message.");
-  }
+    setAnalyzing(true); 
 
-  setAnalyzing(true); 
+    try {
+        const response = await api.post('/ai/parse-ride', { text });
+        let aiData = response.data; 
 
-  try {
-      const response = await api.post('/ai/parse-ride', { text });
-      let aiData = response.data; 
+        let ridesFound = [];
+        if (aiData.rides && Array.isArray(aiData.rides)) ridesFound = aiData.rides;
+        else if (Array.isArray(aiData)) ridesFound = aiData;
+        else ridesFound = [aiData];
+        
+        if (ridesFound.length > 0) {
+            const rideToEdit = ridesFound[0];
+            Vibration.vibrate(50);
+            navigation.navigate('AddRide', { importedData: rideToEdit }); 
+            
+            if (ridesFound.length > 1) {
+                Alert.alert("Info", "Plusieurs courses détectées. La première a été chargée.");
+            }
+        } else {
+             Alert.alert("Oups", "Aucune course claire trouvée.");
+        }
 
-      // Normalisation (au cas où l'IA renvoie un tableau ou un objet unique)
-      let ridesFound = [];
-      if (aiData.rides && Array.isArray(aiData.rides)) {
-          ridesFound = aiData.rides;
-      } else if (Array.isArray(aiData)) {
-          ridesFound = aiData;
-      } else {
-          ridesFound = [aiData];
-      }
-      
-      if (ridesFound.length > 0) {
-          // On prend la première course trouvée
-          const rideToEdit = ridesFound[0];
-          
-          Vibration.vibrate(50);
-          
-          // 👇 LA MODIFICATION EST ICI : On navigue vers l'écran de création
-          // On passe les données via 'importedData'
-          navigation.navigate('AddRide', { importedData: rideToEdit }); 
-          
-          if (ridesFound.length > 1) {
-              Alert.alert("Info", "Plusieurs courses détectées. La première a été chargée pour modification.");
-          }
-      } else {
-           Alert.alert("Oups", "Aucune course claire trouvée dans le texte.");
-      }
-
-  } catch (e) {
-      console.error(e);
-      Alert.alert("Erreur IA", "L'analyse a échoué.");
-  } finally {
-      setAnalyzing(false);
-  }
-};
-  const handleSaveRide = async (rideData) => {
-      try {
-          const fullDate = moment(selectedDate).set({
-              hour: moment(rideData.date).hour(),
-              minute: moment(rideData.date).minute()
-          }).toISOString();
-
-          if (rideData._id) {
-              await api.put(`/rides/${rideData._id}`, { ...rideData, date: fullDate });
-              Alert.alert("Mise à jour", "La course a été modifiée.");
-              setShowRideCreator(false);
-              setImportedRideData(null); 
-          } else {
-              await api.post('/rides', { ...rideData, date: fullDate, status: 'Confirmée' });
-              setRideQueue(prev => prev.slice(1)); 
-              setShowRideCreator(false);
-          }
-          loadData(true); 
-      } catch (e) { Alert.alert("Erreur", "Sauvegarde impossible."); }
+    } catch (e) {
+        Alert.alert("Erreur IA", "L'analyse a échoué.");
+    } finally {
+        setAnalyzing(false);
+    }
   };
 
+  // --- 2. SYNCHRO INTELLIGENTE (AJOUTÉE ICI) ---
+  const handleGlobalSync = () => {
+    Alert.alert(
+      "Synchronisation Agenda",
+      "Que voulez-vous ajouter au calendrier de votre téléphone ?",
+      [
+        { text: "Annuler", style: "cancel" },
+        { 
+            text: "Ce jour uniquement", 
+            onPress: () => syncBatchRides(dailyRides) 
+        },
+        { 
+            text: "TOUTES les futures", 
+            style: "default", 
+            onPress: () => {
+                const futureRides = allRides.filter(r => moment(r.date).isSameOrAfter(moment(), 'day') && r.status !== 'Annulée');
+                syncBatchRides(futureRides);
+            }
+        }
+      ]
+    );
+  };
+
+  // --- GESTION ÉTAT COURSE ---
   const handleStatusChange = async (r, a) => { 
       try { 
           if (a === 'start') { 
@@ -198,31 +169,6 @@ export default function AgendaScreen({ navigation }) {
               setFinishModal(true); 
           } 
       } catch (e) { Alert.alert('Erreur', "Action impossible."); } 
-  };
-
-  const handleDelete = async () => {
-    if (!activeRide) return;
-    Alert.alert(
-      "Supprimer",
-      "Voulez-vous vraiment supprimer cette course ?",
-      [
-        { text: "Annuler", style: "cancel" },
-        { 
-          text: "Supprimer", 
-          style: "destructive", 
-          onPress: async () => {
-            try {
-              await deleteRide(activeRide._id);
-              setModals({ ...modals, options: false });
-              loadData(true);
-              Vibration.vibrate(50);
-            } catch (e) {
-              Alert.alert("Erreur", "Impossible de supprimer.");
-            }
-          }
-        }
-      ]
-    );
   };
 
   const confirmFinishRide = async () => { 
@@ -240,44 +186,40 @@ export default function AgendaScreen({ navigation }) {
       } catch (e) { Alert.alert("Erreur", "Echec clôture."); } 
   };
 
-  // --- GESTION GROUPES (C'est ici que c'était manquant) ---
-  
-  // 1. Sauvegarder un groupe (Création ou Modif)
+  const handleDelete = async () => {
+    if (!activeRide) return;
+    Alert.alert("Supprimer", "Voulez-vous vraiment supprimer cette course ?",
+      [{ text: "Annuler", style: "cancel" }, 
+       { text: "Supprimer", style: "destructive", onPress: async () => {
+            try { await deleteRide(activeRide._id); setModals({ ...modals, options: false }); loadData(true); Vibration.vibrate(50); } 
+            catch (e) { Alert.alert("Erreur", "Impossible de supprimer."); }
+       }}]
+    );
+  };
+
+  // --- GESTION GROUPES ---
   const handleSaveGroup = async (groupData) => {
     try {
-      // On s'assure d'envoyer uniquement les IDs des membres
       const memberIds = groupData.members.map(m => (m.contactId && m.contactId._id) ? m.contactId._id : m._id);
       const payload = { name: groupData.name, members: memberIds };
-
       if (groupData._id) {
-          // Modification
           const res = await api.put(`/groups/${groupData._id}`, payload);
           setMyGroups(prev => prev.map(g => g._id === groupData._id ? res.data : g));
           Alert.alert("Succès", "Groupe modifié !");
       } else {
-          // Création
           const res = await api.post('/groups', payload);
           setMyGroups(prev => [...prev, res.data]);
           Alert.alert("Succès", "Groupe créé !");
       }
-    } catch (e) {
-      console.error(e);
-      Alert.alert("Erreur", "Impossible de sauvegarder le groupe.");
-    }
+    } catch (e) { Alert.alert("Erreur", "Sauvegarde impossible."); }
   };
 
-  // 2. Supprimer un groupe
   const handleDeleteGroup = async (groupId) => {
-    try { 
-        await api.delete(`/groups/${groupId}`); 
-        setMyGroups(prev => prev.filter(g => g._id !== groupId)); 
-        Alert.alert("Supprimé", "Le groupe a été supprimé."); 
-    } catch (e) { 
-        Alert.alert("Erreur", "Impossible de supprimer."); 
-    }
+    try { await api.delete(`/groups/${groupId}`); setMyGroups(prev => prev.filter(g => g._id !== groupId)); Alert.alert("Supprimé", "Groupe supprimé."); } 
+    catch (e) { Alert.alert("Erreur", "Impossible."); }
   };
 
-  // --- FILTRES & HELPERS ---
+  // --- FILTRES & STATUS ---
   const markedDates = useMemo(() => { 
       const m={}; 
       allRides.forEach(r=>{ 
@@ -300,7 +242,6 @@ export default function AgendaScreen({ navigation }) {
     if (!medicalTypes.includes(ride.type) || ride.endTime) return null;
     const docs = allPMTs.filter(d => d.patientName === ride.patientName);
     if (docs.length === 0) return { color: '#FFEBEE', text: 'BT MANQUANT', textColor: '#D32F2F', icon: 'alert-circle' };
-    
     return { color: '#E8F5E9', text: 'BT OK', textColor: '#2E7D32', icon: 'checkbox' };
   };
 
@@ -340,6 +281,50 @@ export default function AgendaScreen({ navigation }) {
         }
       }
     } catch (e) { Alert.alert("Erreur", "Galerie inaccessible"); }
+  };
+
+  const validateAndUploadBT = async () => {
+    const rideDate = moment(activeRide.date).startOf('day');
+    const prescDate = moment(prescriptionDate).startOf('day');
+    if (prescDate.isAfter(rideDate)) {
+      Alert.alert("❌ RISQUE DE REJET", "Prescription POSTÉRIEURE à la course.\nContinuer ?", [{ text: "Non", style: "cancel" }, { text: "Forcer", style: 'destructive', onPress: () => finalizeUploadBT() }]);
+      return;
+    }
+    finalizeUploadBT();
+  };
+
+  const finalizeUploadBT = async () => {
+    setBtValidationModal(false);
+    if (tempScanUri) { await uploadDocument(tempScanUri, 'PMT'); setTempScanUri(null); }
+  };
+
+  // --- ACTIONS (RETOUR, PARTAGE, MAPPY) ---
+  const prepareReturnRide = () => { if (!activeRide) return; setReturnData({ date: moment(activeRide.date).format('YYYY-MM-DD'), time: '', startLocation: activeRide.endLocation, endLocation: activeRide.startLocation, type: 'Retour' }); setTempReturnDate(new Date()); setModals({ ...modals, options: false }); setReturnModal(true); };
+  const onReturnTimeChange = (event, selectedDate) => { if (Platform.OS === 'android') setShowTimePicker(false); if (selectedDate) { setTempReturnDate(selectedDate); setReturnData(prev => ({ ...prev, time: moment(selectedDate).format('HH:mm') })); } };
+  
+  const confirmCreateReturn = async () => {
+    if (!returnData.time) return Alert.alert("Erreur", "Heure requise.");
+    try { const [h, m] = returnData.time.split(':'); const d = moment(returnData.date).hour(parseInt(h)).minute(parseInt(m)).toISOString(); const n = { patientName: activeRide.patientName, patientPhone: activeRide.patientPhone, startLocation: returnData.startLocation, endLocation: returnData.endLocation, type: 'Retour', date: d, status: 'Confirmée', isRoundTrip: false }; await api.post('/rides', n); setReturnModal(false); loadData(true); Alert.alert("Succès", "Retour planifié !"); } catch (e) { Alert.alert("Erreur", "Impossible."); }
+  };
+
+  const shareInternal = async (contact) => {
+    if (!activeRide) return;
+    try { await shareRide(activeRide._id, contact.contactId._id, shareNote); setModals({ ...modals, share: false }); setShareNote(''); loadData(true); Alert.alert('Succès', `Envoyé à ${contact.contactId.fullName}.`); } catch (e) { Alert.alert('Erreur', "Échec."); }
+  };
+  
+  const shareViaWhatsApp = () => {
+    if (!activeRide) return;
+    const date = moment(activeRide.date).format('DD/MM/YYYY');
+    const time = moment(activeRide.startTime || activeRide.date).format('HH:mm');
+    const msg = `📅 *Dispo Course*\n🗓 ${date} à *${time}*\n📍 ${activeRide.startLocation}\n🏁 ${activeRide.endLocation}\n🚑 ${activeRide.type}` + (shareNote ? `\n\n📝 ${shareNote}` : '');
+    Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Erreur", "WhatsApp absent."));
+  };
+
+  const openMappyRoute = () => {
+    if (!activeRide) return;
+    const s = encodeURIComponent(activeRide.startLocation || "");
+    const e = encodeURIComponent(activeRide.endLocation || "");
+    Linking.openURL(`https://fr.mappy.com/itineraire#/voiture/${s}/${e}/car`).catch(() => Alert.alert("Erreur", "Impossible d'ouvrir Mappy"));
   };
 
   // --- RENDER HELPERS ---
@@ -423,6 +408,23 @@ export default function AgendaScreen({ navigation }) {
 
       {/* --- LISTE DES COURSES --- */}
       <View style={styles.listContainer}>
+        {/* EN-TÊTE LISTE AVEC BOUTON SYNC RESTAURÉ 👇 */}
+        <View style={styles.listHeader}>
+            <Text style={styles.dateTitle}>{moment(selectedDate).format('dddd D MMMM')}</Text>
+            <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                
+                {/* 🟢 BOUTON SYNC PRÉSENT ICI */}
+                {dailyRides.length > 0 && (
+                  <TouchableOpacity onPress={handleGlobalSync} style={styles.syncBtn}>
+                    <Ionicons name="calendar-outline" size={16} color="#FFF" style={{marginRight: 4}} />
+                    <Text style={styles.syncBtnText}>Export</Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.countBadge}><Text style={styles.countText}>{dailyRides.length}</Text></View>
+            </View>
+        </View>
+
         {loading ? renderSkeleton() : (
           <FlatList 
             data={dailyRides} 
@@ -464,7 +466,7 @@ export default function AgendaScreen({ navigation }) {
         onClose={() => setModals({ ...modals, options: false })}
         onEdit={() => {
             setModals({ ...modals, options: false });
-            setTimeout(() => { setImportedRideData(activeRide); setShowRideCreator(true); }, 200);
+            setTimeout(() => navigation.navigate('AddRide', { importedData: activeRide }), 100);
         }}
         onCreateReturn={() => { setModals({ ...modals, options: false }); setTimeout(() => { if(activeRide) { setReturnData(prev => ({...prev, startLocation: activeRide.endLocation, endLocation: activeRide.startLocation, date: moment(activeRide.date).format('YYYY-MM-DD')})); setReturnModal(true); }}, 100); }}
         onAddToCalendar={() => { addRideToCalendar(activeRide); setModals({ ...modals, options: false }); }}
@@ -485,19 +487,7 @@ export default function AgendaScreen({ navigation }) {
         onSuccess={() => loadData(true)}
       />
 
-      {/* RIDE CREATOR (CREATE / EDIT) */}
-      <RideCreatorModal 
-        visible={showRideCreator}
-        onClose={() => {
-            if (importedRideData && !importedRideData._id) setRideQueue(prev => prev.slice(1));
-            setShowRideCreator(false);
-            setImportedRideData(null);
-        }}
-        initialData={importedRideData}
-        onSave={handleSaveRide}
-      />
-
-      {/* GESTION GROUPE (FIX CORRIGÉ : props onSaveGroup et onDelete maintenant liées) */}
+      {/* GESTION GROUPE */}
       <GroupListModal 
         visible={showGroupList}
         onClose={() => setShowGroupList(false)}
@@ -514,13 +504,12 @@ export default function AgendaScreen({ navigation }) {
         onSaveGroup={handleSaveGroup} 
       />
 
-      {/* FIN DE COURSE (KM & PÉAGE) */}
+      {/* FIN DE COURSE */}
       <Modal visible={finishModal} animationType="fade" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.bottomSheet}>
             <View style={styles.modalHandle} />
             <Text style={styles.bottomSheetTitle}>Fin de Course</Text>
-            
             <View style={styles.inputRow}>
                 <View style={{flex:1, marginRight:10}}>
                     <Text style={styles.inputLabel}>Km Réels</Text>
@@ -531,7 +520,6 @@ export default function AgendaScreen({ navigation }) {
                     <TextInput style={styles.sheetInput} placeholder="0.00" keyboardType="numeric" value={billingData.peage} onChangeText={t => setBillingData({...billingData, peage: t})}/>
                 </View>
             </View>
-
             <TouchableOpacity style={styles.confirmBtn} onPress={confirmFinishRide}>
                 <Text style={styles.confirmBtnText}>TERMINER LA COURSE</Text>
             </TouchableOpacity>
@@ -548,30 +536,41 @@ export default function AgendaScreen({ navigation }) {
             <View style={styles.bottomSheet}>
                 <View style={styles.modalHandle} />
                 <Text style={styles.bottomSheetTitle}>Planifier le Retour</Text>
-                
                 <TouchableOpacity onPress={() => setShowTimePicker(true)} style={styles.timeSelectBtn}>
                     <Ionicons name="time" size={24} color="#333" />
                     <Text style={{fontSize:20, fontWeight:'bold', marginLeft:10}}>{returnData.time || "--:--"}</Text>
                 </TouchableOpacity>
                 {showTimePicker && (<DateTimePicker value={tempReturnDate} mode="time" is24Hour display="spinner" onChange={(e,d) => { setShowTimePicker(Platform.OS === 'ios'); if(d) { setTempReturnDate(d); setReturnData(p => ({...p, time: moment(d).format('HH:mm')})); } }} />)}
-
-                <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: THEME.primary}]} onPress={async () => {
-                    if(!returnData.time) return Alert.alert("Erreur", "Heure requise");
-                    const [h, m] = returnData.time.split(':');
-                    const d = moment(returnData.date).hour(parseInt(h)).minute(parseInt(m)).toISOString();
-                    await api.post('/rides', { 
-                        patientName: activeRide.patientName, patientPhone: activeRide.patientPhone,
-                        startLocation: returnData.startLocation, endLocation: returnData.endLocation,
-                        type: 'Retour', date: d, status: 'Confirmée'
-                    });
-                    setReturnModal(false); loadData(true); Alert.alert("Succès", "Retour créé !");
-                }}>
+                <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: THEME.primary}]} onPress={confirmCreateReturn}>
                     <Text style={styles.confirmBtnText}>VALIDER RETOUR</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setReturnModal(false)} style={{marginTop:15, alignSelf:'center'}}>
                     <Text style={{color:'#888'}}>Annuler</Text>
                 </TouchableOpacity>
             </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* MODAL PARTAGE */}
+      <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor:'#FFF' }}>
+          <View style={styles.modalHeader}><Text style={styles.headerTitle}>Partager</Text><TouchableOpacity onPress={() => setModals({...modals, share: false})}><Ionicons name="close-circle" size={32} color="#999"/></TouchableOpacity></View>
+          <View style={{padding: 20, flex: 1}}>
+             <TextInput style={styles.noteInput} placeholder="Note (Optionnel)..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} textAlignVertical="top"/>
+             
+             {/* 🟢 BOUTON WHATSAPP */}
+             <TouchableOpacity style={styles.whatsappBtn} onPress={shareViaWhatsApp}>
+                <Ionicons name="logo-whatsapp" size={24} color="#FFF" style={{marginRight: 10}}/>
+                <Text style={styles.whatsappText}>WhatsApp</Text>
+             </TouchableOpacity>
+
+             <FlatList data={contacts} keyExtractor={(item) => item._id} renderItem={({ item }) => (
+                 <TouchableOpacity style={styles.contactRow} onPress={() => shareInternal(item)}>
+                   <Text style={styles.contactName}>{item.contactId?.fullName}</Text>
+                   <Ionicons name="paper-plane-outline" size={24} color="#4CAF50" />
+                 </TouchableOpacity>
+               )} ListEmptyComponent={<Text style={{color:'#999'}}>Aucun contact.</Text>} />
+          </View>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -595,6 +594,19 @@ export default function AgendaScreen({ navigation }) {
                  </View>
               </View>
           </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={btValidationModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.finishCard, {backgroundColor: '#FFF3E0'}]}>
+            <View style={styles.finishHeader}><Text style={[styles.finishTitle, {color: '#E65100'}]}>🛡️ Vérification CPAM</Text><TouchableOpacity onPress={() => setBtValidationModal(false)}><Ionicons name="close" size={24} color="#333" /></TouchableOpacity></View>
+            <Text style={styles.cpamWarning}>Vérifiez la date de prescription.</Text>
+            <TouchableOpacity onPress={() => setShowPrescriptionPicker(true)} style={[styles.inputWrapper, {borderColor: '#FF9800', backgroundColor: '#FFF'}]}><Ionicons name="calendar" size={20} color="#E65100" style={{marginRight:10}}/><Text style={{fontSize:18, fontWeight:'bold', color: '#333'}}>{moment(prescriptionDate).format('DD/MM/YYYY')}</Text></TouchableOpacity>
+            {showPrescriptionPicker && (<DateTimePicker value={prescriptionDate} mode="date" display="default" onChange={(event, date) => { if(Platform.OS === 'android') setShowPrescriptionPicker(false); if(date) setPrescriptionDate(date); }} />)}
+            <View style={styles.comparisonRow}><Text style={styles.compValue}>Course: {moment(activeRide?.date).format('DD/MM')}</Text><Ionicons name={moment(prescriptionDate).isAfter(moment(activeRide?.date)) ? "alert-circle" : "arrow-forward-circle"} size={30} color={moment(prescriptionDate).isAfter(moment(activeRide?.date)) ? "red" : "green"} /><Text style={[styles.compValue, moment(prescriptionDate).isAfter(moment(activeRide?.date)) && {color:'red'}]}>Prescr: {moment(prescriptionDate).format('DD/MM')}</Text></View>
+            <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: '#E65100'}]} onPress={validateAndUploadBT}><Text style={{color:'#FFF', fontWeight:'bold', fontSize: 16}}>VALIDER LE BT</Text></TouchableOpacity>
+          </View>
         </View>
       </Modal>
 
@@ -630,6 +642,17 @@ const styles = StyleSheet.create({
 
   // LISTE
   listContainer: { flex: 1, paddingHorizontal: 15 },
+  
+  // 👇 STYLE LIST HEADER AVEC LE BOUTON SYNC
+  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
+  dateTitle: { fontSize: 18, fontWeight: '700', textTransform: 'capitalize', color: '#333' },
+  
+  syncBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4285F4', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginRight: 10, elevation: 2 },
+  syncBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+
+  countBadge: { backgroundColor: '#FF6B00', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4 },
+  countText: { color: '#FFF', fontWeight: 'bold' },
+
   rideWrapper: { marginBottom: 15 },
   statusBadge: { 
     flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', 
@@ -667,6 +690,7 @@ const styles = StyleSheet.create({
   // DOCS MODAL SPECIFIC
   docModalContainer: { flex: 1, backgroundColor: '#F2F2F2' },
   modalHeader: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#F0F0F0' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' }, 
   docCard: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 20, padding: 12, elevation: 2 },
   docTitle: { fontWeight: 'bold', marginBottom: 8, fontSize: 16, color: '#333' },
   docImage: { width: '100%', height: height * 0.35, borderRadius: 8, backgroundColor: '#EEE' },
@@ -675,5 +699,17 @@ const styles = StyleSheet.create({
   scanGrid: { flexDirection: 'row', justifyContent: 'space-between' },
   scanColumn: { alignItems: 'center', width: '30%' },
   importBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 8, padding: 6, backgroundColor: '#E0E0E0', borderRadius: 20 },
-  importText: { fontSize: 10, color: '#555', marginLeft: 4, fontWeight: 'bold' }
+  importText: { fontSize: 10, color: '#555', marginLeft: 4, fontWeight: 'bold' },
+
+  // STYLE WHATSAPP BTN
+  noteInput: { backgroundColor: '#F5F5F5', borderRadius: 12, padding: 15, height: 80, marginBottom: 15, borderWidth: 1, borderColor: '#DDD', fontSize: 16 },
+  whatsappBtn: { backgroundColor: '#25D366', padding: 16, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20, elevation: 2 },
+  whatsappText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#EEE' },
+  contactName: { fontSize: 16, fontWeight: '600', color: '#333', marginLeft: 10 },
+  cpamWarning: { fontSize: 13, color: '#5D4037', marginBottom: 20, lineHeight: 20 },
+  comparisonRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginVertical: 20, backgroundColor: '#FFE0B2', padding: 10, borderRadius: 10 },
+  compLabel: { fontSize: 10, color: '#E65100', fontWeight: 'bold', textAlign: 'center' },
+  compValue: { fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' },
+  mappyBtn: { backgroundColor: '#009688', padding: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#00796B', elevation: 2 },
 });
