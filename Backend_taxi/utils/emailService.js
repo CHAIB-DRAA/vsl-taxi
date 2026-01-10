@@ -1,26 +1,34 @@
 const nodemailer = require('nodemailer');
 
 const sendEmail = async (options) => {
-  // 1. Création du transporteur
+  // 1. CONFIGURATION ROBUSTE (Port 465 + SSL)
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com', // On force l'adresse exacte
+    port: 465,              // On force le port SSL (plus fiable que 587)
+    secure: true,           // true pour le port 465
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS
-    }
+    },
+    // On ajoute des timeouts pour ne pas bloquer indéfiniment
+    connectionTimeout: 10000, // 10 secondes max pour se connecter
+    greetingTimeout: 5000,    // 5 secondes pour dire bonjour
+    socketTimeout: 10000      // 10 secondes pour les échanges
   });
 
-  // 2. DEBUG : Vérifier la connexion SMTP avant d'envoyer
-  console.log("🔌 Test de connexion SMTP...");
+  console.log("🔌 Tentative de connexion SMTP (Port 465)...");
+
+  // 2. VERIFICATION
   try {
     await transporter.verify();
-    console.log("✅ Connexion SMTP réussie ! Prêt à envoyer.");
+    console.log("✅ Connexion SMTP réussie !");
   } catch (error) {
-    console.error("❌ Erreur de connexion SMTP (Identifiants invalides ?):", error);
-    throw new Error("Impossible de se connecter au service Email.");
+    console.error("❌ ECHEC Connexion SMTP :", error.message);
+    // On lance une erreur pour que le Frontend arrête de tourner
+    throw new Error("Impossible de contacter le serveur Gmail (Timeout ou Auth).");
   }
 
-  // 3. Configuration de l'email
+  // 3. MESSAGE
   const message = {
     from: `"Support Taxi App" <${process.env.EMAIL_USER}>`,
     to: options.email,
@@ -31,15 +39,15 @@ const sendEmail = async (options) => {
         <h2 style="color: #FF6B00;">${options.subject}</h2>
         <p>${options.message}</p>
         ${options.token ? `<h1 style="background: #eee; padding: 10px; display: inline-block; border-radius: 5px;">${options.token}</h1>` : ''}
-        <p>Si vous n'êtes pas à l'origine de cette demande, ignorez cet email.</p>
+        <p>Ceci est un message automatique, merci de ne pas répondre.</p>
       </div>
     `
   };
 
-  // 4. Envoi
-  console.log(`📤 Envoi de l'email à ${options.email}...`);
-  const info = await transporter.sendMail(message);
-  console.log("✅ Email envoyé avec succès. ID:", info.messageId);
+  // 4. ENVOI
+  console.log(`📤 Envoi en cours vers ${options.email}...`);
+  await transporter.sendMail(message);
+  console.log("✅ Email envoyé !");
 };
 
 module.exports = sendEmail;
