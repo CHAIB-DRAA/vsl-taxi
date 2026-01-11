@@ -1,90 +1,64 @@
 import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
-import { getRides, getContacts, respondToShare } from '../services/api'; 
+import api, { getRides, getContacts } from '../services/api'; // Assure-toi d'importer getContacts
 import { Alert } from 'react-native';
 
 const DataContext = createContext();
 
 export const DataProvider = ({ children }) => {
   const [allRides, setAllRides] = useState([]);
-  const [contacts, setContacts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [pendingInvitation, setPendingInvitation] = useState(null);
+  const [contacts, setContacts] = useState([]); // 👇 C'est ici que sont stockés les contacts
+  const [loading, setLoading] = useState(true);
 
-  // 1. CHARGEMENT DES DONNÉES (Version Robuste)
-  const loadData = useCallback(async (isSilent = false) => {
+  // --- FONCTION DE CHARGEMENT GLOBALE ---
+  const loadData = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
-      if (!isSilent) setLoading(true);
-      
-      console.log("🔄 Sync Global...");
+      console.log("🔄 Chargement des données...");
 
-      // 👇 ICI LA CORRECTION : On utilise allSettled pour ne pas tout bloquer en cas d'erreur
-      const results = await Promise.allSettled([
-        getRides(),     // Index 0
-        getContacts()   // Index 1
-      ]);
+      // 1. Charger les Courses
+      const ridesRes = await getRides();
+      setAllRides(ridesRes);
 
-      // --- TRAITEMENT DES COURSES (Index 0) ---
-      if (results[0].status === 'fulfilled') {
-        const rides = results[0].value || [];
-        setAllRides(rides);
-
-        // Détection d'invitation (Uniquement si on a réussi à charger les courses)
-        const invitation = rides.find(r => 
-          r.isShared && (r.statusPartage === 'pending' || r.shareStatus === 'pending')
-        );
-        setPendingInvitation(invitation || null);
-      } else {
-        console.warn("⚠️ Erreur chargement Rides:", results[0].reason);
+      // 2. Charger les Contacts (C'est ce qui te manquait peut-être)
+      try {
+        const contactsRes = await api.get('/contacts'); // Appel direct à la route
+        console.log("✅ Contacts chargés :", contactsRes.data.length);
+        setContacts(contactsRes.data);
+      } catch (err) {
+        console.log("⚠️ Erreur chargement contacts :", err);
+        // On ne bloque pas l'app si les contacts échouent, on met juste un tableau vide
+        setContacts([]);
       }
 
-      // --- TRAITEMENT DES CONTACTS (Index 1) ---
-      if (results[1].status === 'fulfilled') {
-        setContacts(results[1].value || []);
-      } else {
-        // C'est souvent lui qui échoue (404), mais maintenant ça ne bloquera plus les courses !
-        console.warn("⚠️ Erreur chargement Contacts:", results[1].reason);
-      }
-
-    } catch (err) {
-      console.error("🔥 Erreur Critique Sync:", err);
+    } catch (error) {
+      console.error("❌ Erreur chargement global :", error);
     } finally {
-      if (!isSilent) setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
-  // 2. LE TIMER GLOBAL (Toutes les 15s - un peu plus lent pour soulager le serveur)
-  useEffect(() => {
-    loadData(false); 
-    const interval = setInterval(() => {
-      loadData(true); 
-    }, 15000); // 15 secondes
-    return () => clearInterval(interval);
-  }, [loadData]);
-
-  // 3. FONCTION DE RÉPONSE GLOBALE
-  const handleGlobalRespond = async (rideId, action) => {
+  // --- ACTIONS ---
+  const handleGlobalRespond = async (rideId, status) => {
     try {
-      setLoading(true);
-      await respondToShare(rideId, action);
-      setPendingInvitation(null); 
-      
-      const msg = action === 'accepted' ? "Course acceptée !" : "Invitation refusée.";
-      setTimeout(() => {
-        Alert.alert("Info", msg);
-        loadData(true); 
-      }, 300);
-    } catch (err) {
-      console.error("Erreur réponse:", err);
+      await api.put(`/rides/${rideId}/respond`, { status });
+      await loadData(false); // Recharge sans spinner
+    } catch (e) {
       Alert.alert("Erreur", "Impossible de répondre.");
-    } finally {
-      setLoading(false);
     }
   };
 
+  // Chargement initial au lancement de l'app
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
   return (
     <DataContext.Provider value={{ 
-      allRides, contacts, loading, loadData, 
-      pendingInvitation, handleGlobalRespond 
+      allRides, 
+      contacts, // On partage les contacts avec toute l'app
+      loading, 
+      loadData, 
+      handleGlobalRespond 
     }}>
       {children}
     </DataContext.Provider>

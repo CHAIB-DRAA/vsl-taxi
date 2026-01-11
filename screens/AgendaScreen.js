@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-  View, Text, FlatList, ActivityIndicator, StyleSheet,
+   FlatList, ActivityIndicator, StyleSheet,
   Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, 
-  KeyboardAvoidingView, Platform, Dimensions, Linking, Vibration, StatusBar
+  KeyboardAvoidingView, Platform, Dimensions, Linking, Vibration, StatusBar,
+  View, Text
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
@@ -24,12 +25,11 @@ import GroupCreatorModal from '../components/GroupCreatorModal';
 import GroupListModal from '../components/GroupListModal'; 
 
 // --- SERVICES & CONTEXTE ---
-// 👇 J'ai ajouté syncBatchRides ici
 import { addRideToCalendar, syncBatchRides } from '../services/calendarService';
 import api, { updateRide, shareRide, deleteRide } from '../services/api';
 import { useData } from '../contexts/DataContext'; 
 
-const { height } = Dimensions.get('window');
+const { height, width } = Dimensions.get('window');
 
 // --- CONFIG CALENDRIER ---
 LocaleConfig.locales['fr'] = {
@@ -40,13 +40,19 @@ LocaleConfig.locales['fr'] = {
 };
 LocaleConfig.defaultLocale = 'fr';
 
+// --- PALETTE DE COULEURS PRO (FIXE) ---
 const THEME = {
-  primary: '#FF6B00',
-  bg: '#F4F6F8',
-  card: '#FFFFFF',
-  text: '#1A1A1A',
-  textLight: '#888888',
-  border: '#E0E0E0'
+  primary: '#FF6B00',      
+  primaryLight: '#FFF3E0', 
+  secondary: '#2E3A59',    
+  bg: '#F8F9FA',           
+  card: '#FFFFFF',         
+  text: '#1F2937',         
+  textLight: '#9CA3AF',    
+  border: '#E5E7EB',       
+  success: '#10B981',      
+  danger: '#EF4444',       
+  info: '#3B82F6',         
 };
 
 export default function AgendaScreen({ navigation }) {
@@ -97,7 +103,7 @@ export default function AgendaScreen({ navigation }) {
   const fetchGlobalPMTs = async () => { try { const res = await api.get('/documents/pmts/all'); setAllPMTs(res.data); } catch (err) {} };
   const fetchGroups = async () => { try { const res = await api.get('/groups'); setMyGroups(res.data); } catch (e) {} };
 
-  // --- 1. MAGIC PASTE -> CREATE SCREEN ---
+  // --- 1. MAGIC PASTE ---
   const handleImportFromClipboard = async () => {
     const text = await Clipboard.getStringAsync();
     
@@ -133,7 +139,7 @@ export default function AgendaScreen({ navigation }) {
     }
   };
 
-  // --- 2. SYNCHRO INTELLIGENTE (AJOUTÉE ICI) ---
+  // --- 2. SYNCHRO AGENDA ---
   const handleGlobalSync = () => {
     Alert.alert(
       "Synchronisation Agenda",
@@ -225,7 +231,7 @@ export default function AgendaScreen({ navigation }) {
       allRides.forEach(r=>{ 
           const d=moment(r.date).format('YYYY-MM-DD'); 
           if(!m[d])m[d]={dots:[]}; 
-          const c=r.isShared?'#FF9800':'#4CAF50'; 
+          const c=r.isShared?'#FF9800':'#10B981'; 
           if(!m[d].dots.find(dot=>dot.color===c))m[d].dots.push({key:r._id,color:c}); 
       }); 
       m[selectedDate]={...m[selectedDate],selected:true,selectedColor: THEME.primary}; 
@@ -298,18 +304,36 @@ export default function AgendaScreen({ navigation }) {
     if (tempScanUri) { await uploadDocument(tempScanUri, 'PMT'); setTempScanUri(null); }
   };
 
-  // --- ACTIONS (RETOUR, PARTAGE, MAPPY) ---
+  // --- ACTIONS ---
   const prepareReturnRide = () => { if (!activeRide) return; setReturnData({ date: moment(activeRide.date).format('YYYY-MM-DD'), time: '', startLocation: activeRide.endLocation, endLocation: activeRide.startLocation, type: 'Retour' }); setTempReturnDate(new Date()); setModals({ ...modals, options: false }); setReturnModal(true); };
-  const onReturnTimeChange = (event, selectedDate) => { if (Platform.OS === 'android') setShowTimePicker(false); if (selectedDate) { setTempReturnDate(selectedDate); setReturnData(prev => ({ ...prev, time: moment(selectedDate).format('HH:mm') })); } };
   
   const confirmCreateReturn = async () => {
     if (!returnData.time) return Alert.alert("Erreur", "Heure requise.");
     try { const [h, m] = returnData.time.split(':'); const d = moment(returnData.date).hour(parseInt(h)).minute(parseInt(m)).toISOString(); const n = { patientName: activeRide.patientName, patientPhone: activeRide.patientPhone, startLocation: returnData.startLocation, endLocation: returnData.endLocation, type: 'Retour', date: d, status: 'Confirmée', isRoundTrip: false }; await api.post('/rides', n); setReturnModal(false); loadData(true); Alert.alert("Succès", "Retour planifié !"); } catch (e) { Alert.alert("Erreur", "Impossible."); }
   };
 
-  const shareInternal = async (contact) => {
+  // 👇 CORRECTION ICI POUR LE PARTAGE 👇
+  const shareInternal = async (contactItem) => {
     if (!activeRide) return;
-    try { await shareRide(activeRide._id, contact.contactId._id, shareNote); setModals({ ...modals, share: false }); setShareNote(''); loadData(true); Alert.alert('Succès', `Envoyé à ${contact.contactId.fullName}.`); } catch (e) { Alert.alert('Erreur', "Échec."); }
+    try { 
+        // L'item est un objet "Contact" qui contient "contactId" (qui est l'utilisateur)
+        const recipientUserId = contactItem.contactId?._id; 
+        const recipientName = contactItem.contactId?.fullName;
+
+        if (!recipientUserId) {
+            return Alert.alert("Erreur", "Contact invalide.");
+        }
+
+        await shareRide(activeRide._id, recipientUserId, shareNote); 
+        
+        setModals({ ...modals, share: false }); 
+        setShareNote(''); 
+        loadData(true); 
+        Alert.alert('Succès', `Envoyé à ${recipientName}.`); 
+    } catch (e) { 
+        console.log(e);
+        Alert.alert('Erreur', "Échec de l'envoi."); 
+    }
   };
   
   const shareViaWhatsApp = () => {
@@ -318,13 +342,6 @@ export default function AgendaScreen({ navigation }) {
     const time = moment(activeRide.startTime || activeRide.date).format('HH:mm');
     const msg = `📅 *Dispo Course*\n🗓 ${date} à *${time}*\n📍 ${activeRide.startLocation}\n🏁 ${activeRide.endLocation}\n🚑 ${activeRide.type}` + (shareNote ? `\n\n📝 ${shareNote}` : '');
     Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Erreur", "WhatsApp absent."));
-  };
-
-  const openMappyRoute = () => {
-    if (!activeRide) return;
-    const s = encodeURIComponent(activeRide.startLocation || "");
-    const e = encodeURIComponent(activeRide.endLocation || "");
-    Linking.openURL(`https://fr.mappy.com/itineraire#/voiture/${s}/${e}/car`).catch(() => Alert.alert("Erreur", "Impossible d'ouvrir Mappy"));
   };
 
   // --- RENDER HELPERS ---
@@ -341,7 +358,9 @@ export default function AgendaScreen({ navigation }) {
 
   const renderEmptyState = () => (
       <View style={styles.emptyContainer}>
-          <Image source={{uri: 'https://cdn-icons-png.flaticon.com/512/7486/7486744.png'}} style={styles.emptyImage} />
+          <View style={styles.emptyIconCircle}>
+            <Ionicons name="calendar-outline" size={48} color={THEME.primary} />
+          </View>
           <Text style={styles.emptyTitle}>Journée Libre</Text>
           <Text style={styles.emptyText}>Aucune course prévue pour le moment.</Text>
           <TouchableOpacity style={styles.emptyBtn} onPress={handleImportFromClipboard}>
@@ -355,13 +374,13 @@ export default function AgendaScreen({ navigation }) {
   // ============================================================
   return (
     <ScreenWrapper style={{backgroundColor: THEME.bg}}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFF" />
+      <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
       
       {/* --- HEADER --- */}
       <View style={styles.header}>
         <View>
             <Text style={styles.headerTitle}>Mon Planning</Text>
-            <Text style={styles.headerSubtitle}>{moment(selectedDate).format('dddd D MMMM')}</Text>
+            <Text style={styles.headerSubtitle}>{moment(selectedDate).format('dddd D MMMM').toUpperCase()}</Text>
         </View>
         <View style={styles.headerRightButtons}>
             <OffersNotification /> 
@@ -379,11 +398,25 @@ export default function AgendaScreen({ navigation }) {
                 markedDates={markedDates} 
                 markingType={'multi-dot'} 
                 theme={{ 
-                    todayTextColor: THEME.primary, 
-                    selectedDayBackgroundColor: THEME.primary, 
+                    backgroundColor: THEME.card,
+                    calendarBackground: THEME.card,
+                    textSectionTitleColor: THEME.textLight,
+                    selectedDayBackgroundColor: THEME.primary,
+                    selectedDayTextColor: '#ffffff',
+                    todayTextColor: THEME.primary,
+                    dayTextColor: THEME.text,
+                    textDisabledColor: '#d9e1e8',
+                    dotColor: THEME.primary,
+                    selectedDotColor: '#ffffff',
                     arrowColor: THEME.primary,
+                    monthTextColor: THEME.text,
+                    indicatorColor: THEME.primary,
+                    textDayFontWeight: '500',
                     textMonthFontWeight: 'bold',
-                    textDayHeaderFontWeight: '600'
+                    textDayHeaderFontWeight: '600',
+                    textDayFontSize: 14,
+                    textMonthFontSize: 16,
+                    textDayHeaderFontSize: 13
                 }} 
             />
           </View>
@@ -392,37 +425,34 @@ export default function AgendaScreen({ navigation }) {
       {/* --- TOOLBAR ACTIONS RAPIDES --- */}
       <View style={styles.toolbar}>
           <TouchableOpacity onPress={handleImportFromClipboard} disabled={analyzing} style={styles.magicBtn}>
-              {analyzing ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="sparkles" size={20} color="#FFF" />}
+              {analyzing ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="sparkles" size={18} color="#FFF" />}
               <Text style={styles.magicBtnText}>Magic Paste</Text>
           </TouchableOpacity>
           
           <View style={{flexDirection:'row'}}>
             <TouchableOpacity onPress={() => setShowGroupList(true)} style={styles.iconBtn}>
-                <Ionicons name="people" size={22} color="#555" />
+                <Ionicons name="people" size={20} color={THEME.text} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.iconBtn}>
-                <Ionicons name="settings-outline" size={22} color="#555" />
+                <Ionicons name="settings-outline" size={20} color={THEME.text} />
             </TouchableOpacity>
           </View>
       </View>
 
       {/* --- LISTE DES COURSES --- */}
       <View style={styles.listContainer}>
-        {/* EN-TÊTE LISTE AVEC BOUTON SYNC RESTAURÉ 👇 */}
         <View style={styles.listHeader}>
-            <Text style={styles.dateTitle}>{moment(selectedDate).format('dddd D MMMM')}</Text>
-            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                
-                {/* 🟢 BOUTON SYNC PRÉSENT ICI */}
-                {dailyRides.length > 0 && (
-                  <TouchableOpacity onPress={handleGlobalSync} style={styles.syncBtn}>
-                    <Ionicons name="calendar-outline" size={16} color="#FFF" style={{marginRight: 4}} />
-                    <Text style={styles.syncBtnText}>Export</Text>
-                  </TouchableOpacity>
-                )}
-
-                <View style={styles.countBadge}><Text style={styles.countText}>{dailyRides.length}</Text></View>
+            <View style={{flexDirection:'row', alignItems:'center'}}>
+              <Text style={styles.dateTitle}>{moment(selectedDate).format('D MMMM')}</Text>
+              <View style={styles.countBadge}><Text style={styles.countText}>{dailyRides.length}</Text></View>
             </View>
+            
+            {dailyRides.length > 0 && (
+              <TouchableOpacity onPress={handleGlobalSync} style={styles.syncBtn}>
+                <Ionicons name="cloud-upload-outline" size={16} color={THEME.info} style={{marginRight: 6}} />
+                <Text style={styles.syncBtnText}>Sync Tel</Text>
+              </TouchableOpacity>
+            )}
         </View>
 
         {loading ? renderSkeleton() : (
@@ -437,7 +467,7 @@ export default function AgendaScreen({ navigation }) {
               return (
                 <View style={styles.rideWrapper}>
                   {status && (
-                    <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
+                    <View style={[styles.statusBadge, { backgroundColor: status.color, borderColor: status.color }]}>
                         <Ionicons name={status.icon} size={12} color={status.textColor} />
                         <Text style={[styles.statusText, {color: status.textColor}]}>{status.text}</Text>
                     </View>
@@ -512,19 +542,19 @@ export default function AgendaScreen({ navigation }) {
             <Text style={styles.bottomSheetTitle}>Fin de Course</Text>
             <View style={styles.inputRow}>
                 <View style={{flex:1, marginRight:10}}>
-                    <Text style={styles.inputLabel}>Km Réels</Text>
-                    <TextInput style={styles.sheetInput} placeholder="Ex: 25" keyboardType="numeric" value={billingData.kmReel} onChangeText={t => setBillingData({...billingData, kmReel: t})}/>
+                    <Text style={styles.inputLabel}>KM RÉELS</Text>
+                    <TextInput style={styles.sheetInput} placeholder="Ex: 25" placeholderTextColor="#CCC" keyboardType="numeric" value={billingData.kmReel} onChangeText={t => setBillingData({...billingData, kmReel: t})}/>
                 </View>
                 <View style={{flex:1}}>
-                    <Text style={styles.inputLabel}>Péages (€)</Text>
-                    <TextInput style={styles.sheetInput} placeholder="0.00" keyboardType="numeric" value={billingData.peage} onChangeText={t => setBillingData({...billingData, peage: t})}/>
+                    <Text style={styles.inputLabel}>PÉAGES (€)</Text>
+                    <TextInput style={styles.sheetInput} placeholder="0.00" placeholderTextColor="#CCC" keyboardType="numeric" value={billingData.peage} onChangeText={t => setBillingData({...billingData, peage: t})}/>
                 </View>
             </View>
             <TouchableOpacity style={styles.confirmBtn} onPress={confirmFinishRide}>
                 <Text style={styles.confirmBtnText}>TERMINER LA COURSE</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setFinishModal(false)} style={{marginTop:15, alignSelf:'center'}}>
-                <Text style={{color:'#888'}}>Annuler</Text>
+                <Text style={{color:THEME.textLight, fontSize: 16}}>Annuler</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -537,39 +567,58 @@ export default function AgendaScreen({ navigation }) {
                 <View style={styles.modalHandle} />
                 <Text style={styles.bottomSheetTitle}>Planifier le Retour</Text>
                 <TouchableOpacity onPress={() => setShowTimePicker(true)} style={styles.timeSelectBtn}>
-                    <Ionicons name="time" size={24} color="#333" />
-                    <Text style={{fontSize:20, fontWeight:'bold', marginLeft:10}}>{returnData.time || "--:--"}</Text>
+                    <Ionicons name="time" size={24} color={THEME.primary} />
+                    <Text style={{fontSize:22, fontWeight:'700', marginLeft:10, color: THEME.text}}>{returnData.time || "--:--"}</Text>
                 </TouchableOpacity>
                 {showTimePicker && (<DateTimePicker value={tempReturnDate} mode="time" is24Hour display="spinner" onChange={(e,d) => { setShowTimePicker(Platform.OS === 'ios'); if(d) { setTempReturnDate(d); setReturnData(p => ({...p, time: moment(d).format('HH:mm')})); } }} />)}
                 <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: THEME.primary}]} onPress={confirmCreateReturn}>
                     <Text style={styles.confirmBtnText}>VALIDER RETOUR</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setReturnModal(false)} style={{marginTop:15, alignSelf:'center'}}>
-                    <Text style={{color:'#888'}}>Annuler</Text>
+                    <Text style={{color:THEME.textLight, fontSize: 16}}>Annuler</Text>
                 </TouchableOpacity>
             </View>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL PARTAGE */}
+      {/* MODAL PARTAGE (CORRIGÉ POUR LE NOUVEAU BACKEND) */}
       <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor:'#FFF' }}>
-          <View style={styles.modalHeader}><Text style={styles.headerTitle}>Partager</Text><TouchableOpacity onPress={() => setModals({...modals, share: false})}><Ionicons name="close-circle" size={32} color="#999"/></TouchableOpacity></View>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: THEME.card }}>
+          <View style={styles.modalHeader}><Text style={styles.headerTitle}>Partager</Text><TouchableOpacity onPress={() => setModals({...modals, share: false})}><Ionicons name="close-circle" size={32} color={THEME.textLight}/></TouchableOpacity></View>
           <View style={{padding: 20, flex: 1}}>
-             <TextInput style={styles.noteInput} placeholder="Note (Optionnel)..." multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} textAlignVertical="top"/>
+             <TextInput style={styles.noteInput} placeholder="Ajouter une note (code, étage...)" placeholderTextColor={THEME.textLight} multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} textAlignVertical="top"/>
              
-             {/* 🟢 BOUTON WHATSAPP */}
              <TouchableOpacity style={styles.whatsappBtn} onPress={shareViaWhatsApp}>
-                <Ionicons name="logo-whatsapp" size={24} color="#FFF" style={{marginRight: 10}}/>
-                <Text style={styles.whatsappText}>WhatsApp</Text>
+                <Ionicons name="logo-whatsapp" size={22} color="#FFF" style={{marginRight: 10}}/>
+                <Text style={styles.whatsappText}>Envoyer par WhatsApp</Text>
              </TouchableOpacity>
 
-             <FlatList data={contacts} keyExtractor={(item) => item._id} renderItem={({ item }) => (
-                 <TouchableOpacity style={styles.contactRow} onPress={() => shareInternal(item)}>
-                   <Text style={styles.contactName}>{item.contactId?.fullName}</Text>
-                   <Ionicons name="paper-plane-outline" size={24} color="#4CAF50" />
-                 </TouchableOpacity>
-               )} ListEmptyComponent={<Text style={{color:'#999'}}>Aucun contact.</Text>} />
+             <Text style={styles.sectionTitle}>Ou via l'application :</Text>
+             
+             {/* 👇 LISTE DES CONTACTS MISE À JOUR 👇 */}
+             <FlatList 
+               data={contacts || []} 
+               keyExtractor={(item) => item._id} 
+               renderItem={({ item }) => {
+                 // Protection si un contact est mal formé
+                 if (!item.contactId) return null;
+                 
+                 return (
+                   <TouchableOpacity style={styles.contactRow} onPress={() => shareInternal(item)}>
+                     <View style={{flexDirection:'row', alignItems:'center'}}>
+                        <View style={{width:40, height:40, borderRadius:20, backgroundColor: THEME.bg, alignItems:'center', justifyContent:'center', marginRight: 12}}>
+                          <Text style={{fontWeight:'bold', color: THEME.primary}}>
+                             {item.contactId.fullName ? item.contactId.fullName.charAt(0) : '?'}
+                          </Text>
+                        </View>
+                        <Text style={styles.contactName}>{item.contactId.fullName}</Text>
+                     </View>
+                     <Ionicons name="paper-plane-outline" size={20} color={THEME.primary} />
+                   </TouchableOpacity>
+                 );
+               }} 
+               ListEmptyComponent={<Text style={{color:THEME.textLight, textAlign:'center', marginTop: 20}}>Aucun collègue enregistré.</Text>} 
+             />
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -579,18 +628,29 @@ export default function AgendaScreen({ navigation }) {
         <View style={styles.docModalContainer}>
           <View style={styles.modalHeader}>
               <Text style={styles.headerTitle}>Dossier Médical</Text>
-              <TouchableOpacity onPress={() => setModals({...modals, docs: false})}><Ionicons name="close-circle" size={32} color="#999"/></TouchableOpacity>
+              <TouchableOpacity onPress={() => setModals({...modals, docs: false})}><Ionicons name="close-circle" size={32} color={THEME.textLight}/></TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={{padding: 20}}>
-              {loadingDocs ? <ActivityIndicator size="large" color="#FF6B00"/> : patientDocs.length === 0 ? <Text style={styles.emptyText}>Aucun document.</Text> : patientDocs.map((d, i) => (
-                  <View key={i} style={styles.docCard}><Text style={styles.docTitle}>{d.type}</Text><Image source={{ uri: d.imageData }} style={styles.docImage} resizeMode="contain"/></View>
+              {loadingDocs ? <ActivityIndicator size="large" color={THEME.primary}/> : patientDocs.length === 0 ? 
+                <View style={styles.emptyContainer}>
+                    <Ionicons name="document-text-outline" size={50} color={THEME.textLight} />
+                    <Text style={styles.emptyText}>Aucun document.</Text>
+                </View> 
+                : patientDocs.map((d, i) => (
+                  <View key={i} style={styles.docCard}>
+                      <View style={styles.docHeader}>
+                        <Text style={styles.docTitle}>{d.type}</Text>
+                        <Ionicons name="checkmark-circle" size={18} color={THEME.success} />
+                      </View>
+                      <Image source={{ uri: d.imageData }} style={styles.docImage} resizeMode="contain"/>
+                  </View>
               ))}
               <View style={styles.addDocSection}>
                  <Text style={styles.sectionTitle}>Ajouter un document</Text>
                  <View style={styles.scanGrid}>
-                    <View style={styles.scanColumn}><DocumentScannerButton title="BT" docType="PMT" color="#FF6B00" onScan={handleDocumentScanned} isLoading={uploading}/><TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('PMT')}><Text style={styles.importText}>Galerie</Text></TouchableOpacity></View>
-                    <View style={styles.scanColumn}><DocumentScannerButton title="Vitale" docType="CarteVitale" color="#4CAF50" onScan={handleDocumentScanned} isLoading={uploading}/><TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('CarteVitale')}><Text style={styles.importText}>Galerie</Text></TouchableOpacity></View>
-                    <View style={styles.scanColumn}><DocumentScannerButton title="Mutuelle" docType="Mutuelle" color="#2196F3" onScan={handleDocumentScanned} isLoading={uploading}/><TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('Mutuelle')}><Text style={styles.importText}>Galerie</Text></TouchableOpacity></View>
+                    <View style={styles.scanColumn}><DocumentScannerButton title="BT" docType="PMT" color={THEME.primary} onScan={handleDocumentScanned} isLoading={uploading}/><TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('PMT')}><Text style={styles.importText}>Galerie</Text></TouchableOpacity></View>
+                    <View style={styles.scanColumn}><DocumentScannerButton title="Vitale" docType="CarteVitale" color={THEME.success} onScan={handleDocumentScanned} isLoading={uploading}/><TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('CarteVitale')}><Text style={styles.importText}>Galerie</Text></TouchableOpacity></View>
+                    <View style={styles.scanColumn}><DocumentScannerButton title="Mutuelle" docType="Mutuelle" color={THEME.info} onScan={handleDocumentScanned} isLoading={uploading}/><TouchableOpacity style={styles.importBtn} onPress={() => pickFromGallery('Mutuelle')}><Text style={styles.importText}>Galerie</Text></TouchableOpacity></View>
                  </View>
               </View>
           </ScrollView>
@@ -599,13 +659,35 @@ export default function AgendaScreen({ navigation }) {
 
       <Modal visible={btValidationModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.finishCard, {backgroundColor: '#FFF3E0'}]}>
-            <View style={styles.finishHeader}><Text style={[styles.finishTitle, {color: '#E65100'}]}>🛡️ Vérification CPAM</Text><TouchableOpacity onPress={() => setBtValidationModal(false)}><Ionicons name="close" size={24} color="#333" /></TouchableOpacity></View>
-            <Text style={styles.cpamWarning}>Vérifiez la date de prescription.</Text>
-            <TouchableOpacity onPress={() => setShowPrescriptionPicker(true)} style={[styles.inputWrapper, {borderColor: '#FF9800', backgroundColor: '#FFF'}]}><Ionicons name="calendar" size={20} color="#E65100" style={{marginRight:10}}/><Text style={{fontSize:18, fontWeight:'bold', color: '#333'}}>{moment(prescriptionDate).format('DD/MM/YYYY')}</Text></TouchableOpacity>
+          <View style={[styles.finishCard, {backgroundColor: '#FFF'}]}>
+            <View style={styles.finishHeader}>
+                <Text style={[styles.finishTitle, {color: THEME.text}]}>🛡️ Vérification CPAM</Text>
+                <TouchableOpacity onPress={() => setBtValidationModal(false)}><Ionicons name="close" size={24} color={THEME.text} /></TouchableOpacity>
+            </View>
+            <Text style={styles.cpamWarning}>La date de prescription doit être antérieure ou égale à la date de la course.</Text>
+            
+            <TouchableOpacity onPress={() => setShowPrescriptionPicker(true)} style={styles.datePickerBtn}>
+                <Ionicons name="calendar" size={20} color={THEME.primary} style={{marginRight:10}}/>
+                <Text style={{fontSize:18, fontWeight:'bold', color: THEME.text}}>{moment(prescriptionDate).format('DD/MM/YYYY')}</Text>
+            </TouchableOpacity>
+            
             {showPrescriptionPicker && (<DateTimePicker value={prescriptionDate} mode="date" display="default" onChange={(event, date) => { if(Platform.OS === 'android') setShowPrescriptionPicker(false); if(date) setPrescriptionDate(date); }} />)}
-            <View style={styles.comparisonRow}><Text style={styles.compValue}>Course: {moment(activeRide?.date).format('DD/MM')}</Text><Ionicons name={moment(prescriptionDate).isAfter(moment(activeRide?.date)) ? "alert-circle" : "arrow-forward-circle"} size={30} color={moment(prescriptionDate).isAfter(moment(activeRide?.date)) ? "red" : "green"} /><Text style={[styles.compValue, moment(prescriptionDate).isAfter(moment(activeRide?.date)) && {color:'red'}]}>Prescr: {moment(prescriptionDate).format('DD/MM')}</Text></View>
-            <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: '#E65100'}]} onPress={validateAndUploadBT}><Text style={{color:'#FFF', fontWeight:'bold', fontSize: 16}}>VALIDER LE BT</Text></TouchableOpacity>
+            
+            <View style={styles.comparisonRow}>
+                <View>
+                    <Text style={styles.compLabel}>COURSE</Text>
+                    <Text style={styles.compValue}>{moment(activeRide?.date).format('DD/MM')}</Text>
+                </View>
+                <Ionicons name={moment(prescriptionDate).isAfter(moment(activeRide?.date)) ? "alert-circle" : "arrow-forward-circle"} size={30} color={moment(prescriptionDate).isAfter(moment(activeRide?.date)) ? THEME.danger : THEME.success} />
+                <View>
+                    <Text style={styles.compLabel}>PRESCRIPTION</Text>
+                    <Text style={[styles.compValue, moment(prescriptionDate).isAfter(moment(activeRide?.date)) && {color:THEME.danger}]}>{moment(prescriptionDate).format('DD/MM')}</Text>
+                </View>
+            </View>
+            
+            <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: THEME.primary}]} onPress={validateAndUploadBT}>
+                <Text style={{color:'#FFF', fontWeight:'bold', fontSize: 16}}>VALIDER LE BT</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -615,101 +697,165 @@ export default function AgendaScreen({ navigation }) {
   );
 }
 
+// ============================================================
+// STYLE SHEET "PRO"
+// ============================================================
 const styles = StyleSheet.create({
-  // HEADER
+  // --- HEADER ---
   header: { 
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
-    padding: 20, paddingTop: 10, backgroundColor: '#FFF', 
-    borderBottomWidth: 1, borderBottomColor: '#F0F0F0' 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    paddingHorizontal: 20, 
+    paddingVertical: 15, 
+    backgroundColor: THEME.card, 
+    elevation: 4, 
+    shadowColor: '#000', 
+    shadowOpacity: 0.05, 
+    shadowRadius: 10, 
+    shadowOffset: {width:0, height:4},
+    zIndex: 10
   },
-  headerTitle: { fontSize: 24, fontWeight: '800', color: THEME.text },
-  headerSubtitle: { fontSize: 14, color: THEME.textLight, textTransform: 'capitalize', marginTop: 2 },
+  headerTitle: { fontSize: 28, fontWeight: '800', color: THEME.text, letterSpacing: -0.5 },
+  headerSubtitle: { fontSize: 14, color: THEME.primary, fontWeight: '600', letterSpacing: 0.5 },
   headerRightButtons: { flexDirection: 'row', alignItems: 'center' },
-  calendarToggle: { padding: 8, backgroundColor: '#FFF3E0', borderRadius: 12, marginLeft: 10 },
+  calendarToggle: { padding: 10, backgroundColor: THEME.bg, borderRadius: 12, marginLeft: 12 },
 
-  // CALENDRIER
-  calendarContainer: { borderRadius: 20, overflow: 'hidden', margin: 15, elevation: 3, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10 },
+  // --- CALENDRIER ---
+  calendarContainer: { 
+    borderRadius: 24, 
+    overflow: 'hidden', 
+    margin: 15, 
+    backgroundColor: THEME.card,
+    elevation: 8, 
+    shadowColor: THEME.primary, 
+    shadowOpacity: 0.15, 
+    shadowRadius: 15,
+    shadowOffset: {width:0, height:8}
+  },
 
-  // TOOLBAR
-  toolbar: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 10 },
+  // --- TOOLBAR ---
+  toolbar: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20, marginTop: 5 },
   magicBtn: { 
     flexDirection: 'row', alignItems: 'center', backgroundColor: THEME.primary, 
-    paddingVertical: 10, paddingHorizontal: 20, borderRadius: 25, elevation: 4,
-    shadowColor: THEME.primary, shadowOpacity: 0.4, shadowOffset: {width:0, height:4}
+    paddingVertical: 12, paddingHorizontal: 24, borderRadius: 30, elevation: 6,
+    shadowColor: THEME.primary, shadowOpacity: 0.4, shadowOffset: {width:0, height:6}, shadowRadius: 8
   },
-  magicBtnText: { color: '#FFF', fontWeight: 'bold', marginLeft: 8 },
-  iconBtn: { padding: 10, backgroundColor: '#FFF', borderRadius: 12, marginLeft: 10, elevation: 1 },
+  magicBtnText: { color: '#FFF', fontWeight: '700', marginLeft: 8, fontSize: 15 },
+  iconBtn: { padding: 12, backgroundColor: THEME.card, borderRadius: 14, marginLeft: 12, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 3, shadowOffset: {width:0, height:2} },
 
-  // LISTE
-  listContainer: { flex: 1, paddingHorizontal: 15 },
+  // --- LISTE ---
+  listContainer: { flex: 1, paddingHorizontal: 20 },
+  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  dateTitle: { fontSize: 20, fontWeight: '800', textTransform: 'capitalize', color: THEME.text },
   
-  // 👇 STYLE LIST HEADER AVEC LE BOUTON SYNC
-  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 15 },
-  dateTitle: { fontSize: 18, fontWeight: '700', textTransform: 'capitalize', color: '#333' },
-  
-  syncBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4285F4', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginRight: 10, elevation: 2 },
-  syncBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  syncBtn: { 
+      flexDirection: 'row', alignItems: 'center', 
+      backgroundColor: '#EBF5FF', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 
+  },
+  syncBtnText: { color: THEME.info, fontWeight: '700', fontSize: 12 },
 
-  countBadge: { backgroundColor: '#FF6B00', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4 },
-  countText: { color: '#FFF', fontWeight: 'bold' },
+  countBadge: { backgroundColor: THEME.primaryLight, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, marginLeft: 8 },
+  countText: { color: THEME.primary, fontWeight: '800', fontSize: 12 },
 
-  rideWrapper: { marginBottom: 15 },
+  rideWrapper: { marginBottom: 18 },
   statusBadge: { 
     flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', 
-    paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginBottom: -8, 
-    zIndex: 1, marginLeft: 10 
+    paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginBottom: -10, 
+    zIndex: 1, marginLeft: 15, borderWidth: 1
   },
-  statusText: { fontSize: 10, fontWeight: 'bold', marginLeft: 4 },
+  statusText: { fontSize: 10, fontWeight: '800', marginLeft: 4 },
 
-  // EMPTY STATE
-  emptyContainer: { alignItems: 'center', marginTop: 50 },
-  emptyImage: { width: 100, height: 100, opacity: 0.6, marginBottom: 20 },
-  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  emptyText: { fontSize: 14, color: '#888', marginTop: 5 },
-  emptyBtn: { marginTop: 20, paddingVertical: 10, paddingHorizontal: 20, borderWidth: 1, borderColor: THEME.primary, borderRadius: 20 },
-  emptyBtnText: { color: THEME.primary, fontWeight: 'bold' },
+  // --- EMPTY STATE ---
+  emptyContainer: { alignItems: 'center', marginTop: 60 },
+  emptyIconCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: THEME.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  emptyTitle: { fontSize: 20, fontWeight: '800', color: THEME.text },
+  emptyText: { fontSize: 15, color: THEME.textLight, marginTop: 8, textAlign: 'center', maxWidth: '70%' },
+  emptyBtn: { marginTop: 30, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 2, borderColor: THEME.primary, borderRadius: 30 },
+  emptyBtnText: { color: THEME.primary, fontWeight: '700' },
 
-  // SKELETON
-  skeletonCard: { backgroundColor: '#FFF', padding: 20, borderRadius: 15, marginBottom: 10 },
-  skeletonLineShort: { width: '40%', height: 15, backgroundColor: '#F0F0F0', borderRadius: 4, marginBottom: 10 },
-  skeletonLineLong: { width: '80%', height: 15, backgroundColor: '#F0F0F0', borderRadius: 4 },
+  // --- SKELETON ---
+  skeletonCard: { backgroundColor: THEME.card, padding: 20, borderRadius: 20, marginBottom: 15 },
+  skeletonLineShort: { width: '40%', height: 16, backgroundColor: THEME.bg, borderRadius: 8, marginBottom: 12 },
+  skeletonLineLong: { width: '80%', height: 16, backgroundColor: THEME.bg, borderRadius: 8 },
 
-  // MODALS & SHEETS
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  bottomSheet: { backgroundColor: '#FFF', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 25, paddingBottom: 40 },
-  modalHandle: { width: 40, height: 5, backgroundColor: '#DDD', borderRadius: 3, alignSelf: 'center', marginBottom: 20 },
-  bottomSheetTitle: { fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-  inputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  inputLabel: { fontSize: 12, fontWeight: 'bold', color: '#666', marginBottom: 5 },
-  sheetInput: { backgroundColor: '#F5F5F5', borderRadius: 12, padding: 15, fontSize: 18, fontWeight: 'bold', textAlign: 'center' },
-  confirmBtn: { backgroundColor: '#4CAF50', padding: 18, borderRadius: 15, alignItems: 'center', shadowColor: "#4CAF50", shadowOpacity: 0.3, shadowOffset: {width:0, height:4} },
-  confirmBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  // --- MODALS BASE ---
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  bottomSheet: { 
+      backgroundColor: THEME.card, 
+      borderTopLeftRadius: 30, 
+      borderTopRightRadius: 30, 
+      padding: 30, 
+      paddingBottom: 50,
+      shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 20, elevation: 20
+  },
+  modalHandle: { width: 50, height: 6, backgroundColor: THEME.border, borderRadius: 3, alignSelf: 'center', marginBottom: 25 },
+  bottomSheetTitle: { fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 30, color: THEME.text },
   
-  timeSelectBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', padding: 20, borderRadius: 15, justifyContent: 'center', marginBottom: 20 },
+  // --- FORMS ---
+  inputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 },
+  inputLabel: { fontSize: 12, fontWeight: '700', color: THEME.textLight, marginBottom: 8, letterSpacing: 1 },
+  sheetInput: { 
+      backgroundColor: THEME.bg, borderRadius: 16, padding: 18, 
+      fontSize: 20, fontWeight: '700', textAlign: 'center', color: THEME.text 
+  },
+  confirmBtn: { 
+      backgroundColor: THEME.success, padding: 20, borderRadius: 20, 
+      alignItems: 'center', shadowColor: THEME.success, shadowOpacity: 0.4, 
+      shadowOffset: {width:0, height:6}, shadowRadius: 10, elevation: 6 
+  },
+  confirmBtnText: { color: '#FFF', fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
+  
+  timeSelectBtn: { 
+      flexDirection: 'row', alignItems: 'center', backgroundColor: THEME.bg, 
+      padding: 24, borderRadius: 20, justifyContent: 'center', marginBottom: 30 
+  },
 
-  // DOCS MODAL SPECIFIC
-  docModalContainer: { flex: 1, backgroundColor: '#F2F2F2' },
-  modalHeader: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#F0F0F0' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' }, 
-  docCard: { backgroundColor: '#FFF', borderRadius: 16, marginBottom: 20, padding: 12, elevation: 2 },
-  docTitle: { fontWeight: 'bold', marginBottom: 8, fontSize: 16, color: '#333' },
-  docImage: { width: '100%', height: height * 0.35, borderRadius: 8, backgroundColor: '#EEE' },
-  addDocSection: { marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: '#DDD' },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#333' },
+  // --- DOCS MODAL ---
+  docModalContainer: { flex: 1, backgroundColor: THEME.bg },
+  modalHeader: { 
+      padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
+      backgroundColor: THEME.card, borderBottomWidth: 1, borderColor: THEME.border 
+  },
+  docCard: { backgroundColor: THEME.card, borderRadius: 20, marginBottom: 20, padding: 15, elevation: 4, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 8 },
+  docHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  docTitle: { fontWeight: '700', fontSize: 16, color: THEME.text },
+  docImage: { width: '100%', height: height * 0.3, borderRadius: 12, backgroundColor: THEME.bg },
+  addDocSection: { marginTop: 10, paddingTop: 20, borderTopWidth: 1, borderTopColor: THEME.border },
+  sectionTitle: { fontSize: 18, fontWeight: '800', marginBottom: 20, color: THEME.text },
   scanGrid: { flexDirection: 'row', justifyContent: 'space-between' },
-  scanColumn: { alignItems: 'center', width: '30%' },
-  importBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 8, padding: 6, backgroundColor: '#E0E0E0', borderRadius: 20 },
-  importText: { fontSize: 10, color: '#555', marginLeft: 4, fontWeight: 'bold' },
+  scanColumn: { alignItems: 'center', width: '31%' },
+  importBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: THEME.bg, borderRadius: 20 },
+  importText: { fontSize: 11, color: THEME.textLight, marginLeft: 4, fontWeight: '700' },
 
-  // STYLE WHATSAPP BTN
-  noteInput: { backgroundColor: '#F5F5F5', borderRadius: 12, padding: 15, height: 80, marginBottom: 15, borderWidth: 1, borderColor: '#DDD', fontSize: 16 },
-  whatsappBtn: { backgroundColor: '#25D366', padding: 16, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20, elevation: 2 },
-  whatsappText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#EEE' },
-  contactName: { fontSize: 16, fontWeight: '600', color: '#333', marginLeft: 10 },
-  cpamWarning: { fontSize: 13, color: '#5D4037', marginBottom: 20, lineHeight: 20 },
-  comparisonRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginVertical: 20, backgroundColor: '#FFE0B2', padding: 10, borderRadius: 10 },
-  compLabel: { fontSize: 10, color: '#E65100', fontWeight: 'bold', textAlign: 'center' },
-  compValue: { fontSize: 18, fontWeight: 'bold', color: '#333', textAlign: 'center' },
-  mappyBtn: { backgroundColor: '#009688', padding: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#00796B', elevation: 2 },
+  // --- SHARE MODAL ---
+  noteInput: { 
+      backgroundColor: THEME.bg, borderRadius: 16, padding: 18, height: 100, 
+      marginBottom: 20, borderWidth: 1, borderColor: THEME.border, fontSize: 16, color: THEME.text 
+  },
+  whatsappBtn: { 
+      backgroundColor: '#25D366', padding: 18, borderRadius: 16, flexDirection: 'row', 
+      alignItems: 'center', justifyContent: 'center', marginBottom: 30, elevation: 4,
+      shadowColor: '#25D366', shadowOpacity: 0.3, shadowRadius: 8
+  },
+  whatsappText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1, borderColor: THEME.border },
+  contactName: { fontSize: 16, fontWeight: '600', color: THEME.text },
+
+  // --- VERIFICATION CPAM ---
+  finishCard: { width: '85%', borderRadius: 24, padding: 25, elevation: 10 },
+  finishHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
+  finishTitle: { fontSize: 20, fontWeight: '800' },
+  cpamWarning: { fontSize: 14, color: THEME.textLight, marginBottom: 20, lineHeight: 22, textAlign: 'center' },
+  datePickerBtn: { 
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', 
+      padding: 16, backgroundColor: THEME.bg, borderRadius: 16, marginBottom: 25,
+      borderWidth: 1, borderColor: THEME.border
+  },
+  comparisonRow: { 
+      flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', 
+      marginBottom: 30, backgroundColor: THEME.bg, padding: 15, borderRadius: 16 
+  },
+  compLabel: { fontSize: 10, color: THEME.textLight, fontWeight: '800', textAlign: 'center', marginBottom: 4 },
+  compValue: { fontSize: 18, fontWeight: '800', color: THEME.text, textAlign: 'center' },
 });

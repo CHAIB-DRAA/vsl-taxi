@@ -5,12 +5,9 @@ import {
 } from 'react-native';
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import { Ionicons } from '@expo/vector-icons'; // Assure-toi d'avoir installé @expo/vector-icons
+import { Ionicons } from '@expo/vector-icons'; 
 
-const API_URL = 'https://vsl-taxi.onrender.com/api/user'; // Vérifie que c'est la bonne URL (api/user ou api/auth selon ton backend)
-// NOTE : Si tu as mis les routes auth dans /api/auth dans le backend, change ici. 
-// D'après ton code précédent c'était api/user/login, donc je garde api/user.
-
+const API_URL = 'https://vsl-taxi.onrender.com/api/user'; 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignInScreen({ navigation, onSignIn }) {
@@ -19,16 +16,19 @@ export default function SignInScreen({ navigation, onSignIn }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // --- États Mot de Passe Oublié ---
+  // --- États Mot de Passe Oublié (MULTI-ÉTAPES) ---
   const [forgotModalVisible, setForgotModalVisible] = useState(false);
+  const [resetStep, setResetStep] = useState(1); // 1 = Email, 2 = Code + MDP
   const [resetEmail, setResetEmail] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
 
   // Validation email
   const isValidEmail = (email) => EMAIL_REGEX.test(email);
 
   // ==========================================
-  // 1. GESTION DU LOGIN (Ton code existant)
+  // 1. GESTION DU LOGIN
   // ==========================================
   const handleSignIn = async () => {
     Keyboard.dismiss();
@@ -47,7 +47,6 @@ export default function SignInScreen({ navigation, onSignIn }) {
     setLoading(true);
 
     try {
-      // Vérifie bien si ton backend attend /login sur /api/user ou /api/auth
       const res = await axios.post(
         `${API_URL}/login`, 
         { email: cleanEmail, password },
@@ -59,7 +58,7 @@ export default function SignInScreen({ navigation, onSignIn }) {
         await SecureStore.setItemAsync('userEmail', cleanEmail);
 
         onSignIn({
-          user: res.data.user || { email: cleanEmail }, // Fallback si user n'est pas renvoyé
+          user: res.data.user || { email: cleanEmail }, 
           token: res.data.token
         });
       } else {
@@ -67,7 +66,7 @@ export default function SignInScreen({ navigation, onSignIn }) {
       }
 
     } catch (err) {
-      console.log('Login failed'); 
+      console.log('Login failed', err); 
       let userMessage = 'Une erreur est survenue.';
 
       if (err.response) {
@@ -89,7 +88,7 @@ export default function SignInScreen({ navigation, onSignIn }) {
   };
 
   // ==========================================
-  // 2. GESTION MOT DE PASSE OUBLIÉ
+  // 2. MOT DE PASSE OUBLIÉ - ÉTAPE 1 (Envoi Email)
   // ==========================================
   const handleResetRequest = async () => {
     const cleanResetEmail = resetEmail.trim();
@@ -102,25 +101,16 @@ export default function SignInScreen({ navigation, onSignIn }) {
     setResetLoading(true);
 
     try {
-      // Appel à la route créée précédemment
-      // Attention : vérifie si ta route est /forgot-password ou /api/user/forgot-password
       await axios.post(`${API_URL}/forgot-password`, { 
         email: cleanResetEmail 
       });
 
-      // On ferme le modal et on prévient l'utilisateur
-      setForgotModalVisible(false);
-      setResetEmail('');
-      
-      Alert.alert(
-        "Email envoyé 📧", 
-        "Si ce compte existe, vous recevrez un code de réinitialisation."
-      );
+      // ✅ SUCCÈS : On passe à l'étape 2
+      Alert.alert("Succès", "Code envoyé ! Vérifiez vos emails (et spams).");
+      setResetStep(2);
 
     } catch (error) {
-      console.log("Reset error", error);
-      // Même si l'email n'existe pas (404), pour la sécurité, on peut dire que c'est envoyé
-      // Ou alors afficher un message générique.
+      console.log("Reset Step 1 error", error);
       if (error.response && error.response.status === 404) {
          Alert.alert("Compte introuvable", "Aucun compte associé à cet email.");
       } else {
@@ -129,6 +119,47 @@ export default function SignInScreen({ navigation, onSignIn }) {
     } finally {
       setResetLoading(false);
     }
+  };
+
+  // ==========================================
+  // 3. MOT DE PASSE OUBLIÉ - ÉTAPE 2 (Validation Finale)
+  // ==========================================
+  const handleFinalReset = async () => {
+    if (!resetCode || !newPassword) {
+      Alert.alert("Erreur", "Le code et le nouveau mot de passe sont requis.");
+      return;
+    }
+
+    setResetLoading(true);
+
+    try {
+      // Appel à la route de validation
+      await axios.post(`${API_URL}/reset-password`, { 
+        resetToken: resetCode.trim(), 
+        newPassword: newPassword 
+      });
+
+      // ✅ SUCCÈS TOTAL
+      Alert.alert("Félicitations 🎉", "Mot de passe modifié avec succès ! Connectez-vous.");
+      
+      // On ferme tout et on nettoie
+      closeResetModal();
+
+    } catch (error) {
+      console.log("Reset Step 2 error", error);
+      Alert.alert("Erreur", "Code invalide ou expiré.");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  // Fonction pour fermer proprement le modal
+  const closeResetModal = () => {
+    setForgotModalVisible(false);
+    setResetStep(1); // On remet à l'étape 1 pour la prochaine fois
+    setResetEmail('');
+    setResetCode('');
+    setNewPassword('');
   };
 
   // ==========================================
@@ -192,48 +223,96 @@ export default function SignInScreen({ navigation, onSignIn }) {
           </View>
         )}
 
-        {/* --- MODAL DE RÉCUPÉRATION --- */}
+        {/* --- MODAL DE RÉCUPÉRATION (DYNAMIQUE) --- */}
         <Modal
             animationType="slide"
             transparent={true}
             visible={forgotModalVisible}
-            onRequestClose={() => setForgotModalVisible(false)}
+            onRequestClose={closeResetModal}
         >
             <View style={styles.modalOverlay}>
                 <View style={styles.modalContent}>
                     <TouchableOpacity 
                         style={styles.closeModalBtn} 
-                        onPress={() => setForgotModalVisible(false)}
+                        onPress={closeResetModal}
                     >
                         <Ionicons name="close" size={24} color="#666" />
                     </TouchableOpacity>
 
-                    <Text style={styles.modalTitle}>Réinitialisation</Text>
+                    <Text style={styles.modalTitle}>
+                        {resetStep === 1 ? "Réinitialisation" : "Nouveau mot de passe"}
+                    </Text>
+                    
                     <Text style={styles.modalDesc}>
-                        Entrez votre email pour recevoir un code de sécurité.
+                        {resetStep === 1 
+                            ? "Entrez votre email pour recevoir un code." 
+                            : "Entrez le code reçu et votre nouveau mot de passe."}
                     </Text>
 
-                    <TextInput
-                        style={[styles.input, {width: '100%', marginTop: 15}]}
-                        placeholder="Votre email"
-                        placeholderTextColor="#999"
-                        autoCapitalize="none"
-                        keyboardType="email-address"
-                        value={resetEmail}
-                        onChangeText={setResetEmail}
-                    />
+                    {/* --- CONTENU ÉTAPE 1 : EMAIL --- */}
+                    {resetStep === 1 ? (
+                        <>
+                            <TextInput
+                                style={[styles.input, {width: '100%', marginTop: 15}]}
+                                placeholder="Votre email"
+                                placeholderTextColor="#999"
+                                autoCapitalize="none"
+                                keyboardType="email-address"
+                                value={resetEmail}
+                                onChangeText={setResetEmail}
+                            />
 
-                    <TouchableOpacity 
-                        style={[styles.button, {width: '100%', marginTop: 10}]} 
-                        onPress={handleResetRequest}
-                        disabled={resetLoading}
-                    >
-                        {resetLoading ? (
-                            <ActivityIndicator color="#FFF" />
-                        ) : (
-                            <Text style={styles.buttonText}>Envoyer le code</Text>
-                        )}
-                    </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.button, {width: '100%', marginTop: 10}]} 
+                                onPress={handleResetRequest}
+                                disabled={resetLoading}
+                            >
+                                {resetLoading ? (
+                                    <ActivityIndicator color="#FFF" />
+                                ) : (
+                                    <Text style={styles.buttonText}>Envoyer le code</Text>
+                                )}
+                            </TouchableOpacity>
+                        </>
+                    ) : (
+                    /* --- CONTENU ÉTAPE 2 : CODE + PASSWORD --- */
+                        <>
+                            <TextInput
+                                style={[styles.input, {width: '100%', marginTop: 15}]}
+                                placeholder="Code reçu (ex: A1B2C)"
+                                placeholderTextColor="#999"
+                                autoCapitalize="characters"
+                                value={resetCode}
+                                onChangeText={setResetCode}
+                            />
+                            
+                            <TextInput
+                                style={[styles.input, {width: '100%'}]}
+                                placeholder="Nouveau mot de passe"
+                                placeholderTextColor="#999"
+                                secureTextEntry
+                                value={newPassword}
+                                onChangeText={setNewPassword}
+                            />
+
+                            <TouchableOpacity 
+                                style={[styles.button, {width: '100%', marginTop: 10}]} 
+                                onPress={handleFinalReset}
+                                disabled={resetLoading}
+                            >
+                                {resetLoading ? (
+                                    <ActivityIndicator color="#FFF" />
+                                ) : (
+                                    <Text style={styles.buttonText}>Valider le changement</Text>
+                                )}
+                            </TouchableOpacity>
+
+                            <TouchableOpacity onPress={() => setResetStep(1)} style={{marginTop: 15}}>
+                                <Text style={{color: '#FF6B00'}}>Retour à l'email</Text>
+                            </TouchableOpacity>
+                        </>
+                    )}
+
                 </View>
             </View>
         </Modal>
@@ -318,13 +397,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 25,
     alignItems: 'center',
-    elevation: 5
+    elevation: 5,
+    width: '100%' // Assure que le modal prend bien la largeur
   },
   closeModalBtn: {
     position: 'absolute',
     top: 15,
     right: 15,
-    padding: 5
+    padding: 5,
+    zIndex: 10
   },
   modalTitle: {
     fontSize: 22,

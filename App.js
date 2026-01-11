@@ -1,13 +1,18 @@
 import 'react-native-url-polyfill/auto';
 import React, { useState, useEffect, useCallback } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { NavigationContainer } from '@react-navigation/native';
+import { 
+  NavigationContainer, 
+  DefaultTheme, 
+  DarkTheme 
+} from '@react-navigation/native'; // 👈 IMPORT NAVIGATION THEMES
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context'; 
 
 import * as SecureStore from 'expo-secure-store';
 import { ActivityIndicator, View } from 'react-native';
 import { DataProvider } from './contexts/DataContext';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext'; // 👈 IMPORT NOTRE CONTEXTE
 import GlobalInvitationModal from './components/GlobalInvitationModal';
 
 import * as Notifications from 'expo-notifications';
@@ -17,18 +22,18 @@ import Constants from 'expo-constants';
 // --- IMPORTS DES ÉCRANS ---
 import SignInScreen from './screens/SigninScreen';
 import SignUpScreen from './screens/SignupScreen';
-import SettingsScreen from './screens/SettingsScreen';
-import MainTabs from './screens/MainTabs'; // Contient HomeScreen
+import MainTabs from './screens/MainTabs'; 
 import ContactScreen from './screens/ContactScreen';
 import DocumentsScreen from './screens/DocumentsScreen';
 
-// 👇 AJOUT DES ÉCRANS MANQUANTS (Indispensable pour la navigation)
 import HistoryScreen from './screens/HistoryScreen';
 import PatientsScreen from './screens/PatientsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AddRideScreen from './screens/CreateRideScreen'; 
 import FacturationScreen from './screens/FacturationScreen';
-// Import de l'API
+import SettingAppScreen from './screens/SettingAppScreen'; 
+import SettingsScreen from './screens/SettingsScreen'; 
+
 import api, { getRides } from './services/api';
 
 Notifications.setNotificationHandler({
@@ -42,10 +47,41 @@ Notifications.setNotificationHandler({
 const Stack = createNativeStackNavigator();
 const SESSION_KEY = 'user_session';
 
-export default function App() {
+// --- COMPOSANT DE NAVIGATION PRINCIPAL (Séparé pour utiliser le hook useTheme) ---
+const AppNavigator = () => {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [todayRidesCount, setTodayRidesCount] = useState(0);
+
+  // 👇 RÉCUPÉRATION DU THÈME ACTUEL
+  const { isDark, colors } = useTheme();
+
+  // 👇 DÉFINITION DES THÈMES DE NAVIGATION
+  const MyDarkTheme = {
+    ...DarkTheme,
+    colors: {
+      ...DarkTheme.colors,
+      primary: colors.primary, // Orange
+      background: colors.background, // Noir/Gris foncé
+      card: colors.card, // Gris foncé
+      text: colors.text, // Blanc
+      border: colors.border,
+      notification: colors.danger,
+    },
+  };
+
+  const MyLightTheme = {
+    ...DefaultTheme,
+    colors: {
+      ...DefaultTheme.colors,
+      primary: colors.primary, // Orange
+      background: colors.background, // Blanc/Gris clair
+      card: colors.card, // Blanc
+      text: colors.text, // Noir
+      border: colors.border,
+      notification: colors.danger,
+    },
+  };
 
   // --- NOTIFICATIONS ---
   const registerForPushNotificationsAsync = async () => {
@@ -141,102 +177,100 @@ export default function App() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F8F8' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator size="large" color="#FF6B00" />
       </View>
     );
   }
 
   return (
+    // 👇 ICI LA LIAISON DU THÈME NAVIGATION
+    <NavigationContainer theme={isDark ? MyDarkTheme : MyLightTheme}>
+      <Stack.Navigator screenOptions={{ headerTintColor: '#FF6B00' }}>
+        {!session ? (
+          <Stack.Group screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="SignIn">
+              {props => <SignInScreen {...props} onSignIn={handleLogin} />}
+            </Stack.Screen>
+            <Stack.Screen name="SignUp">
+              {props => <SignUpScreen {...props} onSignUp={handleLogin} />}
+            </Stack.Screen>
+          </Stack.Group>
+        ) : (
+          <Stack.Group>
+            <Stack.Screen name="Main" options={{ headerShown: false }}>
+              {props => (
+                <MainTabs
+                  {...props}
+                  todayRidesCount={todayRidesCount}
+                  fetchTodayRidesCount={fetchTodayRidesCount}
+                />
+              )}
+            </Stack.Screen>
+            
+            <Stack.Screen 
+              name="History" 
+              component={HistoryScreen} 
+              options={{ title: 'Historique' }} 
+            />
+            <Stack.Screen 
+              name="Patients" 
+              component={PatientsScreen} 
+              options={{ title: 'Mes Patients' }} 
+            />
+            <Stack.Screen 
+              name="AddRide" 
+              component={AddRideScreen} 
+              options={{ title: 'Nouvelle Course' }} 
+            />
+            <Stack.Screen 
+              name="Profile" 
+              options={{ headerShown: false }} 
+            >
+              {props => <ProfileScreen {...props} onLogout={handleLogout} />}
+            </Stack.Screen>
+            <Stack.Screen 
+              name="SettingsApp" 
+              component={SettingAppScreen} 
+              options={{ headerShown: false }} 
+            />
+            <Stack.Screen 
+              name="Facturation" 
+              component={FacturationScreen} 
+              options={{ title: 'Facturation Auto' }} 
+            />
+            <Stack.Screen 
+              name="Contact" 
+              component={ContactScreen} 
+              options={{ title: 'Mes Collègues' }} 
+            />
+            <Stack.Screen 
+              name="Documents" 
+              component={DocumentsScreen} 
+              options={{ title: 'Mes Documents' }} 
+            />
+            <Stack.Screen name="Settings" options={{ headerShown: false }}>
+              {props => <SettingsScreen {...props} onLogout={handleLogout} />}
+            </Stack.Screen>
+          </Stack.Group>
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+};
+
+// --- COMPOSANT RACINE (Providers) ---
+export default function App() {
+  return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <DataProvider>
-          <NavigationContainer>
-            <Stack.Navigator>
-              {!session ? (
-                // --- ÉCRANS NON CONNECTÉS ---
-                <Stack.Group screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="SignIn">
-                    {props => <SignInScreen {...props} onSignIn={handleLogin} />}
-                  </Stack.Screen>
-                  <Stack.Screen name="SignUp">
-                    {props => <SignUpScreen {...props} onSignUp={handleLogin} />}
-                  </Stack.Screen>
-                </Stack.Group>
-              ) : (
-                // --- ÉCRANS CONNECTÉS ---
-                <Stack.Group>
-                  {/* Écran principal avec les onglets en bas */}
-                  <Stack.Screen name="Main" options={{ headerShown: false }}>
-                    {props => (
-                      <MainTabs
-                        {...props}
-                        todayRidesCount={todayRidesCount}
-                        fetchTodayRidesCount={fetchTodayRidesCount}
-                      />
-                    )}
-                  </Stack.Screen>
-                  
-                  {/* 👇 ENREGISTREMENT DES ÉCRANS MANQUANTS 👇 */}
-                  
-                  <Stack.Screen 
-                    name="History" 
-                    component={HistoryScreen} 
-                    options={{ title: 'Historique', headerTintColor: '#FF6B00' }} 
-                  />
-
-                  <Stack.Screen 
-                    name="Patients" 
-                    component={PatientsScreen} 
-                    options={{ title: 'Mes Patients', headerTintColor: '#FF6B00' }} 
-                  />
-
-                  <Stack.Screen 
-                    name="AddRide" 
-                    component={AddRideScreen} 
-                    options={{ title: 'Nouvelle Course', headerTintColor: '#FF6B00' }} 
-                  />
-
-                  <Stack.Screen 
-                    name="Profile" 
-                    component={ProfileScreen} 
-                    options={{ headerShown: false }} 
-                  />
-
-                  {/* 👆 FIN DES AJOUTS 👆 */}
-
-                  <Stack.Screen
-                    name="Settings"
-                    options={{ headerShown: false }} 
-                  >
-                    {props => <SettingsScreen {...props} onLogout={handleLogout} />}
-                  </Stack.Screen>
-
-                  <Stack.Screen 
-                    name="Contact" 
-                    component={ContactScreen} 
-                    options={{ 
-                      title: 'Mes Collègues',
-                      headerTintColor: '#FF6B00',
-                      headerBackTitleVisible: false
-                    }} 
-                  />
-
-                  <Stack.Screen 
-                    name="Documents" 
-                    component={DocumentsScreen} 
-                    options={{ title: 'Mes Documents', headerTintColor: '#FF6B00' }} 
-                  />
-
-
-<Stack.Screen name="Facturation" component={FacturationScreen} options={{ title: 'Facturation Auto' }} />
-                </Stack.Group>
-              )}
-            </Stack.Navigator>
-          </NavigationContainer>
-          
-          <GlobalInvitationModal />
-        </DataProvider>
+        <ThemeProvider> 
+          <DataProvider>
+            {/* On sépare AppNavigator pour qu'il puisse utiliser useTheme() qui est fourni par ThemeProvider juste au-dessus */}
+            <AppNavigator />
+            <GlobalInvitationModal />
+          </DataProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
