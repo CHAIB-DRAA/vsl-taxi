@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
    FlatList, ActivityIndicator, StyleSheet,
   Alert, TouchableOpacity, Modal, TextInput, Image, ScrollView, 
@@ -26,6 +26,7 @@ import GroupListModal from '../components/GroupListModal';
 
 // --- SERVICES & CONTEXTE ---
 import { addRideToCalendar, syncBatchRides } from '../services/calendarService';
+import { getDrivingDistance } from '../services/distanceService';
 import api, { updateRide, shareRide, deleteRide } from '../services/api';
 import { useData } from '../contexts/DataContext'; 
 
@@ -40,7 +41,7 @@ LocaleConfig.locales['fr'] = {
 };
 LocaleConfig.defaultLocale = 'fr';
 
-// --- PALETTE DE COULEURS PRO (FIXE) ---
+// --- PALETTE DE COULEURS PRO ---
 const THEME = {
   primary: '#FF6B00',      
   primaryLight: '#FFF3E0', 
@@ -76,7 +77,7 @@ export default function AgendaScreen({ navigation }) {
   
   // 4. DONNÉES LOCALES & DOCS
   const [myGroups, setMyGroups] = useState([]); 
-  const [patientDocs, setPatientDocs] = useState([]);
+  const [patientDocs, setPatientDocs] = useState([]); 
   const [allPMTs, setAllPMTs] = useState([]); 
 
   // 5. FORMULAIRES TEMPORAIRES
@@ -92,6 +93,7 @@ export default function AgendaScreen({ navigation }) {
   const [tempReturnDate, setTempReturnDate] = useState(new Date());
   const [shareNote, setShareNote] = useState(''); 
   const [billingData, setBillingData] = useState({ kmReel: '', peage: '' });
+  const [distanceCalculating, setDistanceCalculating] = useState(false);
 
   // --- INITIALISATION ---
   useEffect(() => { 
@@ -106,32 +108,21 @@ export default function AgendaScreen({ navigation }) {
   // --- 1. MAGIC PASTE ---
   const handleImportFromClipboard = async () => {
     const text = await Clipboard.getStringAsync();
-    
     if (!text) return Alert.alert("Presse-papier vide", "Copiez d'abord le message.");
-
     setAnalyzing(true); 
-
     try {
         const response = await api.post('/ai/parse-ride', { text });
         let aiData = response.data; 
-
-        let ridesFound = [];
-        if (aiData.rides && Array.isArray(aiData.rides)) ridesFound = aiData.rides;
-        else if (Array.isArray(aiData)) ridesFound = aiData;
-        else ridesFound = [aiData];
+        let ridesFound = Array.isArray(aiData.rides) ? aiData.rides : (Array.isArray(aiData) ? aiData : [aiData]);
         
         if (ridesFound.length > 0) {
             const rideToEdit = ridesFound[0];
             Vibration.vibrate(50);
             navigation.navigate('AddRide', { importedData: rideToEdit }); 
-            
-            if (ridesFound.length > 1) {
-                Alert.alert("Info", "Plusieurs courses détectées. La première a été chargée.");
-            }
+            if (ridesFound.length > 1) Alert.alert("Info", "Plusieurs courses détectées. La première a été chargée.");
         } else {
              Alert.alert("Oups", "Aucune course claire trouvée.");
         }
-
     } catch (e) {
         Alert.alert("Erreur IA", "L'analyse a échoué.");
     } finally {
@@ -141,25 +132,14 @@ export default function AgendaScreen({ navigation }) {
 
   // --- 2. SYNCHRO AGENDA ---
   const handleGlobalSync = () => {
-    Alert.alert(
-      "Synchronisation Agenda",
-      "Que voulez-vous ajouter au calendrier de votre téléphone ?",
-      [
+    Alert.alert("Synchronisation Agenda", "Que voulez-vous ajouter au calendrier ?", [
         { text: "Annuler", style: "cancel" },
-        { 
-            text: "Ce jour uniquement", 
-            onPress: () => syncBatchRides(dailyRides) 
-        },
-        { 
-            text: "TOUTES les futures", 
-            style: "default", 
-            onPress: () => {
-                const futureRides = allRides.filter(r => moment(r.date).isSameOrAfter(moment(), 'day') && r.status !== 'Annulée');
-                syncBatchRides(futureRides);
-            }
-        }
-      ]
-    );
+        { text: "Ce jour uniquement", onPress: () => syncBatchRides(dailyRides) },
+        { text: "TOUTES les futures", style: "default", onPress: () => {
+            const futureRides = allRides.filter(r => moment(r.date).isSameOrAfter(moment(), 'day') && r.status !== 'Annulée');
+            syncBatchRides(futureRides);
+        }}
+    ]);
   };
 
   // --- GESTION ÉTAT COURSE ---
@@ -171,10 +151,22 @@ export default function AgendaScreen({ navigation }) {
               loadData(true); 
           } else if (a === 'finish') { 
               setActiveRide(r); 
-              setBillingData({ kmReel: '', peage: '' }); 
+              const prefilledKm = (r.realDistance || r.distance) ? String(r.realDistance || r.distance) : '';
+              setBillingData({ kmReel: prefilledKm, peage: r.tolls ? String(r.tolls) : '' }); 
               setFinishModal(true); 
           } 
       } catch (e) { Alert.alert('Erreur', "Action impossible."); } 
+  };
+
+  const handleCalculateDistanceForFinish = async () => {
+    if (!activeRide?.startLocation || !activeRide?.endLocation) return Alert.alert("Info", "Adresses manquantes.");
+    setDistanceCalculating(true);
+    try {
+      const result = await getDrivingDistance(activeRide.startLocation, activeRide.endLocation);
+      if (result) setBillingData(prev => ({ ...prev, kmReel: String(result.distanceKm) }));
+      else Alert.alert("Impossible", "Distance non calculable.");
+    } catch (e) { Alert.alert("Erreur", "Calcul impossible."); }
+    finally { setDistanceCalculating(false); }
   };
 
   const confirmFinishRide = async () => { 
@@ -192,70 +184,18 @@ export default function AgendaScreen({ navigation }) {
       } catch (e) { Alert.alert("Erreur", "Echec clôture."); } 
   };
 
-  const handleDelete = async () => {
-    if (!activeRide) return;
-    Alert.alert("Supprimer", "Voulez-vous vraiment supprimer cette course ?",
-      [{ text: "Annuler", style: "cancel" }, 
-       { text: "Supprimer", style: "destructive", onPress: async () => {
-            try { await deleteRide(activeRide._id); setModals({ ...modals, options: false }); loadData(true); Vibration.vibrate(50); } 
-            catch (e) { Alert.alert("Erreur", "Impossible de supprimer."); }
-       }}]
-    );
-  };
-
-  // --- GESTION GROUPES ---
-  const handleSaveGroup = async (groupData) => {
-    try {
-      const memberIds = groupData.members.map(m => (m.contactId && m.contactId._id) ? m.contactId._id : m._id);
-      const payload = { name: groupData.name, members: memberIds };
-      if (groupData._id) {
-          const res = await api.put(`/groups/${groupData._id}`, payload);
-          setMyGroups(prev => prev.map(g => g._id === groupData._id ? res.data : g));
-          Alert.alert("Succès", "Groupe modifié !");
-      } else {
-          const res = await api.post('/groups', payload);
-          setMyGroups(prev => [...prev, res.data]);
-          Alert.alert("Succès", "Groupe créé !");
-      }
-    } catch (e) { Alert.alert("Erreur", "Sauvegarde impossible."); }
-  };
-
-  const handleDeleteGroup = async (groupId) => {
-    try { await api.delete(`/groups/${groupId}`); setMyGroups(prev => prev.filter(g => g._id !== groupId)); Alert.alert("Supprimé", "Groupe supprimé."); } 
-    catch (e) { Alert.alert("Erreur", "Impossible."); }
-  };
-
-  // --- FILTRES & STATUS ---
-  const markedDates = useMemo(() => { 
-      const m={}; 
-      allRides.forEach(r=>{ 
-          const d=moment(r.date).format('YYYY-MM-DD'); 
-          if(!m[d])m[d]={dots:[]}; 
-          const c=r.isShared?'#FF9800':'#10B981'; 
-          if(!m[d].dots.find(dot=>dot.color===c))m[d].dots.push({key:r._id,color:c}); 
-      }); 
-      m[selectedDate]={...m[selectedDate],selected:true,selectedColor: THEME.primary}; 
-      return m; 
-  }, [allRides, selectedDate]);
-
-  const dailyRides = useMemo(() => 
-      allRides.filter(r => moment(r.date).format('YYYY-MM-DD') === selectedDate && (!r.isShared || r.statusPartage !== 'refused'))
-      .sort((a, b) => new Date(a.date) - new Date(b.date)), 
-  [allRides, selectedDate]);
-
-  const getPMTStatus = (ride) => {
-    const medicalTypes = ['VSL', 'Ambulance', 'Taxi', 'Aller', 'Retour', 'Consultation'];
-    if (!medicalTypes.includes(ride.type) || ride.endTime) return null;
-    const docs = allPMTs.filter(d => d.patientName === ride.patientName);
-    if (docs.length === 0) return { color: '#FFEBEE', text: 'BT MANQUANT', textColor: '#D32F2F', icon: 'alert-circle' };
-    return { color: '#E8F5E9', text: 'BT OK', textColor: '#2E7D32', icon: 'checkbox' };
-  };
-
-  // --- ACTIONS DOCUMENTS ---
+  // --- GESTION DES DOCUMENTS ---
   const fetchRideDocuments = async (ride) => {
     if (!ride) return;
-    try { setLoadingDocs(true); const res = await api.get(`/documents/by-ride/${ride._id}`); setPatientDocs(res.data); setModals({ ...modals, options: false, docs: true }); } 
-    catch (e) { Alert.alert("Info", "Erreur dossier."); } finally { setLoadingDocs(false); }
+    try { 
+        setLoadingDocs(true); 
+        const res = await api.get(`/documents/by-ride/${ride._id}`); 
+        setPatientDocs(res.data); 
+        // ✅ ON OUVRE SEULEMENT DOCS, ON FERME LES AUTRES
+        setModals({ options: false, share: false, docs: true }); 
+    } 
+    catch (e) { Alert.alert("Info", "Erreur dossier."); } 
+    finally { setLoadingDocs(false); }
   };
 
   const handleDocumentScanned = async (uri, docType) => {
@@ -270,8 +210,19 @@ export default function AgendaScreen({ navigation }) {
 
   const uploadDocument = async (uri, docType) => {
     if (!activeRide) return;
-    try { setUploading(true); const f = new FormData(); f.append('photo', { uri: uri, name: `scan.jpg`, type: 'image/jpeg' }); f.append('patientName', activeRide.patientName); f.append('docType', docType); f.append('rideId', activeRide._id); await api.post('/documents/upload', f, { headers: { 'Content-Type': 'multipart/form-data' }, transformRequest: d => d }); Alert.alert("Succès", "Document ajouté !"); fetchRideDocuments(activeRide); } 
-    catch (e) { Alert.alert("Erreur", "Echec envoi doc."); } finally { setUploading(false); }
+    try { 
+        setUploading(true); 
+        const f = new FormData(); 
+        f.append('photo', { uri: uri, name: `scan.jpg`, type: 'image/jpeg' }); 
+        f.append('patientName', activeRide.patientName); 
+        f.append('docType', docType); 
+        f.append('rideId', activeRide._id); 
+        await api.post('/documents/upload', f, { headers: { 'Content-Type': 'multipart/form-data' }, transformRequest: d => d }); 
+        Alert.alert("Succès", "Document ajouté !"); 
+        fetchRideDocuments(activeRide); 
+    } 
+    catch (e) { Alert.alert("Erreur", "Echec envoi doc."); } 
+    finally { setUploading(false); }
   };
 
   const pickFromGallery = async (docType) => {
@@ -304,7 +255,18 @@ export default function AgendaScreen({ navigation }) {
     if (tempScanUri) { await uploadDocument(tempScanUri, 'PMT'); setTempScanUri(null); }
   };
 
-  // --- ACTIONS ---
+  // --- ACTIONS (RETOUR, PARTAGE, SUPPRESSION) ---
+  const handleDelete = async () => {
+    if (!activeRide) return;
+    Alert.alert("Supprimer", "Voulez-vous vraiment supprimer cette course ?",
+      [{ text: "Annuler", style: "cancel" }, 
+       { text: "Supprimer", style: "destructive", onPress: async () => {
+            try { await deleteRide(activeRide._id); setModals({ ...modals, options: false }); loadData(true); Vibration.vibrate(50); } 
+            catch (e) { Alert.alert("Erreur", "Impossible de supprimer."); }
+       }}]
+    );
+  };
+
   const prepareReturnRide = () => { if (!activeRide) return; setReturnData({ date: moment(activeRide.date).format('YYYY-MM-DD'), time: '', startLocation: activeRide.endLocation, endLocation: activeRide.startLocation, type: 'Retour' }); setTempReturnDate(new Date()); setModals({ ...modals, options: false }); setReturnModal(true); };
   
   const confirmCreateReturn = async () => {
@@ -312,28 +274,19 @@ export default function AgendaScreen({ navigation }) {
     try { const [h, m] = returnData.time.split(':'); const d = moment(returnData.date).hour(parseInt(h)).minute(parseInt(m)).toISOString(); const n = { patientName: activeRide.patientName, patientPhone: activeRide.patientPhone, startLocation: returnData.startLocation, endLocation: returnData.endLocation, type: 'Retour', date: d, status: 'Confirmée', isRoundTrip: false }; await api.post('/rides', n); setReturnModal(false); loadData(true); Alert.alert("Succès", "Retour planifié !"); } catch (e) { Alert.alert("Erreur", "Impossible."); }
   };
 
-  // 👇 CORRECTION ICI POUR LE PARTAGE 👇
   const shareInternal = async (contactItem) => {
     if (!activeRide) return;
     try { 
-        // L'item est un objet "Contact" qui contient "contactId" (qui est l'utilisateur)
         const recipientUserId = contactItem.contactId?._id; 
         const recipientName = contactItem.contactId?.fullName;
-
-        if (!recipientUserId) {
-            return Alert.alert("Erreur", "Contact invalide.");
-        }
+        if (!recipientUserId) return Alert.alert("Erreur", "Contact invalide.");
 
         await shareRide(activeRide._id, recipientUserId, shareNote); 
-        
         setModals({ ...modals, share: false }); 
         setShareNote(''); 
         loadData(true); 
         Alert.alert('Succès', `Envoyé à ${recipientName}.`); 
-    } catch (e) { 
-        console.log(e);
-        Alert.alert('Erreur', "Échec de l'envoi."); 
-    }
+    } catch (e) { Alert.alert('Erreur', "Échec de l'envoi."); }
   };
   
   const shareViaWhatsApp = () => {
@@ -344,23 +297,71 @@ export default function AgendaScreen({ navigation }) {
     Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(() => Alert.alert("Erreur", "WhatsApp absent."));
   };
 
+  // --- GESTION GROUPES (CORRIGÉE POUR MULTI-GROUPES) ---
+  const handleSaveGroup = async (groupData) => {
+    try {
+      const memberIds = groupData.members.map(m => (m.contactId && m.contactId._id) ? m.contactId._id : m._id);
+      const payload = { name: groupData.name, members: memberIds };
+
+      if (groupData._id) {
+          // MODIFICATION
+          const res = await api.put(`/groups/${groupData._id}`, payload);
+          setMyGroups(prev => prev.map(g => g._id === groupData._id ? res.data : g));
+          Alert.alert("Succès", "Groupe mis à jour !");
+      } else {
+          // CRÉATION (AJOUT À LA LISTE)
+          const res = await api.post('/groups', payload);
+          setMyGroups(prev => [...prev, res.data]);
+          Alert.alert("Succès", "Nouveau groupe créé !");
+      }
+      setShowGroupCreator(false);
+      setTimeout(() => setShowGroupList(true), 300);
+    } catch (e) { Alert.alert("Erreur", "Sauvegarde impossible."); }
+  };
+
+  const handleDeleteGroup = async (groupId) => {
+    try { 
+        await api.delete(`/groups/${groupId}`); 
+        setMyGroups(prev => prev.filter(g => g._id !== groupId)); 
+    } catch (e) { Alert.alert("Erreur", "Impossible de supprimer."); }
+  };
+
+  // --- FILTRES & STATUS ---
+  const markedDates = useMemo(() => { 
+      const m={}; 
+      allRides.forEach(r=>{ 
+          const d=moment(r.date).format('YYYY-MM-DD'); 
+          if(!m[d])m[d]={dots:[]}; 
+          const c=r.isShared?'#FF9800':'#10B981'; 
+          if(!m[d].dots.find(dot=>dot.color===c))m[d].dots.push({key:r._id,color:c}); 
+      }); 
+      m[selectedDate]={...m[selectedDate],selected:true,selectedColor: THEME.primary}; 
+      return m; 
+  }, [allRides, selectedDate]);
+
+  const dailyRides = useMemo(() => 
+      allRides.filter(r => moment(r.date).format('YYYY-MM-DD') === selectedDate && (!r.isShared || r.statusPartage !== 'refused'))
+      .sort((a, b) => new Date(a.date) - new Date(b.date)), 
+  [allRides, selectedDate]);
+
+  const getPMTStatus = (ride) => {
+    const medicalTypes = ['VSL', 'Ambulance', 'Taxi', 'Aller', 'Retour', 'Consultation'];
+    if (!medicalTypes.includes(ride.type) || ride.endTime) return null;
+    const docs = allPMTs.filter(d => d.patientName === ride.patientName);
+    if (docs.length === 0) return { color: '#FFEBEE', text: 'BT MANQUANT', textColor: '#D32F2F', icon: 'alert-circle' };
+    return { color: '#E8F5E9', text: 'BT OK', textColor: '#2E7D32', icon: 'checkbox' };
+  };
+
   // --- RENDER HELPERS ---
   const renderSkeleton = () => (
       <View style={{marginTop: 20}}>
-          {[1,2,3].map(i => (
-              <View key={i} style={styles.skeletonCard}>
-                  <View style={styles.skeletonLineShort}/>
-                  <View style={styles.skeletonLineLong}/>
-              </View>
-          ))}
+          {[1,2,3].map(i => (<View key={i} style={styles.skeletonCard}><View style={styles.skeletonLineShort}/><View style={styles.skeletonLineLong}/></View>))}
       </View>
   );
 
   const renderEmptyState = () => (
       <View style={styles.emptyContainer}>
-          <View style={styles.emptyIconCircle}>
-            <Ionicons name="calendar-outline" size={48} color={THEME.primary} />
-          </View>
+          <View style={styles.emptyIconCircle}><Ionicons name="calendar-outline" size={48} color={THEME.primary} /></View>
           <Text style={styles.emptyTitle}>Journée Libre</Text>
           <Text style={styles.emptyText}>Aucune course prévue pour le moment.</Text>
           <TouchableOpacity style={styles.emptyBtn} onPress={handleImportFromClipboard}>
@@ -376,7 +377,7 @@ export default function AgendaScreen({ navigation }) {
     <ScreenWrapper style={{backgroundColor: THEME.bg}}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
       
-      {/* --- HEADER --- */}
+      {/* HEADER */}
       <View style={styles.header}>
         <View>
             <Text style={styles.headerTitle}>Mon Planning</Text>
@@ -390,7 +391,7 @@ export default function AgendaScreen({ navigation }) {
         </View>
       </View>
 
-      {/* --- CALENDRIER REPLIABLE --- */}
+      {/* CALENDRIER */}
       {showCalendar && (
           <View style={styles.calendarContainer}>
             <Calendar 
@@ -400,35 +401,27 @@ export default function AgendaScreen({ navigation }) {
                 theme={{ 
                     backgroundColor: THEME.card,
                     calendarBackground: THEME.card,
-                    textSectionTitleColor: THEME.textLight,
                     selectedDayBackgroundColor: THEME.primary,
                     selectedDayTextColor: '#ffffff',
                     todayTextColor: THEME.primary,
                     dayTextColor: THEME.text,
-                    textDisabledColor: '#d9e1e8',
                     dotColor: THEME.primary,
-                    selectedDotColor: '#ffffff',
                     arrowColor: THEME.primary,
                     monthTextColor: THEME.text,
-                    indicatorColor: THEME.primary,
                     textDayFontWeight: '500',
                     textMonthFontWeight: 'bold',
-                    textDayHeaderFontWeight: '600',
-                    textDayFontSize: 14,
-                    textMonthFontSize: 16,
-                    textDayHeaderFontSize: 13
+                    textDayHeaderFontWeight: '600'
                 }} 
             />
           </View>
       )}
 
-      {/* --- TOOLBAR ACTIONS RAPIDES --- */}
+      {/* TOOLBAR */}
       <View style={styles.toolbar}>
           <TouchableOpacity onPress={handleImportFromClipboard} disabled={analyzing} style={styles.magicBtn}>
               {analyzing ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="sparkles" size={18} color="#FFF" />}
               <Text style={styles.magicBtnText}>Magic Paste</Text>
           </TouchableOpacity>
-          
           <View style={{flexDirection:'row'}}>
             <TouchableOpacity onPress={() => setShowGroupList(true)} style={styles.iconBtn}>
                 <Ionicons name="people" size={20} color={THEME.text} />
@@ -439,14 +432,13 @@ export default function AgendaScreen({ navigation }) {
           </View>
       </View>
 
-      {/* --- LISTE DES COURSES --- */}
+      {/* LISTE COURSES */}
       <View style={styles.listContainer}>
         <View style={styles.listHeader}>
             <View style={{flexDirection:'row', alignItems:'center'}}>
               <Text style={styles.dateTitle}>{moment(selectedDate).format('D MMMM')}</Text>
               <View style={styles.countBadge}><Text style={styles.countText}>{dailyRides.length}</Text></View>
             </View>
-            
             {dailyRides.length > 0 && (
               <TouchableOpacity onPress={handleGlobalSync} style={styles.syncBtn}>
                 <Ionicons name="cloud-upload-outline" size={16} color={THEME.info} style={{marginRight: 6}} />
@@ -489,19 +481,19 @@ export default function AgendaScreen({ navigation }) {
 
       {/* ================= MODALS ================= */}
       
-      {/* OPTIONS */}
+      {/* OPTIONS : NOTE - Séparation stricte Share / Docs */}
       <RideOptionsModal 
         visible={modals.options}
         ride={activeRide}
         onClose={() => setModals({ ...modals, options: false })}
-        onEdit={() => {
-            setModals({ ...modals, options: false });
-            setTimeout(() => navigation.navigate('AddRide', { importedData: activeRide }), 100);
-        }}
+        onEdit={() => { setModals({ ...modals, options: false }); setTimeout(() => navigation.navigate('AddRide', { importedData: activeRide }), 100); }}
         onCreateReturn={() => { setModals({ ...modals, options: false }); setTimeout(() => { if(activeRide) { setReturnData(prev => ({...prev, startLocation: activeRide.endLocation, endLocation: activeRide.startLocation, date: moment(activeRide.date).format('YYYY-MM-DD')})); setReturnModal(true); }}, 100); }}
         onAddToCalendar={() => { addRideToCalendar(activeRide); setModals({ ...modals, options: false }); }}
-        onOpenDocs={() => fetchRideDocuments(activeRide)}
-        onShare={() => setModals({ options: false, share: true })}
+        
+        // 👇 SÉPARATION STRICTE
+        onShare={() => setModals({ options: false, share: true, docs: false })} 
+        onOpenDocs={() => fetchRideDocuments(activeRide)} 
+        
         onDelete={handleDelete}
         onDispatch={() => { setModals({ ...modals, options: false }); setTimeout(() => setShowDispatchModal(true), 100); }}
       />
@@ -543,7 +535,14 @@ export default function AgendaScreen({ navigation }) {
             <View style={styles.inputRow}>
                 <View style={{flex:1, marginRight:10}}>
                     <Text style={styles.inputLabel}>KM RÉELS</Text>
-                    <TextInput style={styles.sheetInput} placeholder="Ex: 25" placeholderTextColor="#CCC" keyboardType="numeric" value={billingData.kmReel} onChangeText={t => setBillingData({...billingData, kmReel: t})}/>
+                    <View style={{flexDirection:'row', alignItems:'center'}}>
+                      <TextInput style={[styles.sheetInput, {flex:1}]} placeholder="Ex: 25" placeholderTextColor="#CCC" keyboardType="numeric" value={billingData.kmReel} onChangeText={t => setBillingData({...billingData, kmReel: t})}/>
+                      {activeRide?.startLocation && activeRide?.endLocation && (
+                        <TouchableOpacity style={styles.autoDistanceBtn} onPress={handleCalculateDistanceForFinish} disabled={distanceCalculating}>
+                          {distanceCalculating ? <ActivityIndicator size="small" color="#FFF"/> : <Ionicons name="navigate" size={18} color="#FFF"/>}
+                        </TouchableOpacity>
+                      )}
+                    </View>
                 </View>
                 <View style={{flex:1}}>
                     <Text style={styles.inputLabel}>PÉAGES (€)</Text>
@@ -581,28 +580,22 @@ export default function AgendaScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL PARTAGE (CORRIGÉ POUR LE NOUVEAU BACKEND) */}
+      {/* MODAL PARTAGE */}
       <Modal visible={modals.share} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: THEME.card }}>
           <View style={styles.modalHeader}><Text style={styles.headerTitle}>Partager</Text><TouchableOpacity onPress={() => setModals({...modals, share: false})}><Ionicons name="close-circle" size={32} color={THEME.textLight}/></TouchableOpacity></View>
           <View style={{padding: 20, flex: 1}}>
              <TextInput style={styles.noteInput} placeholder="Ajouter une note (code, étage...)" placeholderTextColor={THEME.textLight} multiline numberOfLines={3} value={shareNote} onChangeText={setShareNote} textAlignVertical="top"/>
-             
              <TouchableOpacity style={styles.whatsappBtn} onPress={shareViaWhatsApp}>
                 <Ionicons name="logo-whatsapp" size={22} color="#FFF" style={{marginRight: 10}}/>
                 <Text style={styles.whatsappText}>Envoyer par WhatsApp</Text>
              </TouchableOpacity>
-
              <Text style={styles.sectionTitle}>Ou via l'application :</Text>
-             
-             {/* 👇 LISTE DES CONTACTS MISE À JOUR 👇 */}
              <FlatList 
                data={contacts || []} 
                keyExtractor={(item) => item._id} 
                renderItem={({ item }) => {
-                 // Protection si un contact est mal formé
                  if (!item.contactId) return null;
-                 
                  return (
                    <TouchableOpacity style={styles.contactRow} onPress={() => shareInternal(item)}>
                      <View style={{flexDirection:'row', alignItems:'center'}}>
@@ -623,7 +616,7 @@ export default function AgendaScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* DOCS MODAL */}
+      {/* ✅ MODAL DOCS (SEPARÉ) */}
       <Modal visible={modals.docs} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.docModalContainer}>
           <View style={styles.modalHeader}>
@@ -657,6 +650,7 @@ export default function AgendaScreen({ navigation }) {
         </View>
       </Modal>
 
+      {/* MODAL VERIF CPAM */}
       <Modal visible={btValidationModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.finishCard, {backgroundColor: '#FFF'}]}>
@@ -703,18 +697,10 @@ export default function AgendaScreen({ navigation }) {
 const styles = StyleSheet.create({
   // --- HEADER ---
   header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    paddingHorizontal: 20, 
-    paddingVertical: 15, 
-    backgroundColor: THEME.card, 
-    elevation: 4, 
-    shadowColor: '#000', 
-    shadowOpacity: 0.05, 
-    shadowRadius: 10, 
-    shadowOffset: {width:0, height:4},
-    zIndex: 10
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
+    paddingHorizontal: 20, paddingVertical: 15, backgroundColor: THEME.card, 
+    elevation: 4, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, 
+    shadowOffset: {width:0, height:4}, zIndex: 10
   },
   headerTitle: { fontSize: 28, fontWeight: '800', color: THEME.text, letterSpacing: -0.5 },
   headerSubtitle: { fontSize: 14, color: THEME.primary, fontWeight: '600', letterSpacing: 0.5 },
@@ -723,14 +709,8 @@ const styles = StyleSheet.create({
 
   // --- CALENDRIER ---
   calendarContainer: { 
-    borderRadius: 24, 
-    overflow: 'hidden', 
-    margin: 15, 
-    backgroundColor: THEME.card,
-    elevation: 8, 
-    shadowColor: THEME.primary, 
-    shadowOpacity: 0.15, 
-    shadowRadius: 15,
+    borderRadius: 24, overflow: 'hidden', margin: 15, backgroundColor: THEME.card,
+    elevation: 8, shadowColor: THEME.primary, shadowOpacity: 0.15, shadowRadius: 15,
     shadowOffset: {width:0, height:8}
   },
 
@@ -748,22 +728,12 @@ const styles = StyleSheet.create({
   listContainer: { flex: 1, paddingHorizontal: 20 },
   listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   dateTitle: { fontSize: 20, fontWeight: '800', textTransform: 'capitalize', color: THEME.text },
-  
-  syncBtn: { 
-      flexDirection: 'row', alignItems: 'center', 
-      backgroundColor: '#EBF5FF', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 
-  },
+  syncBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EBF5FF', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
   syncBtnText: { color: THEME.info, fontWeight: '700', fontSize: 12 },
-
   countBadge: { backgroundColor: THEME.primaryLight, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, marginLeft: 8 },
   countText: { color: THEME.primary, fontWeight: '800', fontSize: 12 },
-
   rideWrapper: { marginBottom: 18 },
-  statusBadge: { 
-    flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', 
-    paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginBottom: -10, 
-    zIndex: 1, marginLeft: 15, borderWidth: 1
-  },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, marginBottom: -10, zIndex: 1, marginLeft: 15, borderWidth: 1 },
   statusText: { fontSize: 10, fontWeight: '800', marginLeft: 4 },
 
   // --- EMPTY STATE ---
@@ -781,42 +751,22 @@ const styles = StyleSheet.create({
 
   // --- MODALS BASE ---
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  bottomSheet: { 
-      backgroundColor: THEME.card, 
-      borderTopLeftRadius: 30, 
-      borderTopRightRadius: 30, 
-      padding: 30, 
-      paddingBottom: 50,
-      shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 20, elevation: 20
-  },
+  bottomSheet: { backgroundColor: THEME.card, borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 30, paddingBottom: 50, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 20, elevation: 20 },
   modalHandle: { width: 50, height: 6, backgroundColor: THEME.border, borderRadius: 3, alignSelf: 'center', marginBottom: 25 },
   bottomSheetTitle: { fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 30, color: THEME.text },
   
   // --- FORMS ---
   inputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 },
+  autoDistanceBtn: { marginLeft: 8, backgroundColor: '#2E7D32', width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   inputLabel: { fontSize: 12, fontWeight: '700', color: THEME.textLight, marginBottom: 8, letterSpacing: 1 },
-  sheetInput: { 
-      backgroundColor: THEME.bg, borderRadius: 16, padding: 18, 
-      fontSize: 20, fontWeight: '700', textAlign: 'center', color: THEME.text 
-  },
-  confirmBtn: { 
-      backgroundColor: THEME.success, padding: 20, borderRadius: 20, 
-      alignItems: 'center', shadowColor: THEME.success, shadowOpacity: 0.4, 
-      shadowOffset: {width:0, height:6}, shadowRadius: 10, elevation: 6 
-  },
+  sheetInput: { backgroundColor: THEME.bg, borderRadius: 16, padding: 18, fontSize: 20, fontWeight: '700', textAlign: 'center', color: THEME.text },
+  confirmBtn: { backgroundColor: THEME.success, padding: 20, borderRadius: 20, alignItems: 'center', shadowColor: THEME.success, shadowOpacity: 0.4, shadowOffset: {width:0, height:6}, shadowRadius: 10, elevation: 6 },
   confirmBtnText: { color: '#FFF', fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
-  
-  timeSelectBtn: { 
-      flexDirection: 'row', alignItems: 'center', backgroundColor: THEME.bg, 
-      padding: 24, borderRadius: 20, justifyContent: 'center', marginBottom: 30 
-  },
+  timeSelectBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: THEME.bg, padding: 24, borderRadius: 20, justifyContent: 'center', marginBottom: 30 },
 
   // --- DOCS MODAL ---
   docModalContainer: { flex: 1, backgroundColor: THEME.bg },
-  modalHeader: { 
-      padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', 
-      backgroundColor: THEME.card, borderBottomWidth: 1, borderColor: THEME.border 
-  },
+  modalHeader: { padding: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: THEME.card, borderBottomWidth: 1, borderColor: THEME.border },
   docCard: { backgroundColor: THEME.card, borderRadius: 20, marginBottom: 20, padding: 15, elevation: 4, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 8 },
   docHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   docTitle: { fontWeight: '700', fontSize: 16, color: THEME.text },
@@ -829,16 +779,10 @@ const styles = StyleSheet.create({
   importText: { fontSize: 11, color: THEME.textLight, marginLeft: 4, fontWeight: '700' },
 
   // --- SHARE MODAL ---
-  noteInput: { 
-      backgroundColor: THEME.bg, borderRadius: 16, padding: 18, height: 100, 
-      marginBottom: 20, borderWidth: 1, borderColor: THEME.border, fontSize: 16, color: THEME.text 
-  },
-  whatsappBtn: { 
-      backgroundColor: '#25D366', padding: 18, borderRadius: 16, flexDirection: 'row', 
-      alignItems: 'center', justifyContent: 'center', marginBottom: 30, elevation: 4,
-      shadowColor: '#25D366', shadowOpacity: 0.3, shadowRadius: 8
-  },
+  noteInput: { backgroundColor: THEME.bg, borderRadius: 16, padding: 18, height: 100, marginBottom: 20, borderWidth: 1, borderColor: THEME.border, fontSize: 16, color: THEME.text },
+  whatsappBtn: { backgroundColor: '#25D366', padding: 18, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 30, elevation: 4, shadowColor: '#25D366', shadowOpacity: 0.3, shadowRadius: 8 },
   whatsappText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: THEME.text, marginBottom: 15 },
   contactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1, borderColor: THEME.border },
   contactName: { fontSize: 16, fontWeight: '600', color: THEME.text },
 
@@ -847,15 +791,8 @@ const styles = StyleSheet.create({
   finishHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   finishTitle: { fontSize: 20, fontWeight: '800' },
   cpamWarning: { fontSize: 14, color: THEME.textLight, marginBottom: 20, lineHeight: 22, textAlign: 'center' },
-  datePickerBtn: { 
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', 
-      padding: 16, backgroundColor: THEME.bg, borderRadius: 16, marginBottom: 25,
-      borderWidth: 1, borderColor: THEME.border
-  },
-  comparisonRow: { 
-      flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', 
-      marginBottom: 30, backgroundColor: THEME.bg, padding: 15, borderRadius: 16 
-  },
+  datePickerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: THEME.bg, borderRadius: 16, marginBottom: 25, borderWidth: 1, borderColor: THEME.border },
+  comparisonRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', marginBottom: 30, backgroundColor: THEME.bg, padding: 15, borderRadius: 16 },
   compLabel: { fontSize: 10, color: THEME.textLight, fontWeight: '800', textAlign: 'center', marginBottom: 4 },
   compValue: { fontSize: 18, fontWeight: '800', color: THEME.text, textAlign: 'center' },
 });

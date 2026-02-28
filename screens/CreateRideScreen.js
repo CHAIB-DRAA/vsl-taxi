@@ -11,6 +11,8 @@ import 'moment/locale/fr';
 // Composants & Services
 import AddressAutocomplete from '../components/AddressAutocomplete'; 
 import { createRide, getPatients, createPatient } from '../services/api';
+import { getDrivingDistance } from '../services/distanceService';
+import { calculatePrice } from '../utils/pricing';
 import ScreenWrapper from '../components/ScreenWrapper';
 import { useData } from '../contexts/DataContext'; 
 
@@ -32,6 +34,9 @@ export default function CreateRideScreen({ navigation, route }) {
   
   const [startLocation, setStartLocation] = useState('');
   const [endLocation, setEndLocation] = useState('');
+  
+  const [estimatedDistance, setEstimatedDistance] = useState(null);
+  const [distanceLoading, setDistanceLoading] = useState(false);
   
   const [notes, setNotes] = useState(''); 
 
@@ -141,10 +146,36 @@ export default function CreateRideScreen({ navigation, route }) {
     const fullHospitalAddress = hospital.includes("Toulouse") ? hospital : `${hospital}, Toulouse`;
     if (type === 'Retour') setStartLocation(fullHospitalAddress);
     else setEndLocation(fullHospitalAddress);
+    setEstimatedDistance(null);
   };
 
   const swapAddresses = () => {
     const temp = startLocation; setStartLocation(endLocation); setEndLocation(temp);
+    setEstimatedDistance(null);
+  };
+
+  const handleCalculateDistance = async () => {
+    if (!startLocation || !endLocation || startLocation === endLocation) return;
+    setDistanceLoading(true);
+    setEstimatedDistance(null);
+    try {
+      const result = await getDrivingDistance(startLocation, endLocation);
+      if (result) setEstimatedDistance(result.distanceKm);
+      else Alert.alert("Impossible", "Distance non calculable. Vérifiez les adresses.");
+    } catch (e) {
+      Alert.alert("Erreur", "Calcul impossible. Vérifiez votre connexion.");
+    } finally {
+      setDistanceLoading(false);
+    }
+  };
+
+  const handleStartSelect = (addr, coords) => {
+    setStartLocation(addr);
+    setEstimatedDistance(null);
+  };
+  const handleEndSelect = (addr, coords) => {
+    setEndLocation(addr);
+    setEstimatedDistance(null);
   };
 
   const openDatePicker = (target) => {
@@ -192,14 +223,15 @@ export default function CreateRideScreen({ navigation, route }) {
       const rideData = {
         patientName, patientPhone, startLocation, endLocation,
         date: date.toISOString(), returnDate: isRoundTrip ? returnDate.toISOString() : null, 
-        type, isRoundTrip, notes
+        type, isRoundTrip, notes,
+        ...(estimatedDistance !== null && { distance: isRoundTrip ? estimatedDistance * 2 : estimatedDistance })
       };
       await createRide(rideData);
       Alert.alert('Succès', 'Course ajoutée au planning.');
       
       // Reset form
       setPatientName(''); setPatientPhone(''); setPatientAddressMem(''); 
-      setStartLocation(''); setEndLocation(''); setIsRoundTrip(false); setNotes('');
+      setStartLocation(''); setEndLocation(''); setEstimatedDistance(null); setIsRoundTrip(false); setNotes('');
       
       navigation.navigate('Agenda'); 
     } catch (error) { Alert.alert('Erreur', "Echec de l'enregistrement."); } 
@@ -305,7 +337,7 @@ export default function CreateRideScreen({ navigation, route }) {
                 <Text style={styles.recentLabel}>Habitudes :</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   {recentDestinations.map((loc, idx) => (
-                    <TouchableOpacity key={idx} style={styles.recentChip} onPress={() => setEndLocation(loc)}>
+                    <TouchableOpacity key={idx} style={styles.recentChip} onPress={() => { setEndLocation(loc); setEstimatedDistance(null); }}>
                       <Ionicons name="reload-circle" size={14} color="#1565C0" style={{marginRight:4}}/>
                       <Text style={styles.recentChipText}>{loc}</Text>
                     </TouchableOpacity>
@@ -339,7 +371,7 @@ export default function CreateRideScreen({ navigation, route }) {
                             placeholder="Lieu de prise en charge" 
                             placeholderTextColor="#999" 
                             value={startLocation} 
-                            onSelect={setStartLocation} 
+                            onSelect={handleStartSelect} 
                             style={{ color: '#000000' }}
                             textInputProps={{ style: { color: '#000000' }, placeholderTextColor: "#999" }}
                         />
@@ -355,7 +387,7 @@ export default function CreateRideScreen({ navigation, route }) {
                             placeholder="Lieu de destination" 
                             placeholderTextColor="#999" 
                             value={endLocation} 
-                            onSelect={setEndLocation} 
+                            onSelect={handleEndSelect} 
                             style={{ color: '#000000' }}
                             textInputProps={{ style: { color: '#000000' }, placeholderTextColor: "#999" }}
                         />
@@ -367,6 +399,37 @@ export default function CreateRideScreen({ navigation, route }) {
                   <Ionicons name="swap-vertical" size={20} color="#FF6B00" />
               </TouchableOpacity>
             </View>
+
+            {/* Calcul distance automatique */}
+            {startLocation && endLocation && startLocation !== endLocation && (
+              <View style={styles.distanceSection}>
+                <TouchableOpacity 
+                  style={styles.distanceBtn} 
+                  onPress={handleCalculateDistance}
+                  disabled={distanceLoading}
+                >
+                  {distanceLoading ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="navigate" size={20} color="#FFF" style={{marginRight: 8}} />
+                      <Text style={styles.distanceBtnText}>Calculer la distance</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                {estimatedDistance !== null && (
+                  <View style={styles.distanceResult}>
+                    <View style={styles.distanceResultRow}>
+                      <Ionicons name="road" size={18} color="#2E7D32" />
+                      <Text style={styles.distanceValue}>{estimatedDistance} km</Text>
+                    </View>
+                    <Text style={styles.distancePrice}>
+                      ~ {calculatePrice({ startLocation, endLocation, date, realDistance: isRoundTrip ? estimatedDistance * 2 : estimatedDistance, tolls: 0, isRoundTrip })} € (estimation)
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
           {/* === 4. DATE === */}
@@ -530,6 +593,16 @@ const styles = StyleSheet.create({
     zIndex: 9999, elevation: 20, borderWidth: 1, borderColor: '#E0E0E0',
     shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 3, shadowOffset: { width: 0, height: 2 }
   },
+  distanceSection: { marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#E8E8E8' },
+  distanceBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#2E7D32', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 12
+  },
+  distanceBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
+  distanceResult: { marginTop: 12, backgroundColor: '#E8F5E9', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#C8E6C9' },
+  distanceResultRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  distanceValue: { fontSize: 18, fontWeight: '800', color: '#1B5E20', marginLeft: 8 },
+  distancePrice: { fontSize: 13, color: '#2E7D32', fontWeight: '600' },
 
   switchRow: { flexDirection: 'row', alignItems: 'center' },
   switchText: { fontSize: 13, color: '#666', marginRight: 10, fontWeight: '600' },

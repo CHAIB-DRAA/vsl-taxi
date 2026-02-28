@@ -21,9 +21,13 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
   const pendingStatus = ride.shareStatus === 'pending' || ride.statusPartage === 'pending';
   const showResponseButtons = ride.isShared && pendingStatus;
 
-  // 👇 MODIFICATION ICI : On récupère la note, qu'elle vienne de toi (notes) ou d'un partage (shareNote/sharedNote)
-  const noteContent = ride.notes || ride.shareNote || ride.sharedNote;
-  const hasNote = noteContent && noteContent.length > 0;
+  // 👇 CORRECTION MAJEURE ICI : Ordre de priorité et nettoyage
+  // 1. shareNote (Note spécifique du partage)
+  // 2. notes (Note générale du créateur)
+  // 3. note (Faute de frappe fréquente)
+  const rawNote = ride.shareNote || ride.notes || ride.note || ride.sharedNote || '';
+  const noteContent = rawNote.trim(); // On enlève les espaces vides
+  const hasNote = noteContent.length > 0;
 
   const needsPMT = (ride.type === 'VSL' || ride.type === 'Ambulance') && !isFinished;
   
@@ -33,7 +37,7 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
                  `👤 ${ride.patientName} (${ride.patientPhone || 'Pas de tel'})\n` +
                  `📍 De : ${ride.startLocation}\n` +
                  `🏁 Vers : ${ride.endLocation}\n` +
-                 (noteContent ? `📝 Note : ${noteContent}` : '');
+                 (hasNote ? `📝 Note : ${noteContent}` : '');
     
     await Clipboard.setStringAsync(info);
     Alert.alert("Copié !", "Les infos de la course sont dans le presse-papier.");
@@ -54,7 +58,7 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
 
   return (
     <TouchableOpacity 
-      activeOpacity={0.7}
+      activeOpacity={0.9}
       onPress={() => onPress && onPress(ride)}
       disabled={showResponseButtons} 
       style={[
@@ -83,7 +87,7 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </View>
       </View>
 
-      {/* INFO PARTAGE (Badge uniquement si partagé) */}
+      {/* INFO PARTAGE */}
       {ride.isShared && (
         <View style={styles.sharedBadge}>
             <Ionicons name="arrow-undo" size={12} color="#EF6C00" />
@@ -93,11 +97,11 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
         </View>
       )}
 
-      {/* 👇 AFFICHAGE DE LA NOTE (Pour tout le monde maintenant) */}
+      {/* 👇 AFFICHAGE DE LA NOTE (Mis en évidence) */}
       {hasNote && (
         <View style={styles.noteContainer}>
-            <Ionicons name="document-text" size={16} color="#666" style={{marginTop: 2}} />
-            <Text style={styles.noteText} numberOfLines={2}>
+            <Ionicons name="chatbox-ellipses" size={18} color="#FF6B00" style={{marginTop: 2}} />
+            <Text style={styles.noteText}>
                 {noteContent}
             </Text>
         </View>
@@ -137,7 +141,6 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
                 {ride.startLocation}
              </Text>
           </View>
-          <Ionicons name="car-sport" size={14} color="#4CAF50" style={{opacity: 0.5, marginRight: 5}}/>
         </TouchableOpacity>
         
         <View style={styles.routeLine} />
@@ -152,7 +155,6 @@ export default function RideCard({ ride, onPress, onRespond, onStatusChange }) {
                 {ride.endLocation}
              </Text>
           </View>
-          <Ionicons name="car-sport" size={14} color="#FF6B00" style={{opacity: 0.5, marginRight: 5}}/>
         </TouchableOpacity>
       </View>
 
@@ -214,17 +216,18 @@ const styles = StyleSheet.create({
   sharedBadge: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3E0', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginBottom: 10 },
   sharedText: { color: '#EF6C00', fontSize: 11, fontWeight: 'bold', marginLeft: 4 },
   
-  // STYLE NOTE CORRIGÉ
+  // STYLE NOTE AMÉLIORÉ
   noteContainer: { 
     flexDirection: 'row', 
-    backgroundColor: '#F5F5F5', 
-    padding: 8, 
+    backgroundColor: '#FFF8E1', // Fond jaune clair pour ressortir
+    padding: 10, 
     borderRadius: 8, 
-    marginBottom: 10, // Espace après la note
+    marginBottom: 12, 
     borderLeftWidth: 3, 
-    borderLeftColor: '#666' 
+    borderLeftColor: '#FF6B00',
+    alignItems: 'center'
   },
-  noteText: { fontSize: 13, color: '#444', fontStyle: 'italic', marginLeft: 8, flex: 1 },
+  noteText: { fontSize: 14, color: '#333', fontWeight: '500', marginLeft: 10, flex: 1 },
 
   patientRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   patientName: { fontSize: 18, fontWeight: 'bold', flex: 1, color: '#000' },
